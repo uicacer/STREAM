@@ -1,0 +1,62 @@
+#!/bin/bash
+#SBATCH --job-name=stream-vllm-ga-001
+#SBATCH --partition=batch_gpu
+#SBATCH --nodelist=ga-001              # ← Run on specific node!
+#SBATCH --gres=gpu:1
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=32G
+#SBATCH --time=00:30:00
+#SBATCH --output=logs/%x-%j.log
+
+# Configuration
+#MODEL=${MODEL:-meta-llama/Llama-3.2-3B-Instruct}
+MODEL=${MODEL:-Qwen/Qwen2.5-1.5B-Instruct}
+#MODEL=${MODEL:-Qwen/Qwen2.5-3B-Instruct}  # ← NO AUTHENTICATION NEEDED!
+# Alternative: mistralai/Mistral-7B-Instruct-v0.3
+# If using Hagging Face Ollama:
+# MODEL=${MODEL:-meta-llama/Llama-3.2-3B-Instruct}
+# ← ADD YOUR HUGGING FACE TOKEN HERE
+# export HF_TOKEN="hf_YOUR_TOKEN_HERE"
+
+
+PORT=${PORT:-8000}
+
+echo "=========================================="
+echo "STREAM vLLM Service"
+echo "Job ID: $SLURM_JOB_ID"
+echo "Node: $SLURM_NODELIST"
+echo "GPU: $CUDA_VISIBLE_DEVICES"
+echo "Model: $MODEL"
+echo "Port: $PORT"
+echo "Started: $(date)"
+echo "=========================================="
+
+# Load Apptainer
+module load apptainer
+
+# Container
+CONTAINER="/home/nassar/STREAM/containers/vllm-openai_v0.13.0.sif"
+
+# Set GPU (for MIG workaround if needed)
+export CUDA_VISIBLE_DEVICES=0
+
+# Get node IP
+NODE_IP=$(hostname -I | awk '{print $1}')
+echo "Service will be available at: http://${NODE_IP}:${PORT}"
+echo "Or via hostname: http://$(hostname):${PORT}"
+echo "=========================================="
+
+# Launch vLLM
+# Increased max-model-len from 2048 to 8192 for longer conversations
+# Using 85% GPU memory to leave headroom
+apptainer exec --nv ${CONTAINER} \
+    vllm serve ${MODEL} \
+    --host 0.0.0.0 \
+    --port ${PORT} \
+    --tensor-parallel-size 1 \
+    --max-model-len 8192 \
+    --gpu-memory-utilization 0.85
+
+echo "=========================================="
+echo "Service stopped: $(date)"
+echo "=========================================="

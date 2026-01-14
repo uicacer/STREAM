@@ -1,0 +1,28 @@
+# Pre-commit hooks configuration
+# Runs automatically before each git commit
+# Install: pre-commit install
+# Run manually: pre-commit run --all-files
+
+repos:
+  # Ruff - Python linter & formatter (replaces flake8, black, isort)
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.4  # Check https://github.com/astral-sh/ruff-pre-commit/releases for latest
+    hooks:
+      # Run linter (finds bugs, style issues)
+      - id: ruff
+        args: [--fix]  # Automatically fix issues when possible
+
+      # Run formatter (consistent code style)
+      - id: ruff-format
+
+  # General file hygiene
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace   # Remove trailing spaces
+      - id: end-of-file-fixer     # Ensure files end with newline
+      - id: check-yaml            # Validate YAML files
+      - id: check-toml            # Validate TOML files
+      - id: check-added-large-files
+        args: ['--maxkb=1000']    # Prevent commits >1MB
+      - id: check-merge-conflict  # Detect merge conflict markers

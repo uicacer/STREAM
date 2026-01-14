@@ -1,0 +1,151 @@
+# =============================================================================
+# STREAM Gateway - LiteLLM Configuration
+# =============================================================================
+# IMPORTANT NOTES:
+# 1. Costs here MUST match middleware/config.py MODEL_COSTS. Middleware is the single source of truth displayed to users
+# 2. Changes require: docker-compose restart litellm
+# 3. Model names are used by middleware for routing
+# 4. Timeouts prevent requests from hanging indefinitely
+# =============================================================================
+
+model_list:
+
+  # ===========================================================================
+  # TIER 1: LOCAL MODELS (Ollama)
+  # ===========================================================================
+
+  - model_name: local-llama-tiny
+    litellm_params:
+      model: ollama/llama3.2:1b
+      api_base: http://ollama:11434
+    model_info:
+      mode: chat
+      input_cost_per_token: 0.0
+      output_cost_per_token: 0.0
+      max_tokens: 4096
+    metadata:
+      tier: "local"
+      description: "Llama 3.2 1B - fastest local model"
+
+  - model_name: local-llama
+    litellm_params:
+      model: ollama/llama3.2:3b
+      api_base: http://ollama:11434
+    model_info:
+      mode: chat
+      input_cost_per_token: 0.0
+      output_cost_per_token: 0.0
+      max_tokens: 4096
+    metadata:
+      tier: "local"
+      description: "Llama 3.2 3B - default local model"
+
+  - model_name: local-llama-quality
+    litellm_params:
+      model: ollama/llama3.1:8b
+      api_base: http://ollama:11434
+    model_info:
+      mode: chat
+      input_cost_per_token: 0.0
+      output_cost_per_token: 0.0
+      max_tokens: 8192
+    metadata:
+      tier: "local"
+      description: "Llama 3.1 8B - highest quality local"
+
+  # ===========================================================================
+  # TIER 2: CLOUD MODELS (Paid APIs)
+  # ===========================================================================
+
+  - model_name: cloud-claude
+    litellm_params:
+      model: claude-sonnet-4-20250514
+      api_key: os.environ/ANTHROPIC_API_KEY
+    model_info:
+      mode: chat
+      input_cost_per_token: 0.000003    # $3 per 1M input tokens
+      output_cost_per_token: 0.000015   # $15 per 1M output tokens
+      max_tokens: 8192
+    metadata:
+      tier: "cloud"
+      provider: "anthropic"
+      description: "Claude Sonnet 4 - best reasoning"
+
+  - model_name: cloud-gpt
+    litellm_params:
+      model: gpt-4-turbo-preview
+      api_key: os.environ/OPENAI_API_KEY
+    model_info:
+      mode: chat
+      input_cost_per_token: 0.00001     # $10 per 1M input tokens
+      output_cost_per_token: 0.00003    # $30 per 1M output tokens
+      max_tokens: 4096
+    metadata:
+      tier: "cloud"
+      provider: "openai"
+      description: "GPT-4 Turbo - versatile"
+
+  - model_name: cloud-gpt-cheap
+    litellm_params:
+      model: gpt-3.5-turbo
+      api_key: os.environ/OPENAI_API_KEY
+    model_info:
+      mode: chat
+      input_cost_per_token: 0.0000005   # $0.50 per 1M input tokens
+      output_cost_per_token: 0.0000015  # $1.50 per 1M output tokens
+      max_tokens: 4096
+    metadata:
+      tier: "cloud"
+      provider: "openai"
+      description: "GPT-3.5 - budget cloud"
+
+  # ===========================================================================
+  # TIER 3: CAMPUS GPU (Lakeshore vLLM)
+  # ===========================================================================
+
+# LAKESHORE TIER
+  - model_name: lakeshore-llama
+    litellm_params:
+      model: openai/Qwen/Qwen2.5-1.5B-Instruct  # ← Update to 1.5B!
+      api_base: http://host.docker.internal:8000/v1
+      api_key: dummy
+    model_info:
+      mode: chat
+      input_cost_per_token: 0.0000005
+      output_cost_per_token: 0.0000005
+      max_tokens: 2048
+
+# =============================================================================
+# ROUTER SETTINGS
+# =============================================================================
+
+router_settings:
+  model_timeout:
+    local-llama-tiny: 60    # Allow time for model loading
+    local-llama: 90
+    local-llama-quality: 120
+    lakeshore-llama: 120
+    cloud-claude: 120
+    cloud-gpt: 120
+
+# =============================================================================
+# GENERAL SETTINGS
+# =============================================================================
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/DATABASE_URL
+
+  # Cost tracking (ENABLED)
+  track_cost_per_deployment: true
+  store_model_in_db: true
+
+  # Verbose logging
+  set_verbose: false  # Set to true only for debugging
+
+  # Rate limiting
+  rpm_limit: 60  # Requests per minute (global across all users)
+
+  # Budget settings (cost control)
+  max_budget: 100         # Maximum spend in USD
+  budget_duration: 30d    # Budget resets every 30 days
