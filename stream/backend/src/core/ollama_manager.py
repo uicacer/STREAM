@@ -1,4 +1,5 @@
 import logging
+import os
 import re
 import subprocess
 
@@ -16,10 +17,38 @@ class OllamaModelManager:
     """Manage Ollama models with auto-pull capability"""
 
     def __init__(self):
+        # Support both CLI (local dev) and HTTP API (Docker)
+        ollama_host = os.getenv("OLLAMA_HOST", "localhost")
+        ollama_port = os.getenv("OLLAMA_PORT", "11434")
+        self.ollama_url = f"http://{ollama_host}:{ollama_port}"
+        self.use_http = not self._is_ollama_cli_available()
+
+        if self.use_http:
+            logger.info(f"🐳 Using Ollama HTTP API at {self.ollama_url}")
+        else:
+            logger.info("💻 Using Ollama CLI")
+
         self.available_models = self._get_available_models()
+
+    def _is_ollama_cli_available(self) -> bool:
+        """Check if ollama CLI is available"""
+        try:
+            subprocess.run(["ollama", "--version"], capture_output=True, timeout=2)
+            return True
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return False
 
     def _get_available_models(self) -> set:
         """Get list of locally available models"""
+        if self.use_http:
+            # NEW: HTTP API approach (Docker)
+            return self._get_available_models_http()
+        else:
+            # EXISTING: CLI approach (local dev)
+            return self._get_available_models_cli()
+
+    def _get_available_models_cli(self) -> set:
+        """Get models via CLI (original method)"""
         try:
             result = subprocess.run(["ollama", "list"], capture_output=True, text=True, timeout=5)
             # Parse output - models are in first column
@@ -31,6 +60,23 @@ class OllamaModelManager:
             return models
         except Exception as e:
             logger.warning(f"⚠️  Warning: Could not check Ollama models: {e}")
+            return set()
+
+    def _get_available_models_http(self) -> set:
+        """NEW: Get models via HTTP API (Docker)"""
+        try:
+            response = httpx.get(f"{self.ollama_url}/api/tags", timeout=5.0)
+            if response.status_code == 200:
+                data = response.json()
+                models = set()
+                for model in data.get("models", []):
+                    models.add(model["name"])
+                return models
+            else:
+                logger.warning(f"⚠️  Ollama API returned status {response.status_code}")
+                return set()
+        except Exception as e:
+            logger.warning(f"⚠️  Could not connect to Ollama: {e}")
             return set()
 
     def is_model_available(self, model_name: str) -> bool:
@@ -168,6 +214,15 @@ class OllamaModelManager:
 
     def pull_model(self, model_name: str, show_progress: bool = True) -> bool:
         """Download an Ollama model"""
+        if self.use_http:
+            # NEW: HTTP API approach (Docker)
+            return self._pull_model_http(model_name, show_progress)
+        else:
+            # EXISTING: CLI approach (local dev)
+            return self._pull_model_cli(model_name, show_progress)
+
+    def _pull_model_cli(self, model_name: str, show_progress: bool) -> bool:
+        """EXISTING: Pull model via CLI"""
         print(f"\n📥 Downloading {model_name}...")
         print("This may take a few minutes depending on your connection.")
         print("You can cancel with Ctrl+C if needed.\n")
@@ -190,10 +245,6 @@ class OllamaModelManager:
                 process.wait()
                 success = process.returncode == 0
             else:
-                # # Silent download
-                # result = subprocess.run(
-                #     ["ollama", "pull", model_name], capture_output=True, text=True, check=True
-                # )
                 success = True
 
             if success:
@@ -209,6 +260,32 @@ class OllamaModelManager:
             return False
         except KeyboardInterrupt:
             print("\n⚠️  Download cancelled by user")
+            return False
+
+    def _pull_model_http(self, model_name: str, show_progress: bool) -> bool:
+        """NEW: Pull model via HTTP API (Docker)"""
+        print(f"\n📥 Downloading {model_name}...")
+        print("This may take a few minutes depending on your connection.")
+        print("You can cancel with Ctrl+C if needed.\n")
+
+        try:
+            # Start the pull request
+            response = httpx.post(
+                f"{self.ollama_url}/api/pull",
+                json={"name": model_name},
+                timeout=600.0,  # 10 minutes
+            )
+
+            if response.status_code == 200:
+                print(f"\n✅ Model '{model_name}' downloaded successfully!")
+                self.available_models.add(model_name)
+                return True
+            else:
+                print(f"\n❌ Failed to download '{model_name}': {response.text}")
+                return False
+
+        except Exception as e:
+            print(f"\n❌ Error downloading model: {e}")
             return False
 
     def ensure_model(

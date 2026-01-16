@@ -4,6 +4,7 @@
 
 import json
 import logging
+import os
 import time
 import uuid
 from collections.abc import Generator
@@ -23,7 +24,7 @@ logger = logging.getLogger(__name__)
 # CONFIGURATION
 # =============================================================================
 
-MIDDLEWARE_BASE_URL = "http://localhost:5000"
+MIDDLEWARE_BASE_URL = os.getenv("MIDDLEWARE_URL")
 REQUEST_TIMEOUT = 120.0  # This is for both streaming and non-streaming requests
 
 # =============================================================================
@@ -56,7 +57,9 @@ class ChatHandler:
         self._last_stream_metadata = {}
         self._cost_rates = {}  # Middleware handles cost calculations
         self._context_limits = {}  # Middleware handles context limits
-
+        # This client will be used for all requests to middleware
+        # it is configured with a long timeout and follows redirects
+        # redirects means that if the final destination is slow, the client will wait.
         self.client = httpx.Client(timeout=REQUEST_TIMEOUT, follow_redirects=True)
 
         # Fetch cost rates from middleware

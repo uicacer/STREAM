@@ -11,11 +11,10 @@ from stream.middleware.utils.visuals import PreImportSpinner
 spinner = PreImportSpinner()
 spinner.start()
 
-import io
 import logging
-import time
+import sys
 import uuid
-from contextlib import asynccontextmanager, redirect_stdout
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
 import uvicorn
@@ -92,6 +91,97 @@ async def lifespan(app: FastAPI):
     logger.info(f"🚀 {SERVICE_NAME} v{SERVICE_VERSION} starting up...")
     logger.info(f"📊 Debug mode: {DEBUG}")
     logger.info(f"🔗 CORS origins: {CORS_ORIGINS}")
+
+    # ADD ALL THE STARTUP CHECKS HERE:
+
+    # Step 1: Check/download Ollama models
+    logger.info("🔍 Checking required Ollama models...")
+    manager = OllamaModelManager()
+    missing_models = []
+
+    for _, ollama_model in OLLAMA_MODELS.items():
+        if not manager.is_model_available(ollama_model):
+            missing_models.append(ollama_model)
+            logger.warning(f"⚠️  Model {ollama_model} not found")
+
+            # Prompt the user to download the model
+            size_estimate = manager.get_model_size_estimate(ollama_model)
+            logger.warning(f"   Estimated size: {size_estimate}")
+
+            # Check if running in interactive mode (TTY) or non-interactive (Docker)
+            if sys.stdin.isatty():
+                # Interactive mode (local dev): ask user to download
+                console.print(f"\nThe model [bold]{ollama_model}[/bold] is required but not found.")
+                console.print(f"Estimated size: [bold]{size_estimate}[/bold]")
+                response = (
+                    console.input(
+                        "Do you want to download it now? ([bold green]y[/bold green]/[bold red]n[/bold red]): "
+                    )
+                    .strip()
+                    .lower()
+                )
+
+                if response in ["y", "yes"]:
+                    with Progress(
+                        SpinnerColumn(),
+                        TextColumn("[progress.description]{task.description}"),
+                        TimeElapsedColumn(),
+                        console=console,
+                    ) as progress:
+                        task = progress.add_task(
+                            f"Downloading [bold]{ollama_model}[/bold]...", start=False
+                        )
+                        progress.start_task(task)
+                        success = manager.pull_model(ollama_model, show_progress=False)
+                        if success:
+                            progress.update(
+                                task,
+                                description=f"[bold green]Downloaded {ollama_model} successfully![/bold green]",
+                            )
+                            logger.info(f"✅ Downloaded {ollama_model}")
+                        else:
+                            progress.update(
+                                task,
+                                description=f"[bold red]Failed to download {ollama_model}.[/bold red]",
+                            )
+                            logger.error(f"❌ Failed to download {ollama_model}")
+                else:
+                    logger.warning(
+                        f"   Skipping download of {ollama_model}. Please download it manually."
+                    )
+            else:
+                # Non-interactive mode (Docker): just warn, don't block startup
+                logger.warning("⚠️  Running in Docker - models should be pre-downloaded")
+                logger.warning(
+                    f"   To download: docker exec -it stream-ollama ollama pull {ollama_model}"
+                )
+
+    if not missing_models:
+        logger.info("✅ All Ollama models available")
+    else:
+        logger.warning(f"⚠️  {len(missing_models)} model(s) not found")
+        if not sys.stdin.isatty():
+            # Docker environment - show friendly instructions
+            logger.warning("=" * 70)
+            logger.warning("📋 To download missing models, run these commands:")
+            for model in missing_models:
+                logger.warning(f"   docker exec -it stream-ollama ollama pull {model}")
+            logger.warning("=" * 70)
+            logger.warning("⚠️  LOCAL tier will be unavailable until models are downloaded")
+            logger.warning("   CLOUD and LAKESHORE tiers will continue to work")
+
+    # Step 2: Health checks
+    logger.info("🔍 Running startup health checks...")
+    check_all_tiers()
+
+    # Step 3: Warm up judge (optional, can skip to speed up startup)
+    logger.info("🔍 Warming up LLM judge...")
+    judge_complexity_with_llm("warmup test")
+
+    # Step 4: Validate costs
+    logger.info("🔍 Validating cost configurations...")
+    validate_costs_match_litellm()
+
     logger.info("✅ Middleware ready!")
 
     yield
@@ -100,8 +190,6 @@ async def lifespan(app: FastAPI):
     # SHUTDOWN
     # ==========================================================================
     logger.info(f"👋 {SERVICE_NAME} shutting down...")
-
-    # Close database connection pool
     if chat.db_pool:
         chat.db_pool.closeall()
         logger.info("✅ Database connection pool closed")
@@ -120,7 +208,7 @@ app = FastAPI(
     debug=DEBUG,  # Enable detailed error messages in dev
     docs_url="/docs" if DEBUG else None,  # Swagger UI (only in development)
     redoc_url="/redoc" if DEBUG else None,  # ReDoc UI (only in development)
-    lifespan=lifespan,  # ← Connect the lifespan handler we defined above
+    lifespan=lifespan,  # Connect the lifespan handler we defined above
 )
 
 # =============================================================================
@@ -139,7 +227,6 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,  # Which websites can call this API
-    # Example: ["http://localhost:8501"] = Streamlit can call us
     allow_credentials=CORS_ALLOW_CREDENTIALS,  # Allow cookies/auth headers
     allow_methods=CORS_ALLOW_METHODS,  # Allow GET, POST, etc.
     allow_headers=CORS_ALLOW_HEADERS,  # Allow any headers
@@ -319,14 +406,11 @@ async def root():
 
 
 # =============================================================================
-# MAIN (for running directly)
+# MAIN (for running directly in local development - not used in Docker)
 # =============================================================================
-# This code only runs when you execute: python app.py
-# It does NOT run when imported by other files
 def main():
-    """Entry point for CLI command"""
+    """Entry point for local development (not used in Docker)"""
 
-    # Print banner
     console.print()
     console.print(
         Panel.fit(
@@ -336,94 +420,10 @@ def main():
         )
     )
     console.print()
-
-    # Step 1: Check/download Ollama models
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[bold blue]Checking required Ollama models..."),
-        console=console,
-        transient=True,
-    ) as progress:
-        # task = progress.add_task("check_models", total=None)
-        manager = OllamaModelManager()
-        missing_models = []
-        for _, ollama_model in OLLAMA_MODELS.items():
-            if not manager.is_model_available(ollama_model):
-                missing_models.append(ollama_model)
-
-    if not missing_models:
-        console.print("   ✅ [green]All Ollama models available[/green]")
-    else:
-        console.print(
-            f"   ⚠️  [yellow]{len(missing_models)} model(s) need to be downloaded[/yellow]"
-        )
-        for model in missing_models:
-            success = manager.ensure_model(model, auto_download=False)
-            if not success:
-                console.print(f"   ❌ [red]Skipped {model}[/red]")
-
+    console.print("[yellow]Note: Startup checks run automatically via lifespan handler[/yellow]")
     console.print()
 
-    # Step 2: Health checks
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[bold blue]Running startup health checks..."),
-        TimeElapsedColumn(),
-        console=console,
-        transient=True,
-    ) as progress:
-        progress.add_task("health_check", total=None)
-        output_buffer = io.StringIO()
-        with redirect_stdout(output_buffer):
-            check_all_tiers()
-
-    console.print(output_buffer.getvalue(), end="")
-
-    # Step 3: Warm up judge
-    console.print()
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[bold blue]Warming up LLM judge (first load may take 30-60s)..."),
-        TimeElapsedColumn(),
-        console=console,
-        transient=True,
-    ) as progress:
-        progress.add_task("warmup", total=None)
-        start = time.time()
-        result = judge_complexity_with_llm("warmup test")
-        elapsed = time.time() - start
-
-    if result:
-        console.print(f"   ✅ [green]Judge model ready in {elapsed:.1f}s[/green]")
-    else:
-        console.print(f"   ⚠️  [yellow]Judge warmup failed in {elapsed:.1f}s[/yellow]")
-
-    # Step 4: Validate costs
-    console.print()
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[bold blue]Validating cost configurations..."),
-        console=console,
-        transient=True,
-    ) as progress:
-        # task = progress.add_task("validate_costs", total=None)
-        output_buffer = io.StringIO()
-        with redirect_stdout(output_buffer):
-            validate_costs_match_litellm()
-
-    console.print(output_buffer.getvalue(), end="")
-
-    # Start server
-    console.print()
-    console.print(
-        Panel.fit(
-            f"[bold green]🚀 Starting server on {MIDDLEWARE_HOST}:{MIDDLEWARE_PORT}[/bold green]",
-            border_style="green",
-            padding=(0, 2),
-        )
-    )
-    console.print()
-
+    # Just start the server - lifespan handles the rest
     uvicorn.run(
         "stream.middleware.app:app",
         host=MIDDLEWARE_HOST,
@@ -435,51 +435,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-# =============================================================================
-# HOW REQUESTS FLOW THROUGH THIS FILE
-# =============================================================================
-"""
-1. REQUEST ARRIVES
-   ↓
-2. CORS MIDDLEWARE checks if origin is allowed
-   ↓
-3. CORRELATION ID MIDDLEWARE adds tracking ID
-   ↓
-4. ROUTER matches URL to endpoint
-   - / → root()
-   - /health → health.router
-   - /v1/chat/completions → chat.router
-   ↓
-5. ENDPOINT HANDLER processes request
-   ↓
-6. CORRELATION ID MIDDLEWARE adds ID to response
-   ↓
-7. RESPONSE SENT to client
-
-IF ERROR OCCURS:
-   ↓
-EXCEPTION HANDLER catches it
-   ↓
-Returns clean error message
-"""
-
-# =============================================================================
-# LEARNING RESOURCES
-# =============================================================================
-"""
-FastAPI basics:
-https://fastapi.tiangolo.com/tutorial/
-
-Middleware:
-https://fastapi.tiangolo.com/advanced/middleware/
-
-Lifespan events:
-https://fastapi.tiangolo.com/advanced/events/
-
-CORS explained:
-https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS
-
-Logging best practices:
-https://docs.python.org/3/howto/logging.html
-"""

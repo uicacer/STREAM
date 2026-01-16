@@ -4,12 +4,11 @@ build-backend = "hatchling.build"
 
 [project]
 name = "stream"
-version = "0.1.0"
+version = "1.0.0"
 description = "STREAM - Smart Tiered Routing Engine for AI Models"
-readme = "README.md"
 requires-python = ">=3.11"
 authors = [
-    {name = "Anas Nassar", email = "nassar@uic.com"}
+    {name = "Anas Nassar", email = "nassar@uic.edu"}
 ]
 
 dependencies = [
@@ -27,8 +26,9 @@ dependencies = [
     # Middleware - HTTP & Networking
     "httpx>=0.28.1",
     "python-multipart>=0.0.20",
-    # Database (REQUIRED - not future)
+    # Database
     "psycopg2-binary>=2.9.10",
+    # Utilities
     "rich>=14.2.0",
     "tiktoken>=0.12.0",
 ]
@@ -39,6 +39,7 @@ dev = [
     "pytest-asyncio>=0.24.0",
     "ipykernel>=7.1.0",
     "jupyter>=1.1.1",
+    "ruff>=0.8.0",
 ]
 
 # Tell hatchling where the package is
@@ -46,12 +47,13 @@ dev = [
 packages = ["stream"]
 
 # Entry points - commands available after installation
+# Useful for local development
 [project.scripts]
 stream-middleware = "stream.middleware.app:main"
 
 [project.urls]
 # Homepage = ""
-# Repository = ""
+Repository = "https://github.com/uicacer/STREAM"
 
 
 [tool.ruff]

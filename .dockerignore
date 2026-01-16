@@ -1,0 +1,60 @@
+# =============================================================================
+# .dockerignore - Tells Docker which files to EXCLUDE from images
+# =============================================================================
+# This is like .gitignore but for Docker builds
+# Excluding files:
+#   1. Makes builds faster (less to copy)
+#   2. Reduces image size (smaller containers)
+#   3. Improves security (don't include secrets/credentials)
+# =============================================================================
+
+# Python runtime artifacts (generated when running code)
+__pycache__/          # Compiled Python files
+*.py[cod]             # More compiled variants
+*.so                  # Compiled C extensions
+.pytest_cache/        # Test artifacts
+.ruff_cache/          # Linter cache
+*.egg-info/           # Package metadata
+dist/                 # Built distributions
+build/                # Build artifacts
+
+# Virtual environments (don't need in container - we install fresh)
+venv/
+env/
+STREAM/               # Your virtual environment name
+
+# IDE files (no need in container)
+.vscode/
+.idea/
+*.swp
+
+# Git (container doesn't need git history)
+.git/
+.gitignore
+
+# Docker files (don't include Dockerfiles in Docker images!)
+docker-compose*.yml
+Dockerfile*
+
+# Documentation and tests (not needed at runtime)
+docs/
+tests/
+*.md
+README.md
+
+# Environment files (secrets passed via docker-compose instead)
+.env
+.env.*
+
+# Scripts (not needed in containers)
+scripts/
+
+# Logs
+*.log
+
+# OS files
+.DS_Store             # macOS
+Thumbs.db             # Windows
+
+# Lock files (we install from pyproject.toml directly)
+uv.lock

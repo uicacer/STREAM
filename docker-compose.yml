@@ -1,0 +1,177 @@
+# =============================================================================
+# STREAM - Complete Service Stack
+# All configuration comes from .env file
+# =============================================================================
+
+services:
+  # ==========================================================================
+  # PostgreSQL Database
+  # ==========================================================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: stream-postgres
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+    ports:
+      - "${POSTGRES_EXTERNAL_PORT}:${POSTGRES_PORT}" # Left side: Port on your laptop/server; Right side: Port in Docker container
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    networks:
+      - stream-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ==========================================================================
+  # Ollama - Local LLM Server
+  # ==========================================================================
+  ollama:
+    image: ollama/ollama:0.14.1
+    container_name: stream-ollama
+    ports:
+      - "${OLLAMA_EXTERNAL_PORT}:${OLLAMA_PORT}" # Left side: Port on your laptop/server; Right side: Port in Docker container
+    volumes:
+      - ollama_models:/root/.ollama
+    deploy:
+      resources:
+        limits:
+          memory: ${OLLAMA_MEMORY:-8G}
+          cpus: '${OLLAMA_CPUS:-4.0}'
+    restart: unless-stopped
+    networks:
+      - stream-network
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ==========================================================================
+  # LiteLLM - AI Gateway
+  # ==========================================================================
+  litellm:
+    image: ghcr.io/berriai/litellm:main-v1.80.16-nightly
+    container_name: stream-litellm
+    ports:
+      - "${LITELLM_EXTERNAL_PORT}:${LITELLM_PORT}" # Left side: Port on your laptop/server; Right side: Port in Docker container
+    volumes:
+      - ./stream/gateway/litellm_config.yaml:/app/config.yaml:ro
+    env_file:
+      - .env
+    environment:
+      # API Keys
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
+
+      # Database connection (internal Docker network)
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
+
+      # Ollama connection (internal Docker network)
+      - OLLAMA_API_BASE=${OLLAMA_URL}
+    command: ["--config", "/app/config.yaml", "--port", "${LITELLM_PORT}", "--detailed_debug"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - stream-network
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:${LITELLM_PORT}/health/readiness')\" || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ==========================================================================
+  # STREAM Middleware - Smart Routing Layer
+  # ==========================================================================
+  middleware:
+    build:
+      context: .
+      dockerfile: Dockerfile.middleware
+    container_name: stream-middleware
+    ports:
+      - "${MIDDLEWARE_EXTERNAL_PORT}:${MIDDLEWARE_PORT}" # Left side: Port on your laptop/server; Right side: Port in Docker container
+    env_file:
+      - .env
+    environment:
+      - OLLAMA_HOST=${OLLAMA_HOST}
+      - OLLAMA_PORT=${OLLAMA_PORT}
+      # LiteLLM connection (internal Docker network)
+      - LITELLM_BASE_URL=${LITELLM_URL}
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
+
+      # Lakeshore vLLM connection (via SSH tunnel on host)
+      - LAKESHORE_VLLM_ENDPOINT=${LAKESHORE_VLLM_ENDPOINT}
+
+      - MIDDLEWARE_PORT=${MIDDLEWARE_PORT}
+
+      # Database connection (internal Docker network)
+      - POSTGRES_HOST=${POSTGRES_HOST}
+      - POSTGRES_PORT=${POSTGRES_PORT}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
+    depends_on:
+      litellm:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - stream-network
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:${MIDDLEWARE_PORT}/health')\" || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ==========================================================================
+  # Streamlit Frontend - Chat Interface
+  # ==========================================================================
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: stream-frontend
+    ports:
+      - "${FRONTEND_EXTERNAL_PORT}:${FRONTEND_PORT}" # Left side: Port on your laptop/server; Right side: Port in Docker container
+    env_file:
+      - .env
+    environment:
+      # Middleware connection (internal Docker network)
+      - MIDDLEWARE_URL=${MIDDLEWARE_URL}
+
+      # Streamlit config
+      - STREAMLIT_SERVER_PORT=${FRONTEND_PORT}
+    depends_on:
+      middleware:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - stream-network
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  stream-network:
+    name: stream_network
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  ollama_models:
+    name: stream_ollama_models
+  postgres_data:
+    name: stream_postgres_data

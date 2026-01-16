@@ -1,0 +1,52 @@
+# =============================================================================
+# Dockerfile.middleware - Builds the STREAM middleware service
+# =============================================================================
+# This service sits between the frontend and the gateway, providing:
+#   - Intelligent routing (LOCAL → LAKESHORE → CLOUD)
+#   - Automatic fallback when services fail
+#   - Cost tracking and optimization
+#   - Context window management
+# =============================================================================
+
+# Base image: Python 3.11 on Debian (slim = minimal size ~150MB)
+FROM python:3.11-slim
+
+# Set working directory inside container
+WORKDIR /app
+
+# Install system-level dependencies
+# - curl: for health checks (testing if service is running)
+# - Clean up apt cache to reduce image size
+RUN apt-get update && apt-get install -y \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy Python dependency file first (for Docker layer caching)
+# Docker caches each step - if pyproject.toml doesn't change,
+# it skips reinstalling dependencies on next build (saves time!)
+
+# Step 1: Copy ONLY dependency manifest
+COPY pyproject.toml ./
+
+# Step 2: Copy source code
+COPY stream/ stream/
+
+# Step 3: Install dependencies (cached unless pyproject.toml changes!)
+RUN pip install --no-cache-dir -e .
+
+
+# Define health check: Docker will periodically check if service is healthy
+# If health check fails 3 times, Docker marks container as "unhealthy"
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
+    CMD curl -f http://localhost:${MIDDLEWARE_PORT:-5000}/health || exit 1
+
+# Tell Docker which port this service uses
+EXPOSE ${MIDDLEWARE_PORT:-5000}
+
+# Run command when container starts
+# uvicorn: ASGI server for FastAPI. ASGI is a standard interface between web servers and Python web apps.
+# stream.middleware.app:app: points to the FastAPI app instance
+# --host 0.0.0.0: listen on all network interfaces (allows external access)
+# --port 5000: listen on port 5000
+# Use shell form to allow env var expansion
+CMD uvicorn stream.middleware.app:app --host 0.0.0.0 --port ${MIDDLEWARE_PORT:-5000}

@@ -11,7 +11,12 @@ import httpx
 from fastapi import APIRouter, status
 from fastapi.responses import JSONResponse  # Import for proper status codes
 
-from stream.middleware.config import HEALTH_CHECK_TIMEOUT, LITELLM_BASE_URL, SERVICE_VERSION
+from stream.middleware.config import (
+    HEALTH_CHECK_TIMEOUT,
+    LITELLM_API_KEY,
+    LITELLM_BASE_URL,
+    SERVICE_VERSION,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +117,7 @@ async def check_database_health() -> bool:
 
     # Import here to avoid potential circular dependency
     # (health.py and chat.py are both route modules in the same package)
-    from routes.chat import db_pool
+    from stream.middleware.routes.chat import db_pool
 
     if not db_pool:
         return False
@@ -136,8 +141,9 @@ async def check_database_health() -> bool:
 async def check_litellm_health() -> bool:
     """Check if LiteLLM gateway is healthy"""
     try:
+        headers = {"Authorization": f"Bearer {LITELLM_API_KEY}"}
         async with httpx.AsyncClient(timeout=HEALTH_CHECK_TIMEOUT) as client:
-            response = await client.get(f"{LITELLM_BASE_URL}/health")
+            response = await client.get(f"{LITELLM_BASE_URL}/health", headers=headers)
             return response.status_code == status.HTTP_200_OK
     except httpx.TimeoutException:
         logger.warning("LiteLLM health check timeout")

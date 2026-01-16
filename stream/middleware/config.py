@@ -18,22 +18,51 @@ LITELLM_CONFIG = files("stream.gateway").joinpath("litellm_config.yaml")
 
 load_dotenv()
 
+
+# =============================================================================
+# SERVICE METADATA
+# =============================================================================
+
+SERVICE_NAME = "STREAM Middleware"
+SERVICE_VERSION = "1.0.0"
+SERVICE_DESCRIPTION = "Smart Tiered Routing Engine for AI Models - Intelligent middleware layer"
+
 # =============================================================================
 # SERVICE CONFIGURATION
 # =============================================================================
 
-MIDDLEWARE_HOST = os.getenv("MIDDLEWARE_HOST", "0.0.0.0")
-MIDDLEWARE_PORT = int(os.getenv("MIDDLEWARE_PORT", "5000"))
+MIDDLEWARE_HOST = os.getenv("MIDDLEWARE_HOST")
+MIDDLEWARE_PORT = int(os.getenv("MIDDLEWARE_PORT"))
 
-SERVICE_NAME = "STREAM Middleware"
-SERVICE_VERSION = "1.0"
-SERVICE_DESCRIPTION = "AI Middleware Hub - LLM Judge Routing + Policy + Telemetry"
+# Development settings
+DEBUG = os.getenv("DEBUG").lower() == "true"
+RELOAD = os.getenv("RELOAD").lower() == "true"
+
+# =============================================================================
+# LOGGING CONFIGURATION
+# =============================================================================
+
+LOG_LEVEL = os.getenv("LOG_LEVEL").upper()
+LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+# =============================================================================
+# CORS CONFIGURATION
+# =============================================================================
+
+# Allow requests from Streamlit frontend (adjust if needed)
+CORS_ORIGINS = os.getenv("CORS_ORIGINS").split(",")
+CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_METHODS = ["*"]
+CORS_ALLOW_HEADERS = ["*"]
+
+# =============================================================================
+# OLLAMA CONFIGURATION
+# =============================================================================
+
+OLLAMA_PORT = int(os.getenv("OLLAMA_PORT"))
 
 # Health check cache (recheck every 3600 seconds; 1 hour)
 HEALTH_CHECK_TTL = 3600  # seconds
-
-# Used in health checks to avoid hanging in middleware/routes/health.py
-HEALTH_CHECK_TIMEOUT = 2.0  # seconds
 
 # =============================================================================
 # LITELLM GATEWAY SETTINGS
@@ -43,6 +72,9 @@ LITELLM_BASE_URL = os.getenv("LITELLM_BASE_URL")
 LITELLM_API_KEY = os.getenv("LITELLM_MASTER_KEY")
 LAKESHORE_VLLM_ENDPOINT = os.getenv("LAKESHORE_VLLM_ENDPOINT")
 
+
+# Timeout for health checks
+HEALTH_CHECK_TIMEOUT = 5.0  # seconds
 
 # =============================================================================
 # JUDGE LLM CONFIGURATION
@@ -105,7 +137,7 @@ MODEL_COSTS = {
 OLLAMA_MODELS = {
     "local-llama-tiny": "llama3.2:1b",
     "local-llama": "llama3.2:3b",
-    "local-llama-quality": "llama3.1:8b",
+    # "local-llama-quality": "llama3.1:8b",
 }
 
 
@@ -165,7 +197,7 @@ def check_tier_health(tier: str) -> tuple[bool, str | None]:
         # LOCAL: Check Ollama directly
         if tier == "local":
             with httpx.Client(timeout=10.0) as client:
-                response = client.get("http://localhost:11434/api/tags")
+                response = client.get(f"http://ollama:{OLLAMA_PORT}/api/tags")
                 if response.status_code != 200:
                     return False, f"Ollama not responding (HTTP {response.status_code})"
 
@@ -666,49 +698,6 @@ DEFAULT_QUOTAS = {
         "allowed_tiers": ["local", "lakeshore", "cloud"],
     },
 }
-
-DEFAULT_RATE_LIMIT = 100
-
-# =============================================================================
-# AUTHENTICATION (Future)
-# =============================================================================
-
-JWT_ENABLED = False
-JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "dev-secret-key-change-in-production")
-JWT_ALGORITHM = "RS256"
-JWKS_URL = os.getenv("JWKS_URL", "")
-
-# =============================================================================
-# OBSERVABILITY (Future)
-# =============================================================================
-
-LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
-LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-
-SPLUNK_ENABLED = False
-SPLUNK_HEC_URL = os.getenv("SPLUNK_HEC_URL", "")
-SPLUNK_HEC_TOKEN = os.getenv("SPLUNK_HEC_TOKEN", "")
-
-# =============================================================================
-# CORS CONFIGURATION
-# =============================================================================
-
-CORS_ORIGINS = [
-    "http://localhost:8501",
-    "http://127.0.0.1:8501",
-    "http://localhost:3000",
-]
-
-CORS_ALLOW_CREDENTIALS = True
-CORS_ALLOW_METHODS = ["*"]
-CORS_ALLOW_HEADERS = ["*"]
-
-# =============================================================================
-# DEVELOPMENT SETTINGS
-# =============================================================================
-
-DEBUG = os.getenv("DEBUG", "false").lower() == "true"
-RELOAD = DEBUG
 
 
 # =============================================================================

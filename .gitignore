@@ -1,6 +1,11 @@
-# Environment variables
-**/.env
-!.env.example
+# =============================================================================
+# .gitignore - Files to exclude from Git repository
+# =============================================================================
+
+# Environment variables (contains API keys - NEVER commit!)
+.env
+.env.local
+.env.*.local
 
 # Python
 __pycache__/
@@ -8,44 +13,76 @@ __pycache__/
 *$py.class
 *.so
 .Python
-env/
-venv/
-.venv/
-ENV/
-*.egg-info/
-dist/
 build/
+develop-eggs/
+dist/
+downloads/
+eggs/
 .eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
 
-# Testing
-.pytest_cache/
-.coverage
-htmlcov/
-*.cover
-
-# Jupyter
-.ipynb_checkpoints/
-*.ipynb
+# Virtual environments
+venv/
+ENV/
+env/
+.venv
+STREAM/
 
 # IDEs
 .vscode/
 .idea/
 *.swp
 *.swo
-
-# OS
+*~
 .DS_Store
-Thumbs.db
 
-# Docker
-docker-compose.override.yml
+# Jupyter Notebooks
+.ipynb_checkpoints
+*.ipynb
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
 
 # Logs
 *.log
+logs/
 
-# Database files (LiteLLM)
-litellm_proxy.db
-litellm_proxy.db-*
+# Docker
+*.pid
+*.seed
+*.pid.lock
 
-# Ruff cache
-.ruff_cache/
+# Database
+*.db
+*.sqlite
+*.sqlite3
+postgresql_data/
+postgres_data/
+
+# Ollama models (too large for Git)
+ollama_data/
+.ollama/
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+.cache/
+
+# OS files
+Thumbs.db
+.DS_Store

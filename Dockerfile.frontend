@@ -1,0 +1,33 @@
+# =============================================================================
+# Dockerfile.frontend - Builds the STREAM web interface
+# =============================================================================
+# This service provides the user-facing Streamlit web app where
+# researchers interact with STREAM through a chat interface
+# =============================================================================
+
+# Base image: Python 3.11 on Debian (slim = minimal size)
+FROM python:3.11-slim
+
+# Set working directory
+WORKDIR /app
+
+# Step 1: Copy dependency manifest
+COPY pyproject.toml ./
+
+# Step 2: Copy source code
+COPY frontend/ frontend/
+COPY stream/ stream/
+
+# Step 3: Install dependencies (cached!)
+RUN pip install --no-cache-dir -e .
+
+# Streamlit uses port 8501 by default (configurable via env var)
+EXPOSE ${FRONTEND_PORT:-8501}
+
+# Run Streamlit when container starts
+# Use shell form to allow env var expansion
+# --server.address 0.0.0.0: accept connections from outside container
+# --server.port: read from env var, fallback to 8501
+CMD streamlit run frontend/streamlit_app.py \
+    --server.address 0.0.0.0 \
+    --server.port ${FRONTEND_PORT:-8501}
