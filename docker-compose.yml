@@ -126,9 +126,9 @@ services:
         condition: service_healthy
       ollama:
         condition: service_healthy
-    restart: unless-stopped
+    restart: unless-stopped # This will always restart the container unless you explicitly stop it
     networks:
-      - stream-network
+      - stream-network # This creates an isolated network for the services to communicate
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:${MIDDLEWARE_PORT}/health')\" || exit 1"]
       interval: 30s
@@ -159,6 +159,13 @@ services:
     restart: unless-stopped
     networks:
       - stream-network
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:${FRONTEND_PORT}/health')\" || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s # Give Streamlit extra time to start
+      # The difference between "start_period" and "interval" is that "start_period" is the initial delay before starting health checks, while "interval" is the time between subsequent checks.
 
 # =============================================================================
 # Networks

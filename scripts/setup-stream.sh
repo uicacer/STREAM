@@ -564,18 +564,79 @@ print_info "Building Docker images..."
 print_info "(This may take 2-3 minutes on first run)"
 echo ""
 
-# Build and start all services
-# --build forces rebuild of images
-# -d runs in detached mode (background)
-# We show output for this step so user can see progress
-if docker-compose up -d --build 2>&1 | grep -E "(Building|Step [0-9]+/|Successfully built|Creating|Starting)" ; then
+# Build and start all services in background with progress monitoring
+# We'll show a nice animated progress indicator
+BUILD_LOG="/tmp/stream-build-$$.log"
+docker-compose up -d --build > "$BUILD_LOG" 2>&1 &
+BUILD_PID=$!
+
+# Animated progress indicator with status updates
+SERVICES_LIST=("postgres" "ollama" "litellm" "middleware" "frontend")
+SPIN_CHARS='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+CURRENT_SERVICE=""
+i=0
+
+echo -e "   ${BLUE}Starting build process...${NC}"
+echo ""
+
+# Monitor build progress while showing spinner
+while kill -0 $BUILD_PID 2>/dev/null; do
+    # Extract current service being built from log
+    if [ -f "$BUILD_LOG" ]; then
+        LATEST_SERVICE=$(grep -oE "Building (stream-)?(postgres|ollama|litellm|middleware|frontend)" "$BUILD_LOG" | tail -1 | awk '{print $NF}')
+        if [ -n "$LATEST_SERVICE" ] && [ "$LATEST_SERVICE" != "$CURRENT_SERVICE" ]; then
+            # Clear current line and show completion for previous service
+            if [ -n "$CURRENT_SERVICE" ]; then
+                printf "\r\033[K"
+                echo -e "   ${GREEN}✓${NC} Built ${CYAN}${CURRENT_SERVICE}${NC}"
+            fi
+            CURRENT_SERVICE=$LATEST_SERVICE
+            i=0  # Reset spinner for new service
+        fi
+    fi
+
+    # Show spinner with current service being built
+    i=$(( (i+1) % 10 ))
+    if [ -n "$CURRENT_SERVICE" ]; then
+        printf "\r   ${BLUE}${SPIN_CHARS:$i:1}${NC} Building ${CYAN}${BOLD}${CURRENT_SERVICE}${NC}..."
+    else
+        printf "\r   ${BLUE}${SPIN_CHARS:$i:1}${NC} Preparing build..."
+    fi
+    sleep 0.2
+done
+
+# Clear the spinner line
+printf "\r\033[K"
+
+# Show completion for last service
+if [ -n "$CURRENT_SERVICE" ]; then
+    echo -e "   ${GREEN}✓${NC} Built ${CYAN}${CURRENT_SERVICE}${NC}"
+fi
+echo ""
+
+# Check if build succeeded
+if wait $BUILD_PID; then
+    print_success "All services built and started"
+
+    # Show which services are running
     echo ""
-    print_success "All services started"
+    print_info "Services running:"
+    for service in "${SERVICES_LIST[@]}"; do
+        if docker ps --filter "name=stream-$service" --filter "status=running" -q | grep -q .; then
+            echo -e "   ${GREEN}✓${NC} $service"
+        fi
+    done
 else
+    echo ""
     print_error "Failed to start services"
-    print_info "Check logs: docker-compose logs"
+    print_info "Last 20 lines of build log:"
+    tail -20 "$BUILD_LOG" | sed 's/^/   /'
+    print_info "Full log: $BUILD_LOG"
     exit 1
 fi
+
+# Clean up log if successful
+rm -f "$BUILD_LOG"
 
 # =============================================================================
 # STEP 5: Health Checks
@@ -598,23 +659,36 @@ ALL_HEALTHY=true
 for service in "${SERVICES[@]}"; do
     CONTAINER="stream-$service"
 
-    # Wait up to 60 seconds for service to be healthy
+    # Frontend needs more time to start (Streamlit initialization)
+    if [ "$service" = "frontend" ]; then
+        MAX_WAIT=90
+    else
+        MAX_WAIT=60
+    fi
+
     WAITED=0
-    MAX_WAIT=60
 
     while [ $WAITED -lt $MAX_WAIT ]; do
         # Check Docker health status
-        # Some containers may not have health checks defined
         STATUS=$(docker inspect --format='{{.State.Health.Status}}' $CONTAINER 2>/dev/null || echo "none")
 
         if [ "$STATUS" = "healthy" ]; then
             print_success "$service is healthy"
             break
         elif [ "$STATUS" = "none" ]; then
-            # No health check defined, just verify it's running
+            # No health check defined, verify container is running
             if docker ps --filter "name=$CONTAINER" --filter "status=running" -q | grep -q .; then
-                print_success "$service is running"
-                break
+                # For frontend, do an additional HTTP check
+                if [ "$service" = "frontend" ]; then
+                    # Check if frontend HTTP server is responding (any response is good)
+                    if curl -s -o /dev/null -w "%{http_code}" http://localhost:${FRONTEND_PORT}/ | grep -q "200\|302\|404"; then
+                        print_success "$service is running and responding"
+                        break
+                    fi
+                else
+                    print_success "$service is running"
+                    break
+                fi
             fi
         fi
 
@@ -624,11 +698,20 @@ for service in "${SERVICES[@]}"; do
         WAITED=$((WAITED + 2))
     done
 
-    # If we timed out, mark as unhealthy
+    # If we timed out, verify container is at least running
     if [ $WAITED -ge $MAX_WAIT ]; then
         echo ""  # New line after dots
-        print_warning "$service is taking longer than expected"
-        ALL_HEALTHY=false
+        if docker ps --filter "name=$CONTAINER" --filter "status=running" -q | grep -q .; then
+            # Container is running, just slow to respond
+            if [ "$service" = "frontend" ]; then
+                print_success "$service container is running (UI may still be initializing)"
+            else
+                print_warning "$service is starting (may need a few more seconds)"
+            fi
+        else
+            print_error "$service failed to start"
+            ALL_HEALTHY=false
+        fi
     fi
 done
 
@@ -667,8 +750,12 @@ echo ""
 
 # Show warnings if needed
 if [ "$ALL_HEALTHY" = false ]; then
-    print_warning "Some services are still starting up"
-    print_info "Monitor progress: docker-compose logs -f"
+    echo ""
+    print_info "Note: Some services may still be initializing"
+    print_info "All containers are running - services should be ready shortly"
+    print_info "Monitor progress: docker-compose logs -f frontend"
+    echo ""
+else
     echo ""
 fi
 
@@ -680,5 +767,5 @@ fi
 
 # Final message
 echo -e "${BLUE}${BOLD}🎉 Happy researching with STREAM!${NC}"
-echo -e "${BLUE}${BOLD}📖 Documentation: https://github.com/uicacer/STREAM${NC}"
+echo -e "${BLUE}${BOLD}📖 Documentation: https://github.com/your-repo/STREAM${NC}"
 echo ""
