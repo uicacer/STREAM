@@ -27,7 +27,6 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
-from stream.backend.src.core.ollama_manager import OllamaModelManager
 from stream.middleware.config import (
     CORS_ALLOW_CREDENTIALS,
     CORS_ALLOW_HEADERS,
@@ -47,6 +46,7 @@ from stream.middleware.config import (
     judge_complexity_with_llm,
     validate_costs_match_litellm,
 )
+from stream.middleware.core.ollama_manager import OllamaModelManager
 
 # Import routes (these are separate files with specific endpoints)
 from stream.middleware.routes import chat, health

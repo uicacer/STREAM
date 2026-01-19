@@ -146,7 +146,7 @@ OLLAMA_MODELS = {
 # =============================================================================
 
 # Model context limits (reserve space for output)
-# Used in middleware/routes/chat.py and backend/src/core/chat_handler.py
+# Used in middleware/routes/chat.py and middleware/config.py
 # reserve_output is the number of tokens to reserve for the model's response
 MODEL_CONTEXT_LIMITS = {
     "lakeshore-llama": {"total": 8192, "reserve_output": 500},

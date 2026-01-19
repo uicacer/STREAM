@@ -561,7 +561,7 @@ fi
 print_step "Step 4/6: Building & Starting Services"
 
 print_info "Building Docker images..."
-print_info "(This may take 2-3 minutes on first run)"
+print_info "(This may take ~5 minutes on first run)"
 echo ""
 
 # Build and start all services in background with progress monitoring

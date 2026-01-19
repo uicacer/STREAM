@@ -8,13 +8,13 @@ import time
 
 import streamlit as st
 
-from stream.backend.config import (
+from stream.sdk.python.chat_handler import ChatHandler
+from stream.sdk.python.config import (
     APP_ICON,
     APP_SUBTITLE,
     APP_TITLE,
     EXAMPLE_QUERIES,
 )
-from stream.backend.src.core.chat_handler import ChatHandler
 
 # =============================================================================
 # PAGE CONFIG

@@ -15,7 +15,7 @@ WORKDIR /app
 COPY pyproject.toml ./
 
 # Step 2: Copy source code
-COPY frontend/ frontend/
+COPY frontends/ frontends/
 COPY stream/ stream/
 
 # Step 3: Install dependencies (cached!)
@@ -28,6 +28,6 @@ EXPOSE ${FRONTEND_PORT:-8501}
 # Use shell form to allow env var expansion
 # --server.address 0.0.0.0: accept connections from outside container
 # --server.port: read from env var, fallback to 8501
-CMD streamlit run frontend/streamlit_app.py \
+CMD streamlit run frontends/streamlit/streamlit_app.py \
     --server.address 0.0.0.0 \
     --server.port ${FRONTEND_PORT:-8501}
