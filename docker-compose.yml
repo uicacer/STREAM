@@ -134,6 +134,14 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 2G      # Prevent using more than 2GB
+          cpus: '2.0'     # Max 2 CPU cores
+        reservations:
+          memory: 512M    # Guarantee at least 512MB
+          cpus: '0.5'     # Guarantee at least 0.5 cores
 
   # ==========================================================================
   # Streamlit Frontend - Chat Interface
@@ -166,7 +174,14 @@ services:
       retries: 3
       start_period: 60s # Give Streamlit extra time to start
       # The difference between "start_period" and "interval" is that "start_period" is the initial delay before starting health checks, while "interval" is the time between subsequent checks.
-
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
 # =============================================================================
 # Networks
 # =============================================================================

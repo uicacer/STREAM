@@ -465,7 +465,7 @@ This part sets up access to UIC's powerful GPU cluster. This is **optional** but
 
 **What is VPN?** A secure connection to UIC's network that makes your computer act like it's on campus.
 
-1. Go to https://vpn.uic.edu
+1. Go to https://help.uillinois.edu/TDClient/37/uic/Requests/ServiceDet?ID=406
 2. Download and install Cisco AnyConnect
 3. Open AnyConnect
 4. Connect to: `vpn.uic.edu`

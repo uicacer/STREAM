@@ -1,749 +1,406 @@
-# =============================================================================
-# STREAM Middleware - Chat Routes (Real Costs)
-# =============================================================================
-# Chat completion endpoints - main AI interaction
-# =============================================================================
+"""
+Main chat completion endpoint.
 
-import json
+This module defines the primary API endpoint for chat interactions.
+It handles:
+1. Request validation (via Pydantic models)
+2. Query complexity analysis
+3. Tier routing decisions
+4. Context window validation
+5. Streaming response orchestration
+
+The endpoint is OpenAI-compatible, meaning any client that works with
+OpenAI's API will work with STREAM.
+
+API Documentation:
+    POST /chat/completions
+    - Request: OpenAI-compatible chat completion request
+    - Response: Server-Sent Events (SSE) stream
+
+    GET /context/limits
+    - Response: Context window limits for each tier
+"""
+
 import logging
-import os
-from datetime import UTC, datetime, timedelta
-from typing import Any
+from datetime import UTC, datetime
 
-import httpx
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
-from psycopg2 import pool
 from pydantic import BaseModel, Field
 
-from stream.middleware.config import (
-    LITELLM_API_KEY,
-    LITELLM_BASE_URL,
-    LLM_JUDGE_ENABLED,
-    MODEL_CONTEXT_LIMITS,
-    MODEL_COSTS,
-    TIERS,
-    get_model_for_tier,
-    get_routing_reason,
-    get_tier_for_query,
-    is_tier_available,
+from stream.middleware.config import LLM_JUDGE_ENABLED
+from stream.middleware.core.complexity_judge import (
     judge_complexity_with_keywords,
     judge_complexity_with_llm,
 )
+from stream.middleware.core.query_router import get_model_for_tier, get_tier_for_query
+from stream.middleware.core.streaming import create_streaming_response
+from stream.middleware.utils.context_limit import get_tier_context_limits
+from stream.middleware.utils.token_estimator import check_context_limit, estimate_tokens
 
+# Configure module logger
 logger = logging.getLogger(__name__)
 
-# Validate that MODEL_COSTS is the single source of truth
-assert MODEL_COSTS, "MODEL_COSTS must be defined in config.py"
-logger.info(f"✅ Cost configuration loaded: {len(MODEL_COSTS)} models defined")
-
-# =============================================================================
-# DATABASE CONNECTION POOL
-# =============================================================================
-try:
-    # Validate required env vars
-    required_vars = {
-        "POSTGRES_HOST": os.getenv("POSTGRES_HOST"),
-        "POSTGRES_PORT": os.getenv("POSTGRES_PORT"),
-        "POSTGRES_DB": os.getenv("POSTGRES_DB"),
-        "POSTGRES_USER": os.getenv("POSTGRES_USER"),
-        "POSTGRES_PASSWORD": os.getenv("POSTGRES_PASSWORD"),
-    }
-
-    missing = [k for k, v in required_vars.items() if v is None]
-    if missing:
-        raise ValueError(f"Missing: {', '.join(missing)}")
-
-    db_pool = pool.SimpleConnectionPool(
-        1,
-        5,
-        host=required_vars["POSTGRES_HOST"],
-        port=int(required_vars["POSTGRES_PORT"]),
-        database=required_vars["POSTGRES_DB"],
-        user=required_vars["POSTGRES_USER"],
-        password=required_vars["POSTGRES_PASSWORD"],
-    )
-    logger.info("✅ Database connection pool created")
-
-except ValueError as e:
-    logger.critical(f"❌ CONFIG ERROR: {e} - Set in .env file")
-    logger.warning("⚠️  Cost tracking disabled")
-    db_pool = None
-
-except Exception as e:
-    logger.critical(f"❌ DB connection failed: {e}")
-    logger.warning("⚠️  Cost tracking disabled")
-    db_pool = None
-
-
-# =============================================================================
-# TIER FALLBACK HELPER
-# =============================================================================
-
-
-def get_fallback_tier(failed_tier: str, complexity: str, already_tried: list[str]) -> str | None:
-    """
-    Get next tier to try when current tier fails
-
-    Args:
-        failed_tier: The tier that just failed
-        complexity: Query complexity (low/medium/high)
-        already_tried: List of tiers already attempted
-
-    Returns:
-        Next tier to try, or None if no fallbacks available
-    """
-
-    # Define fallback chains based on complexity
-    if complexity == "low" or complexity == "medium":
-        fallback_chain = ["lakeshore", "cloud", "local"]
-    else:  # high
-        fallback_chain = ["cloud", "lakeshore", "local"]
-
-    # Try each tier in order (excluding already tried)
-    for tier in fallback_chain:
-        if tier not in already_tried and is_tier_available(tier):
-            return tier
-
-    return None
-
-
-# =============================================================================
-# API ROUTER
-# =============================================================================
-
+# Create FastAPI router
+# This will be registered in app.py with a prefix (e.g., /api/v1)
 router = APIRouter()
 
+
 # =============================================================================
-# REQUEST/RESPONSE MODELS
+# REQUEST/RESPONSE MODELS (Pydantic)
 # =============================================================================
 
 
 class Message(BaseModel):
-    """Chat message"""
+    """
+    A single message in a conversation.
 
-    role: str = Field(..., description="Role: user, assistant, or system")
-    content: str = Field(..., description="Message content")
+    OpenAI-compatible format with role and content.
+
+    Attributes:
+        role: Message sender ("user", "assistant", or "system")
+        content: Message text
+
+    Example:
+        >>> msg = Message(role="user", content="Hello!")
+        >>> msg.model_dump()
+        {"role": "user", "content": "Hello!"}
+    """
+
+    role: str = Field(
+        ...,  # Required field (... means no default)
+        description="Role: user, assistant, or system",
+    )
+    content: str = Field(
+        ...,  # Required field
+        description="Message content",
+    )
 
 
 class ChatCompletionRequest(BaseModel):
-    """Chat completion request (OpenAI-compatible)"""
+    """
+    Chat completion request body.
 
-    model: str = Field(default="auto", description="Model or tier to use")
-    messages: list[Message] = Field(..., description="Conversation messages")
-    temperature: float | None = Field(default=0.7, ge=0.0, le=2.0)
-    stream: bool | None = Field(default=False)
-    user: str | None = Field(default=None, description="User ID (future)")
+    This matches OpenAI's API format for compatibility.
+    Any OpenAI client library can use STREAM without modification.
 
+    Attributes:
+        model: Model or tier to use ("auto" for intelligent routing)
+        messages: Conversation history (list of Message objects)
+        temperature: Sampling temperature (0.0 = deterministic, 2.0 = creative)
+        user: Optional user ID (reserved for future authentication)
 
-class ChatCompletionResponse(BaseModel):
-    """Chat completion response"""
+    Example:
+        >>> request = ChatCompletionRequest(
+        ...     model="auto",
+        ...     messages=[{"role": "user", "content": "Hi"}],
+        ...     temperature=0.7
+        ... )
 
-    id: str
-    object: str = "chat.completion"
-    created: int
-    model: str
-    choices: list[dict[str, Any]]
-    usage: dict[str, int] | None = None
+    Validation:
+        - temperature must be between 0.0 and 2.0
+        - messages list cannot be empty
+        - Each message must have role and content
+    """
 
-    # STREAM-specific metadata
-    stream_metadata: dict[str, Any] | None = None
+    model: str = Field(
+        default="auto", description="Model or tier to use (auto = intelligent routing)"
+    )
 
+    messages: list[Message] = Field(
+        ...,  # Required
+        description="Conversation messages",
+        min_items=1,  # At least one message required
+    )
 
-def calculate_query_cost(model: str, input_tokens: int, output_tokens: int) -> float:
-    """Calculate cost using config-based pricing"""
+    temperature: float | None = Field(
+        default=0.7,
+        ge=0.0,  # Greater than or equal to 0.0
+        le=2.0,  # Less than or equal to 2.0
+        description="Sampling temperature (0.0-2.0)",
+    )
 
-    if model not in MODEL_COSTS:
-        logger.warning(f"⚠️ No cost data for model: {model}")
-        return 0.0
-
-    costs = MODEL_COSTS[model]
-    input_cost = input_tokens * costs["input"]
-    output_cost = output_tokens * costs["output"]
-
-    return input_cost + output_cost
-
-
-async def create_streaming_response(
-    model: str,
-    messages: list[dict],
-    temperature: float,
-    correlation_id: str,
-    tier: str,
-    user_query: str = "",  # ← ADD THIS
-    complexity: str = "medium",  # ← ADD THIS
-):
-    """Create async generator for streaming SSE responses with automatic fallback"""
-
-    input_tokens = 0
-    output_tokens = 0
-    tiers_tried = [tier]
-    current_tier = tier
-    current_model = model
-
-    # **SEND METADATA AS VERY FIRST EVENT**
-    metadata_event = {
-        "stream_metadata": {
-            "tier": current_tier,
-            "model": current_model,
-            "correlation_id": correlation_id,
-        }
-    }
-    yield f"data: {json.dumps(metadata_event)}\n\n"
-
-    max_retries = 3  # Try up to 3 tiers
-
-    for attempt in range(max_retries):
-        try:
-            # Get the async generator from forward_to_litellm
-            litellm_stream = await forward_to_litellm(
-                model=current_model,
-                messages=messages,
-                temperature=temperature,
-                stream=True,
-                correlation_id=correlation_id,
-            )
-
-            # Forward all chunks
-            async for line in litellm_stream:
-                yield f"{line}\n\n"
-
-                # Parse for token tracking
-                if line.startswith("data: "):
-                    try:
-                        data_str = line[6:]
-                        if data_str != "[DONE]":
-                            data = json.loads(data_str)
-                            if "usage" in data:
-                                input_tokens = data["usage"].get("prompt_tokens", 0)
-                                output_tokens = data["usage"].get("completion_tokens", 0)
-                    except json.JSONDecodeError:
-                        pass
-
-            # SUCCESS! Send final cost event
-            if input_tokens > 0 or output_tokens > 0:
-                cost = calculate_query_cost(current_model, input_tokens, output_tokens)
-
-                cost_event = {
-                    "stream_metadata": {
-                        "tier": current_tier,
-                        "model": current_model,
-                        "fallback_used": len(tiers_tried) > 1,
-                        "tiers_tried": tiers_tried,
-                        "cost": {
-                            "total": cost,
-                            "input_tokens": input_tokens,
-                            "output_tokens": output_tokens,
-                        },
-                    }
-                }
-                yield f"data: {json.dumps(cost_event)}\n\n"
-
-                if len(tiers_tried) > 1:
-                    logger.warning(
-                        f"[{correlation_id}] Fallback successful: {tiers_tried[0]} → {current_tier}"
-                    )
-
-                logger.info(
-                    f"[{correlation_id}] Stream completed: cost=${cost:.6f}, tokens={input_tokens + output_tokens}",
-                    extra={
-                        "correlation_id": correlation_id,
-                        "tier": current_tier,
-                        "cost": cost,
-                        "tokens": input_tokens + output_tokens,
-                    },
-                )
-
-            # Success - exit retry loop
-            return
-
-        except HTTPException as e:
-            # Check if it's a connection/availability error
-            error_str = str(e.detail).lower()
-            is_tier_failure = any(
-                [
-                    "connection" in error_str,
-                    "unavailable" in error_str,
-                    "500" in str(e.status_code),
-                    "503" in str(e.status_code),
-                    "504" in str(e.status_code),
-                ]
-            )
-
-            if is_tier_failure and attempt < max_retries - 1:
-                # Try fallback tier
-                logger.warning(f"[{correlation_id}] {current_tier.upper()} failed: {e.detail}")
-
-                # Get next tier to try
-                fallback_tier = get_fallback_tier(current_tier, complexity, tiers_tried)
-
-                if fallback_tier:
-                    logger.info(f"[{correlation_id}] Attempting fallback: {fallback_tier.upper()}")
-
-                    # Update for next attempt
-                    current_tier = fallback_tier
-                    current_model = get_model_for_tier(fallback_tier)
-                    tiers_tried.append(fallback_tier)
-
-                    # Send fallback notification to client
-                    fallback_event = {
-                        "stream_metadata": {
-                            "fallback": True,
-                            "original_tier": tier,
-                            "current_tier": current_tier,
-                            "model": current_model,
-                            "reason": "Connection error",
-                        }
-                    }
-                    yield f"data: {json.dumps(fallback_event)}\n\n"
-
-                    # Continue to next attempt
-                    continue
-                else:
-                    # No more fallbacks available
-                    logger.error(
-                        f"[{correlation_id}] No fallback tiers available",
-                        extra={"correlation_id": correlation_id},
-                    )
-                    yield f'data: {{"error": "All AI tiers unavailable. Tried: {", ".join(tiers_tried)}"}}\n\n'
-                    return
-            else:
-                # Not a tier failure or last retry - propagate error
-                logger.error(
-                    f"[{correlation_id}] Streaming error: {str(e)}",
-                    exc_info=True,
-                    extra={"correlation_id": correlation_id},
-                )
-                yield f'data: {{"error": "{str(e)}"}}\n\n'
-                return
-
-        except Exception as e:
-            logger.error(
-                f"[{correlation_id}] Unexpected streaming error: {str(e)}",
-                exc_info=True,
-                extra={"correlation_id": correlation_id},
-            )
-            yield f'data: {{"error": "{str(e)}"}}\n\n'
-            return
+    user: str | None = Field(
+        default=None, description="User ID (for future rate limiting/authentication)"
+    )
 
 
 # =============================================================================
-# CHAT COMPLETION ENDPOINT
+# MAIN CHAT ENDPOINT
 # =============================================================================
+
+
 @router.post("/chat/completions")
 async def chat_completions(request_body: ChatCompletionRequest, request: Request):
-    """Chat completion endpoint with streaming support and automatic fallback"""
+    """
+    Main chat completion endpoint with streaming and automatic fallback.
 
+    This endpoint:
+    1. Extracts the user's query from the conversation history
+    2. Analyzes query complexity (simple vs. complex)
+    3. Routes to the appropriate tier (local/campus/cloud)
+    4. Validates context window limits
+    5. Streams the response with automatic tier fallback
+
+    The endpoint is OpenAI-compatible, meaning you can use it as a drop-in
+    replacement for OpenAI's API:
+
+        openai.api_base = "http://localhost:5000"
+        response = openai.ChatCompletion.create(
+            model="auto",
+            messages=[{"role": "user", "content": "Hello!"}]
+        )
+
+    Args:
+        request_body: Validated request body (Pydantic handles validation)
+        request: FastAPI request object (contains middleware-injected state)
+
+    Returns:
+        StreamingResponse: Server-Sent Events (SSE) stream containing:
+        - Initial metadata (tier, model)
+        - Content chunks (the AI response, token by token)
+        - Cost summary (tokens used, total cost)
+
+    Raises:
+        HTTPException 400: Invalid request (context too long, bad parameters)
+        HTTPException 500: Internal server error
+
+    Example Request:
+        POST /chat/completions
+        {
+          "model": "auto",
+          "messages": [
+            {"role": "user", "content": "Explain quantum computing"}
+          ],
+          "temperature": 0.7
+        }
+
+    Example Response (SSE stream):
+        data: {"stream_metadata": {"tier": "lakeshore", "model": "llama3.2:3b"}}
+
+        data: {"choices": [{"delta": {"content": "Quantum"}}]}
+
+        data: {"choices": [{"delta": {"content": " computing"}}]}
+
+        data: {"stream_metadata": {"cost": {"total": 0.0}}}
+
+    Note:
+        The correlation_id is injected by middleware for request tracing.
+        It allows us to follow a single request through all log files.
+    """
+
+    # =========================================================================
+    # STEP 1: Extract Correlation ID (for logging/tracing)
+    # =========================================================================
+    # This is injected by middleware in app.py
+    # Format: UUID or timestamp-based identifier
     correlation_id = request.state.correlation_id
 
-    # Extract user query
+    # =========================================================================
+    # STEP 2: Extract User Query
+    # =========================================================================
+    # Get the most recent user message (last message with role="user")
     user_messages = [msg for msg in request_body.messages if msg.role == "user"]
-    user_query = user_messages[-1].content if user_messages else ""
 
-    # Get complexity (needed for intelligent fallback)
+    if user_messages:
+        user_query = user_messages[-1].content
+    else:
+        # Edge case: No user messages (shouldn't happen due to validation)
+        user_query = ""
+        logger.warning(
+            f"[{correlation_id}] No user messages in conversation",
+            extra={"correlation_id": correlation_id},
+        )
+
+    # =========================================================================
+    # STEP 3: Analyze Query Complexity
+    # =========================================================================
+    # Complexity determines routing and fallback priority:
+    # - Low: Simple factual queries ("What's 2+2?")
+    # - Medium: Moderate tasks ("Summarize this article")
+    # - High: Complex reasoning ("Design a database schema for...")
+
     if LLM_JUDGE_ENABLED:
+        # Use LLM to judge complexity (more accurate but slower)
         complexity = judge_complexity_with_llm(user_query)
+
+        # Fallback to keyword-based if LLM fails
         if not complexity:
+            logger.warning(
+                f"[{correlation_id}] LLM judge failed, using keyword fallback",
+                extra={"correlation_id": correlation_id},
+            )
             complexity = judge_complexity_with_keywords(user_query)
     else:
+        # Use keyword-based complexity (faster, less accurate)
         complexity = judge_complexity_with_keywords(user_query)
 
-    # Determine routing
+    logger.debug(
+        f"[{correlation_id}] Query complexity: {complexity}",
+        extra={"correlation_id": correlation_id, "complexity": complexity},
+    )
+
+    # =========================================================================
+    # STEP 4: Route to Tier
+    # =========================================================================
+    # Determine which tier to use based on:
+    # - User's model preference (from request_body.model)
+    # - Query complexity
+    # - Tier availability
     tier = get_tier_for_query(user_query, request_body.model)
     model = get_model_for_tier(tier)
 
-    # Prepare message list
+    logger.debug(
+        f"[{correlation_id}] Routing decision: tier={tier}, model={model}",
+        extra={
+            "correlation_id": correlation_id,
+            "tier": tier,
+            "model": model,
+        },
+    )
+
+    # =========================================================================
+    # STEP 5: Prepare Messages
+    # =========================================================================
+    # Convert Pydantic models to dictionaries for downstream processing
     messages = [msg.model_dump() for msg in request_body.messages]
 
-    # CONTEXT WINDOW CHECK
-    # Estimate input tokens
-    def estimate_tokens(msgs):
-        return sum(len(str(m.get("content", ""))) // 4 for m in msgs)
+    # =========================================================================
+    # STEP 6: Validate Context Window
+    # =========================================================================
+    # Check if conversation fits in the model's context window
+    # This prevents crashes and truncation
 
     estimated_input = estimate_tokens(messages)
+    within_limit, max_allowed = check_context_limit(estimated_input, model, correlation_id)
 
-    # Check if we'll exceed context for this tier
-    if tier in ["lakeshore", "local"]:
-        model_config = MODEL_CONTEXT_LIMITS.get(model)
-        if model_config:
-            max_input = model_config["total"] - model_config["reserve_output"]
+    if not within_limit:
+        # Conversation is too long for this model
+        logger.error(
+            f"[{correlation_id}] Context window exceeded: "
+            f"{estimated_input} tokens > {max_allowed} limit for {model}",
+            extra={
+                "correlation_id": correlation_id,
+                "estimated_tokens": estimated_input,
+                "max_allowed": max_allowed,
+                "model": model,
+            },
+        )
 
-            if estimated_input > max_input:
-                # DON'T truncate or reroute - return helpful error!
-                logger.error(
-                    f"[{correlation_id}] Context window exceeded: "
-                    f"{estimated_input} tokens > {max_input} limit for {model}"
-                )
-                raise HTTPException(
-                    status_code=400,
-                    detail={
-                        "error": "context_too_long",
-                        "message": f"Conversation history ({estimated_input} tokens) exceeds {model} limit ({max_input} tokens)",
-                        "suggestion": "Please start a new conversation or use Cloud tier for longer contexts",
-                        "estimated_tokens": estimated_input,
-                        "model_limit": max_input,
-                    },
-                ) from None
+        # Return helpful error to user
+        raise HTTPException(
+            status_code=400,  # Bad Request
+            detail={
+                "error": "context_too_long",
+                "message": (
+                    f"Conversation history ({estimated_input} tokens) exceeds "
+                    f"{model} limit ({max_allowed} tokens)"
+                ),
+                "suggestion": "Please start a new conversation or use Cloud tier for longer contexts",
+                "estimated_tokens": estimated_input,
+                "model_limit": max_allowed,
+            },
+        )
 
-    # Log routing decision
+    # =========================================================================
+    # STEP 7: Log Routing Decision
+    # =========================================================================
     logger.info(
-        f"[{correlation_id}] Routing: tier={tier}, model={model}, complexity={complexity}, stream={request_body.stream}",
+        f"[{correlation_id}] Routing: tier={tier}, model={model}, complexity={complexity}",
         extra={
             "correlation_id": correlation_id,
             "tier": tier,
             "model": model,
             "complexity": complexity,
-            "stream": request_body.stream,
+            "estimated_tokens": estimated_input,
         },
     )
 
+    # =========================================================================
+    # STEP 8: Stream Response
+    # =========================================================================
     try:
-        if request_body.stream:
-            # Streaming response WITH FALLBACK
-            return StreamingResponse(
-                create_streaming_response(
-                    model=model,
-                    messages=messages,
-                    temperature=request_body.temperature,
-                    correlation_id=correlation_id,
-                    tier=tier,
-                    user_query=user_query,  # ← ADD THIS
-                    complexity=complexity,  # ← ADD THIS
-                ),
-                media_type="text/event-stream",
-                headers={
-                    "Cache-Control": "no-cache",
-                    "X-Accel-Buffering": "no",
-                    "Connection": "keep-alive",
-                },
-            )
-
-        else:
-            # Non-streaming response
-            litellm_response = await forward_to_litellm(
+        # Create streaming response using core/streaming.py
+        return StreamingResponse(
+            create_streaming_response(
                 model=model,
                 messages=messages,
                 temperature=request_body.temperature,
-                stream=False,
                 correlation_id=correlation_id,
-            )
-
-            # Calculate cost
-            usage = litellm_response.get("usage", {})
-            input_tokens = usage.get("prompt_tokens", 0)
-            output_tokens = usage.get("completion_tokens", 0)
-            total_tokens = usage.get("total_tokens", 0)
-
-            actual_cost = calculate_query_cost(model, input_tokens, output_tokens)
-
-            # Add metadata
-            if isinstance(litellm_response, dict):
-                litellm_response["stream_metadata"] = {
-                    "tier": tier,
-                    "tier_name": TIERS[tier]["name"],
-                    "routing_reason": get_routing_reason(user_query, request_body.model, tier),
-                    "correlation_id": correlation_id,
-                    "cost": {
-                        "total": actual_cost,
-                        "input_tokens": input_tokens,
-                        "output_tokens": output_tokens,
-                        "total_tokens": total_tokens,
-                        "input_cost_per_token": MODEL_COSTS.get(model, {}).get("input", 0.0),
-                        "output_cost_per_token": MODEL_COSTS.get(model, {}).get("output", 0.0),
-                    },
-                }
-
-            logger.info(
-                f"[{correlation_id}] Request completed: cost=${actual_cost:.6f}, tokens={total_tokens}",
-                extra={
-                    "correlation_id": correlation_id,
-                    "tier": tier,
-                    "status": "success",
-                    "cost": actual_cost,
-                    "tokens": total_tokens,
-                },
-            )
-
-            return litellm_response
+                tier=tier,
+                user_query=user_query,
+                complexity=complexity,
+            ),
+            media_type="text/event-stream",  # SSE content type
+            headers={
+                # Disable caching (streaming must be live)
+                "Cache-Control": "no-cache",
+                # Disable Nginx buffering (for real-time streaming)
+                "X-Accel-Buffering": "no",
+                # Keep connection alive during streaming
+                "Connection": "keep-alive",
+            },
+        )
 
     except HTTPException:
+        # Re-raise HTTPExceptions (already formatted)
         raise
+
     except Exception as e:
+        # Catch unexpected errors
         logger.error(
             f"[{correlation_id}] Error processing request: {str(e)}",
-            exc_info=True,
+            exc_info=True,  # Include full traceback
             extra={"correlation_id": correlation_id},
         )
+
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error processing request: {str(e)}",
-        ) from e  # Exception chaining
+        ) from e
+        # What this "from e" does is preserve the original exception context
+        # This means that when the HTTPException is raised, it retains information about the original error
+        # Without "from e" the original traceback would be lost, making debugging harder
 
 
 # =============================================================================
-# COST ENDPOINTS
+# CONTEXT LIMITS ENDPOINT
 # =============================================================================
-
-
-@router.get("/costs/models")
-async def get_model_costs_endpoint():
-    """
-    Get cost information (now from config, not LiteLLM API)
-    """
-    return {
-        "success": True,
-        "costs": MODEL_COSTS,
-        "source": "config.py",
-        "timestamp": datetime.now(UTC).isoformat(),
-    }
-
-
-@router.get("/costs/summary")
-async def get_cost_summary(days: int = 7):
-    """
-    Get cost summary from LiteLLM database
-
-    Args:
-        days: Number of days to look back (default 7)
-
-    ✅ FIXED: Proper error handling with status codes
-    """
-
-    conn = None
-
-    try:
-        if not db_pool:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Database pool not available",
-            ) from None
-
-        conn = db_pool.getconn()
-        cur = conn.cursor()
-
-        # Query last N days
-        start_date = datetime.now() - timedelta(days=days)
-
-        cur.execute(
-            """
-            SELECT
-                model,
-                COUNT(*) as requests,
-                SUM(spend) as total_cost,
-                SUM(prompt_tokens) as input_tokens,
-                SUM(completion_tokens) as output_tokens
-            FROM "LiteLLM_SpendLogs"
-            WHERE "startTime" >= %s
-            GROUP BY model
-            ORDER BY total_cost DESC
-        """,
-            (start_date,),
-        )
-
-        results = cur.fetchall()
-
-        # Format response
-        summary = {
-            "period_days": days,
-            "start_date": start_date.isoformat(),
-            "end_date": datetime.now().isoformat(),
-            "models": [],
-        }
-
-        total_cost = 0.0
-        total_requests = 0
-
-        for row in results:
-            model_data = {
-                "model": row[0],
-                "requests": row[1],
-                "cost": float(row[2]) if row[2] else 0.0,
-                "input_tokens": row[3] or 0,
-                "output_tokens": row[4] or 0,
-                "avg_cost_per_request": (float(row[2]) / row[1]) if row[1] > 0 and row[2] else 0.0,
-            }
-            summary["models"].append(model_data)
-            total_cost += model_data["cost"]
-            total_requests += model_data["requests"]
-
-        summary["total_cost"] = total_cost
-        summary["total_requests"] = total_requests
-        summary["avg_cost_per_request"] = total_cost / total_requests if total_requests > 0 else 0.0
-
-        cur.close()
-
-        return summary
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Database error in cost_summary: {str(e)}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Database error: {str(e)}"
-        ) from e  # Exception chaining
-
-    finally:
-        if conn:
-            db_pool.putconn(conn)
-
-
-# =============================================================================
-# HELPER FUNCTIONS
-# =============================================================================
-
-
-async def forward_to_litellm(
-    model: str, messages: list[dict], temperature: float, stream: bool, correlation_id: str
-):
-    """
-    Forward request to LiteLLM gateway with streaming support
-
-    Returns:
-        - If stream=False: Dict (JSON response)
-        - If stream=True: Returns async generator function
-    """
-    payload = {"model": model, "messages": messages, "temperature": temperature, "stream": stream}
-
-    headers = {
-        "Authorization": f"Bearer {LITELLM_API_KEY}",
-        "Content-Type": "application/json",
-        "X-Correlation-ID": correlation_id,
-    }
-
-    url = f"{LITELLM_BASE_URL}/v1/chat/completions"
-
-    logger.debug(
-        f"[{correlation_id}] Forwarding to LiteLLM: {url}, stream={stream}",
-        extra={"correlation_id": correlation_id},
-    )
-
-    if not stream:
-        # ========== NON-STREAMING MODE ==========
-        try:
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                response = await client.post(url, json=payload, headers=headers)
-
-                logger.debug(
-                    f"[{correlation_id}] LiteLLM response: status={response.status_code}",
-                    extra={"correlation_id": correlation_id},
-                )
-
-                if response.status_code != 200:
-                    logger.error(
-                        f"[{correlation_id}] LiteLLM error: {response.status_code} - {response.text}",
-                        extra={"correlation_id": correlation_id},
-                    )
-                    raise HTTPException(
-                        status_code=response.status_code, detail=f"LiteLLM error: {response.text}"
-                    ) from None
-
-                try:
-                    return response.json()
-                except Exception as json_err:
-                    logger.error(
-                        f"[{correlation_id}] Failed to parse LiteLLM response",
-                        extra={"correlation_id": correlation_id},
-                    )
-                    raise HTTPException(
-                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                        detail=f"Invalid JSON response from LiteLLM: {str(json_err)}",
-                    ) from json_err
-
-        except httpx.TimeoutException:
-            logger.error(
-                f"[{correlation_id}] LiteLLM timeout", extra={"correlation_id": correlation_id}
-            )
-            raise HTTPException(
-                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-                detail="Gateway timeout - request took too long",
-            ) from None
-
-        except httpx.ConnectError:
-            logger.error(
-                f"[{correlation_id}] Cannot connect to LiteLLM at {url}",
-                extra={"correlation_id": correlation_id},
-            )
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="LiteLLM gateway unavailable",
-            ) from None
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.error(
-                f"[{correlation_id}] Unexpected error: {str(e)}",
-                exc_info=True,
-                extra={"correlation_id": correlation_id},
-            )
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Unexpected error: {str(e)}",
-            ) from e  # Exception chaining
-
-    else:
-        # ========== STREAMING MODE - Return async generator ==========
-        async def stream_lines():
-            try:
-                async with (
-                    httpx.AsyncClient(timeout=120.0) as client,
-                    client.stream("POST", url, json=payload, headers=headers) as response,
-                ):
-                    if response.status_code != 200:
-                        error_text = await response.aread()
-                        logger.error(
-                            f"[{correlation_id}] LiteLLM error: {response.status_code}",
-                            extra={"correlation_id": correlation_id},
-                        )
-                        raise HTTPException(
-                            status_code=response.status_code,
-                            detail=f"LiteLLM error: {error_text.decode()}",
-                        ) from None
-
-                    # Yield each line from the stream
-                    async for line in response.aiter_lines():
-                        if line.strip():
-                            yield line
-
-            except httpx.TimeoutException:
-                logger.error(
-                    f"[{correlation_id}] LiteLLM timeout", extra={"correlation_id": correlation_id}
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail="Gateway timeout"
-                ) from None
-            except httpx.ConnectError:
-                logger.error(
-                    f"[{correlation_id}] Cannot connect to LiteLLM at {url}",
-                    extra={"correlation_id": correlation_id},
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail="LiteLLM gateway unavailable",
-                ) from None
-            except HTTPException:
-                raise
-            except Exception as e:
-                logger.error(
-                    f"[{correlation_id}] Unexpected error: {str(e)}",
-                    exc_info=True,
-                    extra={"correlation_id": correlation_id},
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail=f"Unexpected error: {str(e)}",
-                ) from e  # Exception chaining
-
-        return stream_lines()
 
 
 @router.get("/context/limits")
 async def get_context_limits():
     """
-    Get context window limits for all tiers
+    Get context window limits for all tiers.
 
-    Returns limits organized by tier for UI display
+    This endpoint provides information about token limits for each tier,
+    which is useful for:
+    - UI warnings ("You're approaching the limit")
+    - Client-side truncation
+    - Tier selection
+
+    Returns:
+        Dictionary with limits organized by tier:
+        {
+          "success": true,
+          "limits": {
+            "local": {"total": 8000, "reserve_output": 2000},
+            "lakeshore": {"total": 8000, "reserve_output": 2000},
+            "cloud": {"total": 128000, "reserve_output": 4000}
+          },
+          "timestamp": "2026-01-23T12:34:56.789Z"
+        }
+
+    Example:
+        GET /context/limits
+
+        Response:
+        {
+          "success": true,
+          "limits": {...},
+          "timestamp": "2026-01-23T12:34:56.789Z"
+        }
     """
-    from stream.middleware.config import get_tier_context_limits
 
     return {
         "success": True,

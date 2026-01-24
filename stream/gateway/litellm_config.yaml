@@ -22,7 +22,7 @@ model_list:
       mode: chat
       input_cost_per_token: 0.0
       output_cost_per_token: 0.0
-      max_tokens: 4096
+      # max_tokens: 4096
     metadata:
       tier: "local"
       description: "Llama 3.2 1B - fastest local model"
@@ -35,7 +35,7 @@ model_list:
       mode: chat
       input_cost_per_token: 0.0
       output_cost_per_token: 0.0
-      max_tokens: 4096
+      # max_tokens: 4096
     metadata:
       tier: "local"
       description: "Llama 3.2 3B - default local model"
@@ -48,7 +48,7 @@ model_list:
       mode: chat
       input_cost_per_token: 0.0
       output_cost_per_token: 0.0
-      max_tokens: 8192
+      # max_tokens: 8192
     metadata:
       tier: "local"
       description: "Llama 3.1 8B - highest quality local"
@@ -65,7 +65,7 @@ model_list:
       mode: chat
       input_cost_per_token: 0.000003    # $3 per 1M input tokens
       output_cost_per_token: 0.000015   # $15 per 1M output tokens
-      max_tokens: 8192
+      # max_tokens: 8192
     metadata:
       tier: "cloud"
       provider: "anthropic"
@@ -73,13 +73,13 @@ model_list:
 
   - model_name: cloud-gpt
     litellm_params:
-      model: gpt-4-turbo-preview
+      model: gpt-4-turbo-2024-04-09
       api_key: os.environ/OPENAI_API_KEY
     model_info:
       mode: chat
       input_cost_per_token: 0.00001     # $10 per 1M input tokens
       output_cost_per_token: 0.00003    # $30 per 1M output tokens
-      max_tokens: 4096
+      # max_tokens: 4096
     metadata:
       tier: "cloud"
       provider: "openai"
@@ -87,13 +87,13 @@ model_list:
 
   - model_name: cloud-gpt-cheap
     litellm_params:
-      model: gpt-3.5-turbo
+      model: gpt-3.5-turbo-0125
       api_key: os.environ/OPENAI_API_KEY
     model_info:
       mode: chat
       input_cost_per_token: 0.0000005   # $0.50 per 1M input tokens
       output_cost_per_token: 0.0000015  # $1.50 per 1M output tokens
-      max_tokens: 4096
+      # max_tokens: 4096
     metadata:
       tier: "cloud"
       provider: "openai"
@@ -113,7 +113,7 @@ model_list:
       mode: chat
       input_cost_per_token: 0.0000005
       output_cost_per_token: 0.0000005
-      max_tokens: 2048
+      # max_tokens: 2048
 
 # =============================================================================
 # ROUTER SETTINGS
@@ -145,6 +145,20 @@ general_settings:
 
   # Rate limiting
   rpm_limit: 60  # Requests per minute (global across all users)
+
+  # For simple in-memory cache:
+  cache: true
+  cache_params:
+    type: local # In-memory cache
+    ttl: 3600  # Time to live for cached responses (in seconds)
+
+  # For production
+  # cache_params:
+  #   type: redis
+  #   host: redis
+  #   port: 6379
+
+
 
   # Budget settings (cost control)
   max_budget: 100         # Maximum spend in USD

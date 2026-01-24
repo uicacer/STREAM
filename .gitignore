@@ -86,3 +86,6 @@ ollama_data/
 # OS files
 Thumbs.db
 .DS_Store
+
+# Backup files
+*.backup
