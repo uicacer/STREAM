@@ -7,14 +7,17 @@
 import time
 
 import streamlit as st
-
-from stream.sdk.python.chat_handler import ChatHandler
-from stream.sdk.python.config import (
+from config import (
     APP_ICON,
     APP_SUBTITLE,
     APP_TITLE,
     EXAMPLE_QUERIES,
 )
+
+from stream.sdk.python.chat_handler import ChatHandler
+
+MAX_DISPLAY_MESSAGES = 100  # UI display limit
+MAX_SEND_MESSAGES = 50  # Messages sent to middleware (middleware will trim further if needed)
 
 # =============================================================================
 # PAGE CONFIG
@@ -277,9 +280,16 @@ if "pending_query" in st.session_state:
             if first_chunk:
                 message_placeholder.markdown(full_response + "▌")
 
-                for chunk in result["response"]:
-                    full_response += chunk
-                    message_placeholder.markdown(full_response + "▌")
+                try:
+                    for chunk in result["response"]:
+                        full_response += chunk
+                        message_placeholder.markdown(full_response + "▌")
+                except Exception as e:
+                    st.error(f"Stream interrupted: {e}")
+                    # Save partial response
+                    st.session_state.messages.append(
+                        {"role": "assistant", "content": full_response + " [INTERRUPTED]"}
+                    )
 
             message_placeholder.markdown(full_response)
 

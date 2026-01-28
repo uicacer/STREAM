@@ -22,7 +22,6 @@ from stream.middleware.core.complexity_judge import judge_complexity_with_llm
 from stream.middleware.core.database import close_database_pool, initialize_database_pool
 from stream.middleware.core.ollama_manager import OllamaModelManager
 from stream.middleware.core.tier_health import check_all_tiers
-from stream.middleware.utils.validation import validate_costs_match_litellm
 
 logger = logging.getLogger(__name__)
 console = Console()
@@ -60,10 +59,6 @@ async def startup():
     # Step 4: Warm up judge (optional)
     logger.info("🔍 Warming up LLM judge...")
     judge_complexity_with_llm("warmup test")
-
-    # Step 5: Validate costs
-    logger.info("🔍 Validating cost configurations...")
-    validate_costs_match_litellm()
 
     logger.info("✅ Middleware ready!")
 

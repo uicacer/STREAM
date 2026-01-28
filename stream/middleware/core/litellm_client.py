@@ -172,7 +172,7 @@ async def forward_to_litellm(
             exc_info=True,  # Include full traceback in logs
             extra={"correlation_id": correlation_id},
         )
-        # FIX: Add exception chaining (B904)
+        # Add exception chaining (B904)
         raise HTTPException(
             status_code=500,  # Internal Server Error
             detail=f"Unexpected error: {str(e)}",

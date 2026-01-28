@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 # CONFIGURATION
 # =============================================================================
 
-MIDDLEWARE_BASE_URL = os.getenv("MIDDLEWARE_URL", "http://localhost:5000")
+MIDDLEWARE_BASE_URL = os.getenv("MIDDLEWARE_URL")
 REQUEST_TIMEOUT = 120.0
 
 # =============================================================================

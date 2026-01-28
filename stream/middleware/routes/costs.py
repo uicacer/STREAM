@@ -8,8 +8,8 @@ from datetime import UTC, datetime, timedelta
 from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
-from stream.middleware.config import MODEL_COSTS
 from stream.middleware.core.database import get_database_pool, is_database_available
+from stream.middleware.utils.cost_reader import load_model_pricing
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -37,10 +37,14 @@ async def get_model_costs():
     """Get pricing information for all available models."""
     logger.info("Fetching model cost information")
 
+    # Read from LiteLLM config (single source of truth)
+    # pricing = get_all_model_costs()
+    pricing = load_model_pricing()
+
     return {
         "success": True,
-        "costs": MODEL_COSTS,
-        "source": "config.py",
+        "costs": pricing,
+        "source": "litellm_config.yaml",
         "timestamp": datetime.now(UTC).isoformat(),
     }
 

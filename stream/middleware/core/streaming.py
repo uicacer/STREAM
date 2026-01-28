@@ -26,6 +26,7 @@ from stream.middleware.core.metrics import MetricsTracker
 from stream.middleware.core.query_router import get_model_for_tier
 from stream.middleware.utils.cost_calculator import calculate_query_cost
 from stream.middleware.utils.fallback import get_fallback_reason, get_fallback_tier
+from stream.middleware.utils.token_estimator import estimate_tokens, estimate_tokens_from_text
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +104,7 @@ async def create_streaming_response(
     # Initialize tracking variables
     input_tokens = 0  # Tokens in the prompt/conversation
     output_tokens = 0  # Tokens in the model's response
+    output_text = []  # Track generated text for estimation
     tiers_tried = [tier]  # Track which tiers we've attempted
     current_tier = tier  # The tier we're currently trying
     current_model = model  # The model we're currently trying
@@ -170,48 +172,82 @@ async def create_streaming_response(
                 # Format: data: {"usage": {"prompt_tokens": X, "completion_tokens": Y}}
                 if line.startswith("data: "):
                     try:
-                        # Extract JSON from "data: <JSON>" format
-                        data_str = line[6:]  # Skip "data: " prefix
+                        # Extract JSON payload (skip "data: " prefix and trim whitespace)
+                        data_str = line[6:].strip()
 
                         # Skip the "[DONE]" marker (end of stream)
                         if data_str == "[DONE]":
                             continue
 
+                        # Skip empty
+                        if not data_str:
+                            continue
+
                         # Parse JSON
                         data = json.loads(data_str)
 
-                        # Extract token counts if present
-                        if "usage" in data:
-                            input_tokens = data["usage"].get("prompt_tokens", 0)
-                            output_tokens = data["usage"].get("completion_tokens", 0)
+                        # Method 1: Look for usage in standard OpenAI format
+                        if "usage" in data and data["usage"]:
+                            usage = data["usage"]
+                            if usage.get("prompt_tokens") is not None:
+                                input_tokens = usage.get("prompt_tokens", 0)
+                                output_tokens = usage.get("completion_tokens", 0)
+                                logger.debug(f"[{correlation_id}] ✅ Tokens from usage object")
+                                # Found tokens - don't collect text!
 
-                            logger.debug(
-                                f"[{correlation_id}] Token usage: {input_tokens} in, {output_tokens} out",
-                                extra={
-                                    "correlation_id": correlation_id,
-                                    "input_tokens": input_tokens,
-                                    "output_tokens": output_tokens,
-                                },
-                            )
+                        # Method 2: Some providers put tokens at top level (not nested in "usage")
+                        elif "prompt_tokens" in data:
+                            input_tokens = data.get("prompt_tokens", 0)
+                            output_tokens = data.get("completion_tokens", 0)
+                            logger.debug(f"[{correlation_id}] ✅ Tokens from top-level")
+                            # Found tokens - don't collect text!
+
+                        # Method 3: Collect text ONLY if we didn't get tokens (Extract content for token estimation)
+                        else:
+                            # Only collect if we haven't found usage yet
+                            if "choices" in data:
+                                for choice in data["choices"]:
+                                    if "delta" in choice and "content" in choice["delta"]:
+                                        content = choice["delta"]["content"]
+                                        if content:
+                                            output_text.append(content)
 
                     except json.JSONDecodeError:
-                        # Some lines may not be valid JSON (e.g., malformed)
-                        # This is OK - just skip token extraction for this line
                         pass
+                    except Exception as e:
+                        logger.warning(
+                            f"[{correlation_id}] Error parsing usage: {e}",
+                            extra={"correlation_id": correlation_id},
+                        )
 
             # ---------------------------------------------------------------------
-            # SUCCESS! Stream completed without errors
+            # SUCCESS! Stream completed without errors. Now, calculate cost with fallback estimation
             # ---------------------------------------------------------------------
-            # Record metrics
+            # If we didn't get token counts from stream, estimate them
+            if output_tokens == 0 and output_text:
+                full_output = "".join(output_text)
+                output_tokens = estimate_tokens_from_text(full_output)
+
+                logger.info(
+                    f"[{correlation_id}] Estimated output tokens from text: {output_tokens}",
+                    extra={"correlation_id": correlation_id, "output_tokens": output_tokens},
+                )
+
+            if input_tokens == 0:
+                input_tokens = estimate_tokens(messages)
+
+                logger.info(
+                    f"[{correlation_id}] Estimated input tokens: {input_tokens}",
+                    extra={"correlation_id": correlation_id, "input_tokens": input_tokens},
+                )
+
+            # Calculate cost only once (now using centralized cost_reader!)
             cost = calculate_query_cost(current_model, input_tokens, output_tokens)
             tracker.record_tokens(input_tokens, output_tokens)
             tracker.record_completion(cost)
 
             # Send final cost summary if we have token counts
             if input_tokens > 0 or output_tokens > 0:
-                # Calculate cost using pricing from config
-                cost = calculate_query_cost(current_model, input_tokens, output_tokens)
-
                 cost_event = {
                     "stream_metadata": {
                         "tier": current_tier,

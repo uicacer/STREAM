@@ -11,7 +11,6 @@ import logging
 
 from stream.middleware.config import DEFAULT_MODELS, LLM_JUDGE_ENABLED
 from stream.middleware.core.complexity_judge import (
-    get_cached_judgment,
     judge_complexity_with_keywords,
     judge_complexity_with_llm,
 )
@@ -111,37 +110,3 @@ def get_tier_for_query(query: str, user_preference: str = "auto") -> str:
 def get_model_for_tier(tier: str) -> str:
     """Get model name for a tier"""
     return DEFAULT_MODELS.get(tier, DEFAULT_MODELS["local"])
-
-
-def get_routing_reason(query: str, user_preference: str, tier: str) -> str:
-    """Get human-readable routing reason"""
-    if user_preference != "auto":
-        return f"User selected {tier} tier"
-
-    # Get complexity from cache or recalculate
-    cached = get_cached_judgment(query)
-    if cached:
-        complexity = cached
-        source = "(cached)"
-    elif LLM_JUDGE_ENABLED:
-        complexity = judge_complexity_with_llm(query)
-        source = "(LLM)"
-    else:
-        complexity = judge_complexity_with_keywords(query)
-        source = "(keywords)"
-
-    if not complexity:
-        return f"Routed to {tier.upper()}"
-
-    # Show preferred tier vs actual tier
-    if complexity == "low":
-        preferred = "local"
-    elif complexity == "medium":
-        preferred = "lakeshore"
-    else:
-        preferred = "cloud"
-
-    if tier == preferred:
-        return f"LLM judge: {complexity.upper()} complexity {source} → {tier.upper()}"
-    else:
-        return f"LLM judge: {complexity.upper()} complexity {source} → {preferred.upper()} unavailable, using {tier.upper()}"

@@ -83,21 +83,8 @@ TIERS = {
     "cloud": {"name": "Cloud APIs", "description": "Claude, GPT, etc."},
 }
 
-DEFAULT_MODELS = {"local": "local-llama", "lakeshore": "lakeshore-llama", "cloud": "cloud-claude"}
+DEFAULT_MODELS = {"local": "local-llama", "lakeshore": "lakeshore-qwen", "cloud": "cloud-claude"}
 
-# =============================================================================
-# MODEL COSTS (per token)
-# =============================================================================
-
-MODEL_COSTS = {
-    "local-llama-tiny": {"input": 0.0, "output": 0.0},
-    "local-llama": {"input": 0.0, "output": 0.0},
-    "local-llama-quality": {"input": 0.0, "output": 0.0},
-    "cloud-claude": {"input": 0.000003, "output": 0.000015},
-    "cloud-gpt": {"input": 0.00001, "output": 0.00003},
-    "cloud-gpt-cheap": {"input": 0.0000005, "output": 0.0000015},
-    "lakeshore-llama": {"input": 0.0000005, "output": 0.0000005},
-}
 
 # =============================================================================
 # OLLAMA MODELS
@@ -116,7 +103,7 @@ MODEL_CONTEXT_LIMITS = {
     "local-llama-tiny": {"total": 2048, "reserve_output": 300},
     "local-llama": {"total": 2048, "reserve_output": 300},
     "local-llama-quality": {"total": 8192, "reserve_output": 500},
-    "lakeshore-llama": {"total": 8192, "reserve_output": 500},
+    "lakeshore-qwen": {"total": 8192, "reserve_output": 500},
     "cloud-claude": {"total": 200000, "reserve_output": 4000},
     "cloud-gpt": {"total": 128000, "reserve_output": 4000},
     "cloud-gpt-cheap": {"total": 16385, "reserve_output": 1000},

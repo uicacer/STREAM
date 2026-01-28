@@ -22,7 +22,6 @@ API Documentation:
 """
 
 import logging
-from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
@@ -35,8 +34,8 @@ from stream.middleware.core.complexity_judge import (
 )
 from stream.middleware.core.query_router import get_model_for_tier, get_tier_for_query
 from stream.middleware.core.streaming import create_streaming_response
-from stream.middleware.utils.context_limit import get_tier_context_limits
-from stream.middleware.utils.token_estimator import check_context_limit, estimate_tokens
+from stream.middleware.utils.context_window import check_context_limit
+from stream.middleware.utils.token_estimator import estimate_tokens
 
 # Configure module logger
 logger = logging.getLogger(__name__)
@@ -116,8 +115,8 @@ class ChatCompletionRequest(BaseModel):
     temperature: float | None = Field(
         default=0.7,
         ge=0.0,  # Greater than or equal to 0.0
-        le=2.0,  # Less than or equal to 2.0
-        description="Sampling temperature (0.0-2.0)",
+        le=1.0,  # Less than or equal to 1.0
+        description="Sampling temperature (0.0-1.0)",
     )
 
     user: str | None = Field(
@@ -174,6 +173,21 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
           ],
           "temperature": 0.7
         }
+
+    There are 3 roles in chat messages:
+
+    1. user: The human asking questions (visible to everyone)
+    Example: {"role": "user", "content": "What is Python?"}
+
+    2. assistant: The AI's responses (visible to everyone)
+    Example: {"role": "assistant", "content": "Python is a programming language..."}
+
+    3. system: Instructions/configuration for the AI (HIDDEN from user, only AI sees it)
+    Example: {"role": "system", "content": "You are a helpful coding tutor."}
+
+    Key Difference:
+    - user & assistant = The visible conversation (back and forth)
+    - system = Hidden instructions that shape how the assistant behaves
 
     Example Response (SSE stream):
         data: {"stream_metadata": {"tier": "lakeshore", "model": "llama3.2:3b"}}
@@ -363,47 +377,47 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
         # Without "from e" the original traceback would be lost, making debugging harder
 
 
-# =============================================================================
-# CONTEXT LIMITS ENDPOINT
-# =============================================================================
+# # =============================================================================
+# # CONTEXT LIMITS ENDPOINT
+# # =============================================================================
 
 
-@router.get("/context/limits")
-async def get_context_limits():
-    """
-    Get context window limits for all tiers.
+# @router.get("/context/limits")
+# async def get_context_limits():
+#     """
+#     Get context window limits for all tiers.
 
-    This endpoint provides information about token limits for each tier,
-    which is useful for:
-    - UI warnings ("You're approaching the limit")
-    - Client-side truncation
-    - Tier selection
+#     This endpoint provides information about token limits for each tier,
+#     which is useful for:
+#     - UI warnings ("You're approaching the limit")
+#     - Client-side truncation
+#     - Tier selection
 
-    Returns:
-        Dictionary with limits organized by tier:
-        {
-          "success": true,
-          "limits": {
-            "local": {"total": 8000, "reserve_output": 2000},
-            "lakeshore": {"total": 8000, "reserve_output": 2000},
-            "cloud": {"total": 128000, "reserve_output": 4000}
-          },
-          "timestamp": "2026-01-23T12:34:56.789Z"
-        }
+#     Returns:
+#         Dictionary with limits organized by tier:
+#         {
+#           "success": true,
+#           "limits": {
+#             "local": {"total": 8000, "reserve_output": 2000},
+#             "lakeshore": {"total": 8000, "reserve_output": 2000},
+#             "cloud": {"total": 128000, "reserve_output": 4000}
+#           },
+#           "timestamp": "2026-01-23T12:34:56.789Z"
+#         }
 
-    Example:
-        GET /context/limits
+#     Example:
+#         GET /context/limits
 
-        Response:
-        {
-          "success": true,
-          "limits": {...},
-          "timestamp": "2026-01-23T12:34:56.789Z"
-        }
-    """
+#         Response:
+#         {
+#           "success": true,
+#           "limits": {...},
+#           "timestamp": "2026-01-23T12:34:56.789Z"
+#         }
+#     """
 
-    return {
-        "success": True,
-        "limits": get_tier_context_limits(),
-        "timestamp": datetime.now(UTC).isoformat(),
-    }
+#     return {
+#         "success": True,
+#         "limits": get_tier_context_limits(),
+#         "timestamp": datetime.now(UTC).isoformat(),
+#     }

@@ -65,7 +65,14 @@ def judge_complexity_with_llm(query: str) -> str | None:
     # Check cache first
     cached = get_cached_judgment(query)
     if cached:
-        print(f"🔍 JUDGE: Using cached result → {cached.upper()}")
+        logger.debug(
+            "🔍 Using cached complexity result",
+            # extra={
+            #     "correlation_id": correlation_id,
+            #     "complexity": "LOW",
+            #     "cached": True
+            # }
+        )
         return cached
 
     # Build judge prompt
@@ -73,6 +80,7 @@ def judge_complexity_with_llm(query: str) -> str | None:
 
     try:
         # Call LiteLLM with judge model
+        # This is needed for query complexity assessment
         with httpx.Client(timeout=JUDGE_TIMEOUT) as client:
             response = client.post(
                 f"{LITELLM_BASE_URL}/v1/chat/completions",

@@ -7,7 +7,7 @@ services:
   # ==========================================================================
   # PostgreSQL Database
   # ==========================================================================
-  postgres:
+  postgres: # This becomes DNS name
     image: postgres:16-alpine
     container_name: stream-postgres
     environment:
@@ -22,6 +22,9 @@ services:
     networks:
       - stream-network
     healthcheck:
+    # CMD-SHELL means to run the command in a shell
+    # We use CMD-SHELL not just CMD because we need shell features like pipes
+    # pipes means we can chain commands together. Like this:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
@@ -46,6 +49,7 @@ services:
     networks:
       - stream-network
     healthcheck:
+    # We only use CMD here because we don't need shell features
       test: ["CMD", "ollama", "list"]
       interval: 30s
       timeout: 10s

@@ -1,57 +1,44 @@
-# =============================================================================
-# STREAM Gateway - LiteLLM Configuration
-# =============================================================================
-# IMPORTANT NOTES:
-# 1. Costs here MUST match middleware/config.py MODEL_COSTS. Middleware is the single source of truth displayed to users
-# 2. Changes require: docker-compose restart litellm
-# 3. Model names are used by middleware for routing
-# 4. Timeouts prevent requests from hanging indefinitely
-# =============================================================================
+# ======================================================================================
+# STREAM Gateway - LiteLLM Configuration (https://docs.litellm.ai/docs/proxy/configs)
+# ======================================================================================
 
 model_list:
-
   # ===========================================================================
   # TIER 1: LOCAL MODELS (Ollama)
   # ===========================================================================
-
   - model_name: local-llama-tiny
     litellm_params:
       model: ollama/llama3.2:1b
       api_base: http://ollama:11434
+      # ↑ "ollama" = Docker service name from docker-compose.yml. Docker DNS (Domain Name System) resolves it automatically
     model_info:
-      mode: chat
       input_cost_per_token: 0.0
       output_cost_per_token: 0.0
-      # max_tokens: 4096
-    metadata:
-      tier: "local"
-      description: "Llama 3.2 1B - fastest local model"
+      # max_tokens: 4096 # Optional: override model default
+      # rpm: 60  # Rate limit (requests per minute)
+      # tpm: 100000  # Token limit (tokens per minute)
 
   - model_name: local-llama
     litellm_params:
       model: ollama/llama3.2:3b
       api_base: http://ollama:11434
     model_info:
-      mode: chat
       input_cost_per_token: 0.0
       output_cost_per_token: 0.0
       # max_tokens: 4096
-    metadata:
-      tier: "local"
-      description: "Llama 3.2 3B - default local model"
+      # rpm: 60  # Rate limit (requests per minute)
+      # tpm: 100000  # Token limit (tokens per minute)
 
   - model_name: local-llama-quality
     litellm_params:
       model: ollama/llama3.1:8b
       api_base: http://ollama:11434
     model_info:
-      mode: chat
       input_cost_per_token: 0.0
       output_cost_per_token: 0.0
       # max_tokens: 8192
-    metadata:
-      tier: "local"
-      description: "Llama 3.1 8B - highest quality local"
+      # rpm: 60  # Rate limit (requests per minute)
+      # tpm: 100000  # Token limit (tokens per minute)
 
   # ===========================================================================
   # TIER 2: CLOUD MODELS (Paid APIs)
@@ -60,60 +47,56 @@ model_list:
   - model_name: cloud-claude
     litellm_params:
       model: claude-sonnet-4-20250514
+      # NO api_base needed! LiteLLM automatically knows: api_base = https://api.openai.com/v1
       api_key: os.environ/ANTHROPIC_API_KEY
     model_info:
-      mode: chat
       input_cost_per_token: 0.000003    # $3 per 1M input tokens
       output_cost_per_token: 0.000015   # $15 per 1M output tokens
       # max_tokens: 8192
-    metadata:
-      tier: "cloud"
-      provider: "anthropic"
-      description: "Claude Sonnet 4 - best reasoning"
+      # rpm: 60  # Rate limit (requests per minute)
+      # tpm: 100000  # Token limit (tokens per minute)
 
   - model_name: cloud-gpt
     litellm_params:
       model: gpt-4-turbo-2024-04-09
       api_key: os.environ/OPENAI_API_KEY
     model_info:
-      mode: chat
       input_cost_per_token: 0.00001     # $10 per 1M input tokens
       output_cost_per_token: 0.00003    # $30 per 1M output tokens
       # max_tokens: 4096
-    metadata:
-      tier: "cloud"
-      provider: "openai"
-      description: "GPT-4 Turbo - versatile"
+      # rpm: 60  # Rate limit (requests per minute)
+      # tpm: 100000  # Token limit (tokens per minute)
 
   - model_name: cloud-gpt-cheap
     litellm_params:
       model: gpt-3.5-turbo-0125
       api_key: os.environ/OPENAI_API_KEY
     model_info:
-      mode: chat
       input_cost_per_token: 0.0000005   # $0.50 per 1M input tokens
       output_cost_per_token: 0.0000015  # $1.50 per 1M output tokens
       # max_tokens: 4096
-    metadata:
-      tier: "cloud"
-      provider: "openai"
-      description: "GPT-3.5 - budget cloud"
+      # rpm: 60  # Rate limit (requests per minute)
+      # tpm: 100000  # Token limit (tokens per minute)
 
   # ===========================================================================
   # TIER 3: CAMPUS GPU (Lakeshore vLLM)
   # ===========================================================================
 
 # LAKESHORE TIER
-  - model_name: lakeshore-llama
+  - model_name: lakeshore-qwen
     litellm_params:
-      model: openai/Qwen/Qwen2.5-1.5B-Instruct  # ← Update to 1.5B!
+      model: openai/Qwen/Qwen2.5-1.5B-Instruct
       api_base: http://host.docker.internal:8000/v1
+      # ↑ "host.docker.internal" = Special Docker DNS
+      # Reaches outside container to host machine
+      # Host has SSH tunnel to Lakeshore
       api_key: dummy
     model_info:
-      mode: chat
       input_cost_per_token: 0.0000005
       output_cost_per_token: 0.0000005
       # max_tokens: 2048
+      # rpm: 60  # Rate limit (requests per minute)
+      # tpm: 100000  # Token limit (tokens per minute)
 
 # =============================================================================
 # ROUTER SETTINGS
@@ -124,7 +107,7 @@ router_settings:
     local-llama-tiny: 60    # Allow time for model loading
     local-llama: 90
     local-llama-quality: 120
-    lakeshore-llama: 120
+    lakeshore-qwen: 120
     cloud-claude: 120
     cloud-gpt: 120
 
@@ -138,13 +121,10 @@ general_settings:
 
   # Cost tracking (ENABLED)
   track_cost_per_deployment: true
-  store_model_in_db: true
+  store_model_in_db: true # Store model details in DB for cost tracking
 
   # Verbose logging
   set_verbose: false  # Set to true only for debugging
-
-  # Rate limiting
-  rpm_limit: 60  # Requests per minute (global across all users)
 
   # For simple in-memory cache:
   cache: true
@@ -157,8 +137,6 @@ general_settings:
   #   type: redis
   #   host: redis
   #   port: 6379
-
-
 
   # Budget settings (cost control)
   max_budget: 100         # Maximum spend in USD

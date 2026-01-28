@@ -52,7 +52,7 @@ console = Console()
 # =============================================================================
 # Configure logging (JSON for production, human-readable for development)
 LOG_FORMAT_TYPE = os.getenv("LOG_FORMAT", "json")  # "json" or "human"
-configure_logging(LOG_LEVEL, LOG_FORMAT, LOG_FORMAT_TYPE)  # ← ONE LINE!
+configure_logging(LOG_LEVEL, LOG_FORMAT, LOG_FORMAT_TYPE)
 
 logger = logging.getLogger(__name__)
 
@@ -62,11 +62,36 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 
+# async context manager
+# Purpose: Manages asynchronous resource setup (e.g., connecting) and
+# teardown (e.g., disconnecting) in non-blocking code.
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan manager."""
+    """
+    Application lifespan manager.
+
+    Manages async resource setup and teardown.
+
+    Startup tasks (before yield):
+    1. Initialize database connection pool
+    2. Load model pricing from LiteLLM config
+    3. Pull Ollama models if missing
+    4. Start background tier health checks
+
+    Shutdown tasks (after yield):
+    1. Stop background health checks
+    2. Close database connections
+
+    The "yield" statement means:
+    - "Pause here and let the application run"
+    - "When application stops, continue to cleanup code"
+
+    Args:
+    app: FastAPI app instance (required by FastAPI, not used here)
+
+    """
     await lifecycle.startup()
-    yield
+    yield  # yield here means "pause and wait for the application to finish"
     await lifecycle.shutdown()
 
 
@@ -78,7 +103,7 @@ app = FastAPI(
     title=SERVICE_NAME,
     version=SERVICE_VERSION,
     description=SERVICE_DESCRIPTION,
-    debug=DEBUG,
+    debug=DEBUG,  # This means debug mode is enabled
     docs_url="/docs" if DEBUG else None,
     redoc_url="/redoc" if DEBUG else None,
     lifespan=lifespan,
@@ -88,19 +113,114 @@ app = FastAPI(
 # MIDDLEWARE
 # =============================================================================
 
+"""
+app.add_middleware():
+---------------------
+Registers a middleware class (CORSMiddleware).
+
+What is CORS?
+-------------
+CORS = Cross-Origin Resource Sharing
+
+Problem: Browsers block requests from different origins by default
+Example:
+  Frontend: http://localhost:8501 (Streamlit)
+  Middleware: http://localhost:5000 (FastAPI)
+  Browser: "Different ports = different origins, BLOCKED!" ❌
+
+Solution: CORS headers tell browser "this cross-origin request is allowed"
+
+CORS Parameters:
+----------------
+- allow_origins: Which domains can make requests
+  ["http://localhost:8501"] = Only Streamlit can call our API
+  ["*"] = Anyone can call (insecure, avoid in production)
+
+- allow_credentials: Allow cookies/auth headers
+  True = Browser can send credentials (needed for auth)
+  False = No credentials allowed
+
+- allow_methods: Which HTTP methods allowed
+  ["*"] = All methods (GET, POST, PUT, DELETE, etc.)
+  ["GET", "POST"] = Only these methods
+
+- allow_headers: Which headers allowed
+  ["*"] = All headers
+  ["Content-Type"] = Only this header
+
+How it works:
+-------------
+Browser sends "preflight" request (OPTIONS):
+  OPTIONS /v1/chat/completions
+  Origin: http://localhost:8501
+
+CORSMiddleware responds:
+  Access-Control-Allow-Origin: http://localhost:8501
+  Access-Control-Allow-Methods: *
+  Access-Control-Allow-Headers: *
+
+Browser: "OK, this cross-origin request is safe" ✓
+Then browser sends actual request (POST)
+"""
+
+# IMPORTANT: CORS settings should be reviewed before deploying to production
+# In particular, review the allow_origins setting to avoid security issues.
+# NOTE: Using ["*"] is not recommended for production.
+# Consider using a specific list of allowed origins.
+# Example:
+# CORS_ORIGINS = [
+#     "http://localhost:8501",
+#     "https://your-frontend-domain.com",
+# ]
+
+# NOTE: middleware runs automatically for every request. No explicit function call
+# needed for it to run
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=CORS_ORIGINS,
-    allow_credentials=CORS_ALLOW_CREDENTIALS,
-    allow_methods=CORS_ALLOW_METHODS,
-    allow_headers=CORS_ALLOW_HEADERS,
+    allow_origins=CORS_ORIGINS,  # Which domains can call our API
+    allow_credentials=CORS_ALLOW_CREDENTIALS,  # Allow cookies/auth
+    allow_methods=CORS_ALLOW_METHODS,  # Which HTTP methods are allowed
+    allow_headers=CORS_ALLOW_HEADERS,  # Which headers are allowed
 )
 
 
+# Custom middleware to add correlation ID
+# This function is NEVER called explicitly!
+# FastAPI calls it automatically because of the @app.middleware decorator
 @app.middleware("http")
 async def add_correlation_id(request: Request, call_next):
-    """Add correlation ID to every request."""
+    """
+    Add correlation ID to every request.
+
+    This middleware:
+    1. Generates or extracts correlation ID (UUID)
+    2. Stores in request.state for use by route handlers
+    3. Logs request start
+    4. Calls next handler
+    5. Adds correlation ID to response headers
+    6. Logs request completion with duration
+
+    Args:
+        request: Incoming HTTP request
+        call_next: Function to call next middleware/handler
+
+    Returns:
+        HTTP response (possibly modified by this middleware)
+
+
+    Notes:
+    1) This middleware is applied to all incoming requests.
+    2) call_next is a function that takes the request as input and returns the response.
+    """
+    # Extract correlation ID from header or generate new UUID
+    # uuid library generates random UUIDs that are unique across space and time
+    # By space and time we mean across different machines and at different times
+    # So no 2 UUIDs are the same wherever they are generated
+    # uuid stands for Universally Unique Identifier
     correlation_id = request.headers.get("X-Correlation-ID", str(uuid.uuid4()))
+
+    # Store in request.state (accessible in all route handlers)
     request.state.correlation_id = correlation_id
     request.state.start_time = datetime.now(UTC)
 
@@ -109,10 +229,18 @@ async def add_correlation_id(request: Request, call_next):
         extra={"correlation_id": correlation_id},
     )
 
+    # Call next middleware or route handler
+    # This is where the actual request processing happens
     response = await call_next(request)
+
+    # Add correlation ID to response headers
+    # Allows client to track their request
     response.headers["X-Correlation-ID"] = correlation_id
 
+    # Calculate request duration. This is needed for logging
     duration = (datetime.now(UTC) - request.state.start_time).total_seconds()
+
+    # Log request completion with status and duration
     logger.info(
         f"[{correlation_id}] {response.status_code} ({duration:.3f}s)",
         extra={
@@ -132,21 +260,56 @@ async def add_correlation_id(request: Request, call_next):
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    """Global exception handler."""
+    """
+    Global exception handler for unhandled errors.
+
+    Catches any exception not handled by route handlers.
+    Logs the error with full traceback and returns formatted response.
+
+    In production (DEBUG=False):
+    - Hides error details from user (security)
+    - Returns generic message
+
+    In development (DEBUG=True):
+    - Shows full error message
+    - Helps with debugging
+
+    Args:
+        request: Current request (contains correlation_id in request.state)
+        exc: The exception that was raised
+
+    Returns:
+        JSONResponse with error details and 500 status code
+
+    Example:
+        Route handler:
+            def chat():
+                raise ValueError("Invalid model")
+
+        This handler catches it:
+            → Logs: [abc-123] Unhandled exception: Invalid model
+            → Returns: {"error": "Internal server error", ...}
+    """
+
+    # Get correlation ID from request state (added by middleware)
+    # If not found (shouldn't happen), use "unknown"
     correlation_id = getattr(request.state, "correlation_id", "unknown")
 
+    # Log error with full traceback
+    # exc_info=True includes full stack trace for debugging
     logger.error(
         f"[{correlation_id}] Unhandled exception: {str(exc)}",
-        exc_info=True,
+        exc_info=True,  # Include full traceback
         extra={"correlation_id": correlation_id},
     )
 
+    # Return formatted error response
     return JSONResponse(
-        status_code=500,
+        status_code=500,  # Internal Server Error
         content={
             "error": "Internal server error",
-            "message": str(exc) if DEBUG else "An error occurred",
-            "correlation_id": correlation_id,
+            "message": str(exc) if DEBUG else "An error occurred",  # Hide details in production
+            "correlation_id": correlation_id,  # Allow user to reference in support
         },
     )
 
@@ -187,7 +350,17 @@ async def root():
 
 
 def main():
-    """Entry point for local development."""
+    """
+    Entry point for local development.
+
+    Starts uvicorn server with auto-reload enabled.
+
+    Usage:
+        python -m stream.middleware.app
+
+    Or:
+        uvicorn stream.middleware.app:app --reload
+    """
     console.print()
     console.print(
         Panel.fit(
@@ -198,14 +371,16 @@ def main():
     )
     console.print()
 
+    # Start uvicorn server
     uvicorn.run(
-        "stream.middleware.app:app",
+        "stream.middleware.app:app",  # Python path to app
         host=MIDDLEWARE_HOST,
         port=MIDDLEWARE_PORT,
         reload=RELOAD,
-        log_level=LOG_LEVEL.lower(),
+        log_level=False,  # LOG_LEVEL.lower(),
     )
 
 
+# If this file is run directly (not imported)
 if __name__ == "__main__":
     main()
