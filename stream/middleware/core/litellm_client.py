@@ -109,7 +109,7 @@ async def forward_to_litellm(
             # Check for HTTP errors (4xx, 5xx)
             if response.status_code != 200:
                 # Read error details from response body
-                error_text = await response.aread()
+                error_text = await response.aread()  # aread means "asynchronous read"
                 error_message = error_text.decode("utf-8")
 
                 logger.error(
@@ -131,7 +131,7 @@ async def forward_to_litellm(
             async for line in response.aiter_lines():
                 # Filter out empty lines (SSE protocol allows them)
                 if line.strip():
-                    yield line
+                    yield line  # Forward to streaming.py
 
     except httpx.TimeoutException as e:
         # Request took longer than REQUEST_TIMEOUT seconds
@@ -155,7 +155,7 @@ async def forward_to_litellm(
                 "error": str(e),
             },
         )
-        # FIX: Add exception chaining (B904)
+        # Add exception chaining (B904)
         raise HTTPException(
             status_code=503,  # Service Unavailable
             detail="LiteLLM gateway unavailable - service may be down",

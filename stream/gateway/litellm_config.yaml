@@ -82,14 +82,16 @@ model_list:
   # TIER 3: CAMPUS GPU (Lakeshore vLLM)
   # ===========================================================================
 
-# LAKESHORE TIER
+# LAKESHORE TIER (via Proxy)
   - model_name: lakeshore-qwen
     litellm_params:
       model: openai/Qwen/Qwen2.5-1.5B-Instruct
-      api_base: http://host.docker.internal:8000/v1
-      # ↑ "host.docker.internal" = Special Docker DNS
-      # Reaches outside container to host machine
-      # Host has SSH tunnel to Lakeshore
+      api_base: http://lakeshore-proxy:8001/v1
+      # ↑ "lakeshore-proxy" = Docker service name for the Lakeshore proxy
+      # The proxy handles routing via either:
+      #   - Globus Compute (preferred): Submits jobs to remote endpoint
+      #   - SSH Port Forward (fallback): Forwards to host.docker.internal:8000
+      # Mode is configured via USE_GLOBUS_COMPUTE environment variable
       api_key: dummy
     model_info:
       input_cost_per_token: 0.0000005

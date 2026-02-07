@@ -86,16 +86,16 @@ def get_model_cost(model: str) -> dict:
     return pricing.get(model, {"input": 0.0, "output": 0.0})
 
 
-def get_all_model_costs() -> dict:
-    """
-    Get pricing for all models.
+# def get_all_model_costs() -> dict:
+#     """
+#     Get pricing for all models.
 
-    Returns:
-        dict: All model pricing
+#     Returns:
+#         dict: All model pricing
 
-    Example:
-        >>> all_costs = get_all_model_costs()
-        >>> all_costs.keys()
-        dict_keys(['local-llama', 'cloud-claude', ...])
-    """
-    return load_model_pricing()
+#     Example:
+#         >>> all_costs = get_all_model_costs()
+#         >>> all_costs.keys()
+#         dict_keys(['local-llama', 'cloud-claude', ...])
+#     """
+#     return load_model_pricing()

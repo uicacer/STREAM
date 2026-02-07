@@ -56,6 +56,39 @@ services:
       retries: 3
 
   # ==========================================================================
+  # Lakeshore Proxy - Routes requests via Globus Compute or SSH
+  # ==========================================================================
+  lakeshore-proxy:
+    build:
+      context: .
+      dockerfile: Dockerfile.proxy.simple
+    container_name: stream-lakeshore-proxy
+    ports:
+      - "8001:8001"  # Proxy port (internal service, not usually accessed from host)
+    env_file:
+      - .env
+    environment:
+      - USE_GLOBUS_COMPUTE=${USE_GLOBUS_COMPUTE}
+      - GLOBUS_COMPUTE_ENDPOINT_ID=${GLOBUS_COMPUTE_ENDPOINT_ID}
+      - VLLM_SERVER_URL=${VLLM_SERVER_URL}
+      - LAKESHORE_VLLM_ENDPOINT=${LAKESHORE_VLLM_ENDPOINT}
+      - PROXY_HOST=0.0.0.0
+      - PROXY_PORT=8001
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    volumes:
+      # Mount Globus credentials from host so the proxy can authenticate
+      - ~/.globus_compute:/root/.globus_compute:ro
+    restart: unless-stopped
+    networks:
+      - stream-network
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8001/health')\" || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # ==========================================================================
   # LiteLLM - AI Gateway
   # ==========================================================================
   litellm:
@@ -73,7 +106,7 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
 
-      # Database connection (internal Docker network)
+      # Database connection (internal Docker network). LiteLLM needs DATABASE_URL to know where to log
       - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
 
       # Ollama connection (internal Docker network)
@@ -83,6 +116,8 @@ services:
       postgres:
         condition: service_healthy
       ollama:
+        condition: service_healthy
+      lakeshore-proxy:
         condition: service_healthy
     restart: unless-stopped
     networks:
@@ -129,6 +164,8 @@ services:
       litellm:
         condition: service_healthy
       ollama:
+        condition: service_healthy
+      lakeshore-proxy:
         condition: service_healthy
     restart: unless-stopped # This will always restart the container unless you explicitly stop it
     networks:

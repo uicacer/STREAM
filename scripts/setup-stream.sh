@@ -571,7 +571,7 @@ docker-compose up -d --build > "$BUILD_LOG" 2>&1 &
 BUILD_PID=$!
 
 # Animated progress indicator with status updates
-SERVICES_LIST=("postgres" "ollama" "litellm" "middleware" "frontend")
+SERVICES_LIST=("postgres" "ollama" "lakeshore-proxy" "litellm" "middleware" "frontend")
 SPIN_CHARS='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
 CURRENT_SERVICE=""
 i=0
@@ -583,7 +583,7 @@ echo ""
 while kill -0 $BUILD_PID 2>/dev/null; do
     # Extract current service being built from log
     if [ -f "$BUILD_LOG" ]; then
-        LATEST_SERVICE=$(grep -oE "Building (stream-)?(postgres|ollama|litellm|middleware|frontend)" "$BUILD_LOG" | tail -1 | awk '{print $NF}')
+        LATEST_SERVICE=$(grep -oE "Building (stream-)?(postgres|ollama|lakeshore-proxy|litellm|middleware|frontend)" "$BUILD_LOG" | tail -1 | awk '{print $NF}')
         if [ -n "$LATEST_SERVICE" ] && [ "$LATEST_SERVICE" != "$CURRENT_SERVICE" ]; then
             # Clear current line and show completion for previous service
             if [ -n "$CURRENT_SERVICE" ]; then
@@ -652,7 +652,7 @@ echo ""
 sleep 10
 
 # List of services to check
-SERVICES=("ollama" "postgres" "litellm" "middleware" "frontend")
+SERVICES=("ollama" "postgres" "lakeshore-proxy" "litellm" "middleware" "frontend")
 ALL_HEALTHY=true
 
 # Check each service

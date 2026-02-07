@@ -248,7 +248,7 @@ class ChatHandler:
                         content = delta.get("content", "")
                         if content:
                             full_text += content
-                            yield content
+                            yield content  # The actual response. For example: # "Python", " is", " a", ...
 
                     # Extract usage (fallback if not in metadata)
                     if "usage" in data and input_tokens == 0:

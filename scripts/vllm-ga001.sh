@@ -1,11 +1,11 @@
 #!/bin/bash
 #SBATCH --job-name=stream-vllm-ga-001
 #SBATCH --partition=batch_gpu
-#SBATCH --nodelist=ga-001              # ← Run on specific node!
-#SBATCH --gres=gpu:1
+#SBATCH --nodelist=ga-001              # Run on specific node!
+#SBATCH --gres=gpu:3g.40gb:1
 #SBATCH --cpus-per-task=4
-#SBATCH --mem=32G
-#SBATCH --time=00:30:00
+#SBATCH --mem=40G
+#SBATCH --time=02:00:00
 #SBATCH --output=logs/%x-%j.log
 
 # Configuration
@@ -60,3 +60,18 @@ apptainer exec --nv ${CONTAINER} \
 echo "=========================================="
 echo "Service stopped: $(date)"
 echo "=========================================="
+
+
+# Note:
+
+# Why 4 CPUs for vLLM?
+# Model Loading: Parallel data loading and preprocessing
+# Tokenization: CPU-bound operation, benefits from parallelism
+# Request Batching: Scheduling and queue management
+# API Server: FastAPI/uvicorn workers for concurrent requests
+# Result Processing: Post-processing and serialization
+
+# Typical Configuration:
+# Small Models (<7B): 2-4 CPUs sufficient
+# Medium Models (7B-13B): 4-8 CPUs recommended
+# Large Models (>13B): 8-16 CPUs for optimal throughput

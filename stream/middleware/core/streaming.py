@@ -148,9 +148,13 @@ async def create_streaming_response(
             # ---------------------------------------------------------------------
             # Stream from LiteLLM
             # ---------------------------------------------------------------------
+            # All tiers (local, lakeshore, cloud) route through LiteLLM gateway
+            # For Lakeshore: LiteLLM → Lakeshore Proxy → Globus Compute OR SSH
+            # For Local: LiteLLM → Ollama
+            # For Cloud: LiteLLM → Anthropic/OpenAI APIs
+            #
             # forward_to_litellm is an async generator that yields SSE lines
-            # we use async for here because we want to process each line as it arrives
-            # and we are are calling forward_to_litellm which is an async function
+            # we use 'async for' here because we want to process each line as it arrives
             async for line in forward_to_litellm(
                 model=current_model,
                 messages=messages,
@@ -163,7 +167,7 @@ async def create_streaming_response(
                     first_chunk = False
                 # Forward the line to the client immediately
                 # This provides real-time streaming (no buffering)
-                yield f"{line}\n\n"
+                yield f"{line}\n\n"  # Add extra newline for SSE format
 
                 # ---------------------------------------------------------------------
                 # Parse Token Usage (for cost tracking)
@@ -192,14 +196,14 @@ async def create_streaming_response(
                             if usage.get("prompt_tokens") is not None:
                                 input_tokens = usage.get("prompt_tokens", 0)
                                 output_tokens = usage.get("completion_tokens", 0)
-                                logger.debug(f"[{correlation_id}] ✅ Tokens from usage object")
+                                logger.debug(f"[{correlation_id}] Tokens from usage object")
                                 # Found tokens - don't collect text!
 
                         # Method 2: Some providers put tokens at top level (not nested in "usage")
                         elif "prompt_tokens" in data:
                             input_tokens = data.get("prompt_tokens", 0)
                             output_tokens = data.get("completion_tokens", 0)
-                            logger.debug(f"[{correlation_id}] ✅ Tokens from top-level")
+                            logger.debug(f"[{correlation_id}] Tokens from top-level")
                             # Found tokens - don't collect text!
 
                         # Method 3: Collect text ONLY if we didn't get tokens (Extract content for token estimation)

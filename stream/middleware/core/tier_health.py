@@ -16,7 +16,6 @@ import httpx
 from stream.middleware.config import (
     DEFAULT_MODELS,
     HEALTH_CHECK_TTL,
-    LAKESHORE_VLLM_ENDPOINT,
     LITELLM_API_KEY,
     LITELLM_BASE_URL,
     OLLAMA_MODELS,
@@ -61,21 +60,37 @@ def check_tier_health(tier: str) -> tuple[bool, str | None]:
 
                 return True, None
 
-        # LAKESHORE: Check vLLM
+        # LAKESHORE: Check proxy service WITH RETRY
+        # The proxy handles routing via Globus Compute or SSH port forwarding
         elif tier == "lakeshore":
-            if not LAKESHORE_VLLM_ENDPOINT:
-                return False, "No Lakeshore endpoint configured in .env"
+            # Retry 3 times with delays (proxy might be starting up)
+            for attempt in range(3):
+                try:
+                    with httpx.Client(timeout=10.0) as client:
+                        # Check if the Lakeshore proxy is healthy
+                        response = client.get("http://lakeshore-proxy:8001/health")
 
-            with httpx.Client(timeout=10.0) as client:
-                response = client.get(
-                    f"{LAKESHORE_VLLM_ENDPOINT}/v1/models",
-                    headers={"Content-Type": "application/json"},
-                )
+                        if response.status_code == 200:
+                            # Proxy is healthy
+                            # The proxy's health endpoint tells us if it's configured properly
+                            health_data = response.json()
+                            if health_data.get("status") == "healthy":
+                                return True, None
+                            else:
+                                return False, "Lakeshore proxy unhealthy"
+                        else:
+                            return (
+                                False,
+                                f"Lakeshore proxy not responding (HTTP {response.status_code})",
+                            )
 
-                if response.status_code == 200:
-                    return True, None
-                else:
-                    return False, f"vLLM not responding (HTTP {response.status_code})"
+                except httpx.ConnectError:
+                    if attempt < 2:  # Don't sleep on last attempt
+                        time.sleep(2)  # Wait 2 seconds before retrying
+                        continue
+                    return False, "Cannot connect to Lakeshore proxy. Is the proxy service running?"
+                except Exception as e:
+                    return False, f"Lakeshore proxy error: {str(e)}"
 
         # CLOUD: Test through LiteLLM WITH RETRY
         elif tier == "cloud":
@@ -133,6 +148,7 @@ def update_tier_health(tier: str):
     status = "✅" if is_available else "❌"
     model = DEFAULT_MODELS.get(tier, "unknown")
 
+    # Display tier status
     if is_available:
         print(f"{status} {tier.upper()} ({model}) is available")
     else:

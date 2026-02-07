@@ -15,10 +15,25 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Install system-level dependencies
-# - curl: for health checks (testing if service is running)
-# - Clean up apt cache to reduce image size
+# RUN apt-get update && apt-get install -y \
+#     curl \
+#     && rm -rf /var/lib/apt/lists/*
+# =============================================================================
+# Install System Dependencies
+# =============================================================================
+# What we're installing:
+#   - curl:         For health checks (Docker uses this to test if service is alive)
+#   - gcc:          C compiler (needed to compile psutil and other C extensions)
+#   - python3-dev:  Python development headers (needed for C extension compilation)
+#
+# Why both frontend and middleware need these:
+#   Both services install the same dependencies from pyproject.toml, which
+#   includes globus-compute-sdk → psutil (requires compilation)
+# =============================================================================
 RUN apt-get update && apt-get install -y \
     curl \
+    gcc \
+    python3-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy Python dependency file first (for Docker layer caching)

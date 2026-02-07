@@ -55,7 +55,21 @@ CORS_ALLOW_HEADERS = ["*"]
 OLLAMA_PORT = int(os.getenv("OLLAMA_PORT", "11434"))
 LITELLM_BASE_URL = os.getenv("LITELLM_BASE_URL")
 LITELLM_API_KEY = os.getenv("LITELLM_MASTER_KEY")
-LAKESHORE_VLLM_ENDPOINT = os.getenv("LAKESHORE_VLLM_ENDPOINT")
+
+# Lakeshore connection configuration
+# Two modes: SSH port forwarding (legacy) or Globus Compute (preferred)
+LAKESHORE_VLLM_ENDPOINT = os.getenv(
+    "LAKESHORE_VLLM_ENDPOINT"
+)  # SSH port forward URL (e.g., http://host.docker.internal:8000)
+USE_GLOBUS_COMPUTE = (
+    os.getenv("USE_GLOBUS_COMPUTE", "true").lower() == "true"
+)  # Enable Globus Compute mode
+GLOBUS_COMPUTE_ENDPOINT_ID = os.getenv(
+    "GLOBUS_COMPUTE_ENDPOINT_ID"
+)  # Globus endpoint ID for Lakeshore
+VLLM_SERVER_URL = os.getenv(
+    "VLLM_SERVER_URL", "http://ga-001:8000"
+)  # vLLM URL on Lakeshore (for Globus remote execution)
 
 # =============================================================================
 # HEALTH CHECKS

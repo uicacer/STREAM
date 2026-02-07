@@ -11,6 +11,27 @@ FROM python:3.11-slim
 # Set working directory
 WORKDIR /app
 
+# =============================================================================
+# Install Build Tools (for Python packages with C extensions)
+# =============================================================================
+# Some Python packages (like psutil, required by globus-compute-sdk) contain
+# C code that must be compiled during installation. The slim image doesn't
+# include compilers by default to keep it small.
+#
+# What we're installing:
+#   - gcc:          GNU C Compiler - compiles C code into machine code
+#   - python3-dev:  Python header files - needed for C extensions to interface
+#                   with Python's internal APIs
+#
+# Why we clean up afterward:
+#   - rm -rf /var/lib/apt/lists/*  removes package lists to save ~40MB
+#   - These lists are only needed during apt-get install
+# =============================================================================
+RUN apt-get update && apt-get install -y \
+    gcc \
+    python3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 # Step 1: Copy dependency manifest
 COPY pyproject.toml ./
 
