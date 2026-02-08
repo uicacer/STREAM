@@ -5,8 +5,12 @@
 # =============================================================================
 
 import logging
+import os
+import subprocess
 import time
+import traceback
 
+import httpx
 import streamlit as st
 from config import (
     APP_ICON,
@@ -17,14 +21,143 @@ from config import (
 
 from stream.sdk.python.chat_handler import ChatHandler
 
-# Configure logging to see SDK debug messages
+# Configure logging - use INFO level to reduce noise
 logging.basicConfig(
-    level=logging.DEBUG, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
+# Silence noisy libraries
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 # =============================================================================
 # GLOBUS AUTHENTICATION HELPER
 # =============================================================================
+
+
+def restart_lakeshore_proxy() -> tuple[bool, str]:
+    """
+    Restart the lakeshore-proxy Docker container.
+
+    This is needed when the container was started before credentials existed,
+    because Docker's volume mount doesn't pick up files created after container start.
+
+    Returns:
+        (success: bool, message: str)
+    """
+    logger = logging.getLogger(__name__)
+
+    try:
+        logger.info("🔄 Restarting lakeshore-proxy container...")
+
+        # Get project root directory (parent of frontends/streamlit)
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+        # Try docker-compose first (preferred)
+        result = subprocess.run(
+            ["docker-compose", "restart", "lakeshore-proxy"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            cwd=project_root,
+        )
+
+        if result.returncode == 0:
+            logger.info("✅ Container restarted successfully")
+            time.sleep(3)  # Wait for container to be healthy
+            return True, "Container restarted successfully"
+
+        # Try docker directly as fallback
+        result = subprocess.run(
+            ["docker", "restart", "stream-lakeshore-proxy"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if result.returncode == 0:
+            logger.info("✅ Container restarted successfully (via docker)")
+            time.sleep(3)
+            return True, "Container restarted successfully"
+
+        logger.error(f"❌ Failed to restart container: {result.stderr}")
+        return False, f"Failed to restart: {result.stderr}"
+
+    except subprocess.TimeoutExpired:
+        logger.error("❌ Container restart timed out")
+        return False, "Container restart timed out"
+    except FileNotFoundError:
+        logger.error("❌ docker-compose not found")
+        return False, "docker-compose not found"
+    except Exception as e:
+        logger.error(f"❌ Failed to restart container: {e}")
+        return False, f"Failed to restart: {str(e)}"
+
+
+def reload_proxy_credentials() -> tuple[bool, str]:
+    """
+    Tell the lakeshore-proxy Docker container to reload Globus credentials.
+
+    After the user authenticates on the host machine, the credentials are saved
+    to ~/.globus_compute/storage.db. The Docker container needs to reload these
+    credentials because it caches the GlobusApp state.
+
+    If reload fails because the credentials file doesn't exist in the container
+    (happens when container was started before auth), automatically restart
+    the container to pick up the newly created file.
+
+    Returns:
+        (success: bool, message: str)
+    """
+    logger = logging.getLogger(__name__)
+    proxy_url = os.getenv("LAKESHORE_PROXY_URL", "http://localhost:8001")
+
+    try:
+        logger.info(f"🔄 Reloading proxy credentials at {proxy_url}/reload-auth")
+
+        with httpx.Client(timeout=10.0) as client:
+            response = client.post(f"{proxy_url}/reload-auth")
+
+            if response.status_code == 200:
+                result = response.json()
+                if result.get("success"):
+                    logger.info(f"✅ Proxy credentials reloaded: {result.get('message')}")
+                    return True, result.get("message", "Credentials reloaded")
+
+                error_msg = result.get("message", "Reload failed")
+                logger.warning(f"⚠️ Proxy reload reported failure: {error_msg}")
+
+                # Check if this is the "database file not found" error
+                # This happens when container was started before credentials existed
+                if "unable to open database file" in error_msg.lower():
+                    logger.info(
+                        "🔄 Credentials file not visible to container, restarting container..."
+                    )
+                    restart_success, restart_msg = restart_lakeshore_proxy()
+                    if restart_success:
+                        # Try reload again after restart
+                        logger.info("🔄 Retrying credential reload after container restart...")
+                        response2 = client.post(f"{proxy_url}/reload-auth")
+                        if response2.status_code == 200:
+                            result2 = response2.json()
+                            if result2.get("success"):
+                                logger.info("✅ Credentials reloaded after container restart!")
+                                return True, "Credentials reloaded (container was restarted)"
+                        # Even if reload fails after restart, the container should now see the file
+                        return True, "Container restarted - credentials should be available"
+
+                    return False, f"Container restart failed: {restart_msg}"
+
+                return False, error_msg
+
+            logger.error(f"❌ Proxy reload failed with status {response.status_code}")
+            return False, f"Proxy returned status {response.status_code}"
+
+    except httpx.ConnectError:
+        # Proxy not running - might be okay if using SSH mode
+        logger.warning("Could not connect to lakeshore-proxy (might not be running)")
+        return True, "Proxy not reachable (may be using SSH mode)"
+    except Exception as e:
+        logger.error(f"❌ Failed to reload proxy credentials: {e}")
+        return False, f"Failed to reload: {str(e)}"
 
 
 def authenticate_globus_compute() -> tuple[bool, str]:
@@ -40,6 +173,7 @@ def authenticate_globus_compute() -> tuple[bool, str]:
     6. The OAuth code is captured automatically (no manual copying!)
     7. Code is exchanged for access tokens
     8. Tokens are saved to ~/.globus_compute/ for future use
+    9. **NEW**: Tells the Docker proxy to reload the credentials
 
     This is TRUE zero-friction - you only interact with the browser,
     no terminal commands or code pasting required!
@@ -47,9 +181,22 @@ def authenticate_globus_compute() -> tuple[bool, str]:
     Returns:
         (success: bool, message: str)
     """
+    logger = logging.getLogger(__name__)
+
     try:
+        # First check if already authenticated
+        from stream.middleware.core.globus_auth import is_authenticated
+
+        if is_authenticated():
+            logger.info("✓ Already authenticated with Globus Compute")
+            # Still reload proxy credentials in case container has stale state
+            reload_proxy_credentials()
+            return True, "✅ Already authenticated! Your credentials are valid."
+
         # Import our custom zero-friction OAuth implementation
         from stream.middleware.core.globus_auth import authenticate_with_browser_callback
+
+        logger.info("Starting Globus authentication flow...")
 
         # This handles the entire OAuth flow automatically
         # It will:
@@ -59,25 +206,117 @@ def authenticate_globus_compute() -> tuple[bool, str]:
         # - Exchange it for tokens
         # - Save the tokens to disk
         success, message = authenticate_with_browser_callback()
+
+        if success:
+            logger.info(f"Authentication successful: {message}")
+
+            # IMPORTANT: Tell the Docker proxy to reload credentials
+            # The proxy caches the GlobusApp state, so it needs to be notified
+            # that new credentials are available
+            reload_success, reload_msg = reload_proxy_credentials()
+            if reload_success:
+                logger.info(f"Proxy notified: {reload_msg}")
+            else:
+                logger.warning(f"Proxy notification failed: {reload_msg}")
+                # Don't fail overall auth - credentials are saved, just proxy needs restart
+        else:
+            logger.error(f"Authentication failed: {message}")
+
         return success, message
 
     except ImportError as e:
         # Fallback: If our custom module isn't available, explain the issue
-        import traceback
-
         error_details = traceback.format_exc()
+        logger.error(f"Import error: {error_details}")
         return False, f"❌ Zero-friction auth module not available: {str(e)}\n{error_details}"
 
     except Exception as e:
         # Any other error during authentication
-        import traceback
-
         error_details = traceback.format_exc()
+        logger.error(f"Authentication error: {error_details}")
         return False, f"❌ Authentication failed: {str(e)}\n{error_details}"
 
 
 MAX_DISPLAY_MESSAGES = 100  # UI display limit
 MAX_SEND_MESSAGES = 50  # Messages sent to middleware (middleware will trim further if needed)
+
+# =============================================================================
+# ENGAGING PROGRESS MESSAGES
+# =============================================================================
+
+# Tier-specific connection messages
+TIER_MESSAGES = {
+    "local": {
+        "icon": "🏠",
+        "name": "Local AI",
+        "connecting": "Waking up local Ollama...",
+        "thinking": "Local model is thinking...",
+        "facts": [
+            "💡 Local inference runs entirely on your machine - zero network latency!",
+            "🔒 Your data never leaves your computer with local models.",
+            "⚡ Ollama uses optimized inference for Apple Silicon and CUDA GPUs.",
+            "🆓 Local tier is completely free - no API costs!",
+        ],
+    },
+    "lakeshore": {
+        "icon": "🏔️",
+        "name": "Lakeshore HPC",
+        "connecting": "Connecting to Marquette's Lakeshore HPC...",
+        "thinking": "Lakeshore is processing your query...",
+        "facts": [
+            "🖥️ Lakeshore runs on NVIDIA A100 GPUs at Marquette University.",
+            "🔐 Globus Compute provides secure, authenticated access to HPC resources.",
+            "🌐 Your request travels: You → Globus Cloud → HPC → vLLM → Back to you!",
+            "💰 HPC tier is free for Marquette researchers - no cloud API costs!",
+            "🚀 vLLM serves models with continuous batching for high throughput.",
+        ],
+    },
+    "cloud": {
+        "icon": "☁️",
+        "name": "Cloud AI",
+        "connecting": "Connecting to cloud AI service...",
+        "thinking": "Cloud model is generating response...",
+        "facts": [
+            "🌍 Cloud tier connects to state-of-the-art models like Claude and GPT-4.",
+            "⚡ Cloud APIs offer the fastest response times (~1-2 seconds).",
+            "💰 Cloud usage incurs API costs - shown after each response.",
+            "🧠 Cloud models excel at complex reasoning and creative tasks.",
+        ],
+    },
+    "auto": {
+        "icon": "🤖",
+        "name": "Smart Router",
+        "connecting": "Analyzing query complexity...",
+        "thinking": "AI is generating your response...",
+        "facts": [
+            "🧠 STREAM analyzes your query to pick the best tier automatically.",
+            "📊 Simple questions → Local (fast & free), Complex → HPC or Cloud.",
+            "🎯 Smart routing optimizes for both cost and quality.",
+            "⚖️ The LLM judge evaluates query complexity in real-time.",
+        ],
+    },
+}
+
+
+def get_progress_message(tier_preference: str, elapsed_seconds: float) -> str:
+    """Generate an engaging progress message based on tier and elapsed time."""
+
+    tier_info = TIER_MESSAGES.get(tier_preference, TIER_MESSAGES["auto"])
+
+    # Phase 1: Connecting (0-1 seconds)
+    if elapsed_seconds < 1:
+        return f"{tier_info['icon']} {tier_info['connecting']}"
+
+    # Phase 2: Thinking (1-3 seconds)
+    elif elapsed_seconds < 3:
+        return f"{tier_info['icon']} {tier_info['thinking']}"
+
+    # Phase 3: Show fun facts (3+ seconds, rotate every 3 seconds)
+    else:
+        fact_index = int((elapsed_seconds - 3) / 3) % len(tier_info["facts"])
+        fact = tier_info["facts"][fact_index]
+        return f"{tier_info['icon']} {tier_info['thinking']}\n\n{fact}"
+
 
 # =============================================================================
 # PAGE CONFIG
@@ -315,7 +554,8 @@ if prompt := st.chat_input("Ask me anything about HPC, SLURM, or general questio
 # =============================================================================
 # HANDLE ONGOING AUTH FLOW (persists across reruns)
 # =============================================================================
-if st.session_state.get("auth_flow_step") and st.session_state.get("auth_pending_message"):
+# Only require auth_flow_step to be set - auth_pending_message is optional
+if st.session_state.get("auth_flow_step"):
     # Auth flow is in progress - handle it here
     user_message = st.session_state.get("auth_pending_message", "")
 
@@ -327,6 +567,13 @@ if st.session_state.get("auth_flow_step") and st.session_state.get("auth_pending
                 "To use the **Lakeshore HPC tier**, you need to authenticate with Globus Compute.\n\n"
                 "A browser window will open for you to log in. This is a **one-time setup** - "
                 "your credentials will be saved for future sessions."
+            )
+
+            # VPN Warning - important for successful authentication
+            st.warning(
+                "⚠️ **VPN Users**: Please **disconnect your VPN** before clicking "
+                '"Authenticate Now". Some VPNs interfere with the authentication callback. '
+                "You can reconnect after authentication completes."
             )
 
             st.markdown("---")
@@ -361,30 +608,60 @@ if st.session_state.get("auth_flow_step") and st.session_state.get("auth_pending
         # STEP 2: Perform Authentication
         elif st.session_state.auth_flow_step == "authenticating":
             st.info(
-                "### 🌐 Opening Browser for Authentication\n\nA browser window will open automatically..."
+                "### 🌐 Authenticating with Globus Compute\n\n"
+                "Please check your browser - a Globus login page should have opened.\n\n"
+                "**If no browser opened**, you may already be authenticated!"
             )
 
-            with st.spinner("Authenticating with Globus Compute..."):
+            # Show spinner while authenticating
+            with st.spinner(
+                "🔄 Authenticating with Globus Compute... Please complete login in your browser"
+            ):
                 success, message = authenticate_globus_compute()
 
             if success:
+                st.success(f"✅ {message}")
+                import time
+
+                time.sleep(1)  # Brief pause to show success message
                 st.session_state.auth_flow_step = "vpn_reconnect"
                 st.rerun()
             else:
-                st.error(f"Authentication failed: {message}")
+                st.error(f"❌ {message}")
                 st.session_state.auth_flow_step = "vpn_warning"
-                if st.button("🔄 Try Again", type="primary"):
-                    st.rerun()
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("🔄 Try Again", type="primary", use_container_width=True):
+                        st.rerun()
+                with col2:
+                    if st.button("☁️ Use Cloud Instead", type="secondary", use_container_width=True):
+                        st.session_state.tier_preference = "cloud"
+                        st.session_state._sync_tier_selector = True
+                        st.session_state.auth_flow_step = None
+                        st.session_state.pop("auth_pending_message", None)
+                        st.rerun()
                 st.stop()
 
         # STEP 3: Success - auto-retry the question
         elif st.session_state.auth_flow_step == "vpn_reconnect":
-            st.success("### ✅ Authentication Successful!")
-            st.info("Retrying your question...")
+            st.success(
+                "### ✅ Authentication Successful!\n\n"
+                "You can now reconnect your VPN if needed. "
+                "Your credentials are cached and will work through VPN."
+            )
 
-            # Auto-retry the question
+            import time
+
+            time.sleep(1)  # Brief pause to show success
+
+            # Auto-retry the question if there was one
             st.session_state.auth_flow_step = None
             if user_message:
+                st.info(
+                    f"📝 Retrying your question: *{user_message[:50]}...*"
+                    if len(user_message) > 50
+                    else f"📝 Retrying your question: *{user_message}*"
+                )
                 st.session_state.pending_query = user_message
             st.session_state.pop("auth_pending_message", None)
             st.rerun()
@@ -416,38 +693,69 @@ if "pending_query" in st.session_state:
         if result["success"]:
             full_response = ""
             start_time = time.time()
+            first_chunk_received = False
 
-            # Show spinner until first chunk arrives
-            with st.spinner("Generating response..."):
-                first_chunk = next(result["response"], None)
-                if first_chunk:
-                    full_response += first_chunk
+            # Create a status container for engaging progress messages
+            status_container = st.empty()
+            last_status_update = 0
 
-            # Stream remaining chunks
-            if first_chunk:
-                message_placeholder.markdown(full_response + "▌")
+            # Get tier-specific info for status messages
+            tier_pref = st.session_state.tier_preference
+            tier_info = TIER_MESSAGES.get(tier_pref, TIER_MESSAGES["auto"])
 
-                try:
-                    for chunk in result["response"]:
+            # Show initial connecting message with tier-specific info
+            status_container.info(
+                f"{tier_info['icon']} **{tier_info['connecting']}**\n\n"
+                f"_{tier_info['facts'][0]}_"
+            )
+
+            # Stream response with engaging progress updates
+            try:
+                for chunk in result["response"]:
+                    elapsed = time.time() - start_time
+
+                    if not first_chunk_received:
+                        # Update status message while waiting (rotate fun facts)
+                        if elapsed > 2 and elapsed - last_status_update >= 2:
+                            last_status_update = elapsed
+                            fact_index = int(elapsed / 2) % len(tier_info["facts"])
+                            wait_msg = (
+                                tier_info["thinking"] if elapsed > 1 else tier_info["connecting"]
+                            )
+                            status_container.info(
+                                f"{tier_info['icon']} **{wait_msg}**\n\n"
+                                f"_{tier_info['facts'][fact_index]}_"
+                            )
+
+                        # First chunk arrived! Clear status and start showing response
+                        first_chunk_received = True
+                        status_container.empty()
+                        full_response = chunk
+                        message_placeholder.markdown(full_response + "▌")
+                    else:
                         full_response += chunk
                         message_placeholder.markdown(full_response + "▌")
-                except Exception as e:
-                    st.error(f"Stream interrupted: {e}")
-                    # Save partial response
-                    st.session_state.messages.append(
-                        {"role": "assistant", "content": full_response + " [INTERRUPTED]"}
-                    )
 
+            except Exception as e:
+                status_container.empty()
+                st.error(f"Stream interrupted: {e}")
+                # Save partial response
+                st.session_state.messages.append(
+                    {"role": "assistant", "content": full_response + " [INTERRUPTED]"}
+                )
+
+            # Clear status container
+            status_container.empty()
+
+            # Show final response or placeholder
+            if first_chunk_received:
                 message_placeholder.markdown(full_response)
-
-            # Check for auth error BEFORE displaying empty response
-            stream_meta = st.session_state.chat_handler.get_last_stream_metadata()
-            if stream_meta.get("auth_required"):
-                # Auth required - don't show empty response, show auth flow instead
-                pass  # Will be handled below
-            elif not first_chunk:
-                # No auth error but empty response - show placeholder
-                message_placeholder.markdown("*No response received.*")
+            else:
+                # Check for auth error BEFORE displaying empty response
+                stream_meta = st.session_state.chat_handler.get_last_stream_metadata()
+                if not stream_meta.get("auth_required"):
+                    # No auth error but empty response - show placeholder
+                    message_placeholder.markdown("*No response received.*")
 
             # Get metadata from completed stream
             stream_meta = st.session_state.chat_handler.get_last_stream_metadata()

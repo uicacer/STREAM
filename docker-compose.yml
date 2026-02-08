@@ -77,7 +77,8 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     volumes:
       # Mount Globus credentials from host so the proxy can authenticate
-      - ~/.globus_compute:/root/.globus_compute:ro
+      # Using ${HOME} instead of ~ because ~ doesn't expand in Docker Compose
+      - ${HOME}/.globus_compute:/root/.globus_compute:rw
     restart: unless-stopped
     networks:
       - stream-network

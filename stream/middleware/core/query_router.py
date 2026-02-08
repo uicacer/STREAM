@@ -56,14 +56,19 @@ def get_tier_for_query(query: str, user_preference: str = "auto") -> str:
     """
     Determine which tier to use based on LLM judge + keyword fallback + health checks
     """
-    # If user explicitly chose a tier, respect it (but check health)
+    # If user explicitly chose a tier, respect it strictly (no silent fallback)
     if user_preference in ["local", "lakeshore", "cloud"]:
         if is_tier_available(user_preference):
             print(f"🔍 ROUTING: User override → {user_preference.upper()}")
             return user_preference
         else:
-            print(f"⚠️  ROUTING: User selected {user_preference.upper()} but it's unavailable")
-            # Continue to auto-routing with fallback
+            # User explicitly selected this tier - don't silently fallback
+            # Raise an error so the user knows their selection couldn't be honored
+            print(f"❌ ROUTING: User selected {user_preference.upper()} but it's unavailable")
+            raise Exception(
+                f"{user_preference.upper()} tier is currently unavailable. "
+                f"Please try again or select a different tier."
+            )
 
     # Try LLM judge first (if enabled)
     complexity = None

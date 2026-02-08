@@ -2,6 +2,7 @@
 Lakeshore vLLM Proxy Service - Routes requests via Globus Compute or SSH
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -9,6 +10,7 @@ import os
 import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
+from globus_sdk import GlobusAPIError
 
 from stream.middleware.core.globus_compute_client import GlobusComputeClient
 
@@ -62,6 +64,28 @@ async def health_check():
     }
 
 
+@app.post("/reload-auth")
+async def reload_authentication():
+    """
+    Reload Globus credentials from disk.
+
+    This endpoint should be called after the user authenticates on the host machine.
+    It forces the proxy to re-read the credentials from ~/.globus_compute/storage.db.
+
+    Returns:
+        JSON with success status and message
+    """
+    if not USE_GLOBUS_COMPUTE or not globus_client:
+        return {"success": False, "message": "Globus Compute not configured"}
+
+    try:
+        success, message = globus_client.reload_credentials()
+        return {"success": success, "message": message}
+    except Exception as e:
+        logger.error(f"Failed to reload credentials: {e}")
+        return {"success": False, "message": f"Failed to reload: {str(e)}"}
+
+
 @app.post("/v1/chat/completions")
 async def proxy_chat_completions(request: Request):
     try:
@@ -73,7 +97,46 @@ async def proxy_chat_completions(request: Request):
     messages = body.get("messages", [])
     temperature = body.get("temperature", 0.7)
     stream = body.get("stream", False)
-    max_tokens = body.get("max_tokens", 512)
+
+    # =========================================================================
+    # MAX_TOKENS AND CONTEXT WINDOW - LAKESHORE TIER ONLY
+    # =========================================================================
+    # This proxy handles ONLY Lakeshore tier requests. Cloud and Local tiers
+    # go through LiteLLM directly and don't have this constraint (Cloud has
+    # 200K+ context, Local depends on the Ollama model configuration).
+    #
+    # CONTEXT WINDOW BASICS:
+    # LLMs have a fixed "context window" - the total tokens they can process.
+    # For Qwen2.5-1.5B on Lakeshore, the context window is 8192 tokens.
+    #
+    # The constraint: input_tokens + output_tokens <= context_window
+    #   - input_tokens = your messages (system prompt + conversation history)
+    #   - output_tokens = the model's response (controlled by max_tokens)
+    #
+    # TOKEN TO WORD CONVERSION (rough estimate):
+    #   - 1 token ≈ 0.75 words (or ~4 characters)
+    #   - 1000 tokens ≈ 750 words
+    #   - 8192 tokens ≈ 6,100 words total context
+    #
+    # WHY 1024 TOKENS (15%) IS A GOOD DEFAULT FOR OUTPUT:
+    # =========================================================================
+    # In a chat application, conversation history grows over time, but individual
+    # responses are typically short (100-500 tokens for most answers).
+    #
+    # With 8192 context and max_tokens=1024:
+    #   - ~7000 tokens for conversation history (85%) ≈ 5,250 words of chat
+    #   - ~1000 tokens for model response (15%) ≈ 750 words per response
+    #
+    # This allows:
+    #   - Long conversations with many back-and-forth messages
+    #   - Sufficient response length for detailed answers (750 words is plenty)
+    #   - Maximizes available space for conversation context
+    #   - Avoids "max_tokens too large" errors as history grows
+    #
+    # If a user explicitly requests a larger max_tokens, we use their value.
+    # vLLM will return an error if input + max_tokens > context_window.
+    # =========================================================================
+    max_tokens = body.get("max_tokens", 1024)
 
     logger.info(
         f"Proxy request: model={model}, messages={len(messages)}, stream={stream}, mode={'globus' if USE_GLOBUS_COMPUTE else 'ssh'}"
@@ -101,9 +164,18 @@ async def _route_via_globus_compute(model, messages, temperature, max_tokens, st
         )
 
         if "error" in result:
-            raise HTTPException(
-                status_code=503, detail=f"Lakeshore inference failed: {result['error']}"
-            )
+            error_msg = result.get("error", "Unknown error")
+            error_type = result.get("error_type", "UnknownError")
+
+            # Use HTTP 401 for authentication errors, 503 for other service errors
+            if error_type == "AuthenticationError":
+                raise HTTPException(
+                    status_code=401, detail=f"Globus Compute authentication required: {error_msg}"
+                )
+            else:
+                raise HTTPException(
+                    status_code=503, detail=f"Lakeshore inference failed: {error_msg}"
+                )
 
         logger.info("Globus Compute inference successful")
 
@@ -113,6 +185,14 @@ async def _route_via_globus_compute(model, messages, temperature, max_tokens, st
 
     except HTTPException:
         raise
+    except GlobusAPIError as e:
+        # Handle Globus API errors specifically
+        if e.http_status in (401, 403):
+            raise HTTPException(
+                status_code=401, detail=f"Globus authentication required: {str(e)}"
+            ) from e
+        else:
+            raise HTTPException(status_code=503, detail=f"Globus API error: {str(e)}") from e
     except Exception as e:
         logger.error(f"Globus Compute routing error: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Internal proxy error: {str(e)}") from e
@@ -169,7 +249,28 @@ async def _route_via_ssh(model, messages, temperature, max_tokens, stream):
 
 
 def _convert_json_to_sse_stream(json_response: dict):
-    """Convert chat.completion (message format) to chat.completion.chunk (delta format) SSE stream"""
+    """
+    Convert a complete chat.completion response to a simulated streaming response.
+
+    WHY SIMULATE STREAMING FOR GLOBUS COMPUTE?
+    =========================================================================
+    Globus Compute is a Function-as-a-Service (FaaS) system:
+    - You submit a function → it runs remotely → returns complete result
+    - There's NO way to get partial results while the function is running
+    - This is fundamentally different from Local/Cloud tiers which support true streaming
+
+    To provide a consistent user experience across all tiers, we simulate streaming:
+    - Split the complete response into small chunks (groups of words)
+    - Yield each chunk as a separate SSE event
+    - Add tiny delays between chunks to create natural "typing" effect
+
+    The result: Users see text appearing progressively, just like Local/Cloud tiers,
+    even though we already have the complete response.
+    =========================================================================
+    """
+    # Configuration for simulated streaming
+    words_per_chunk = 3  # How many words to send at once (smaller = smoother)
+    delay_between_chunks = 0.02  # Seconds between chunks (20ms = natural typing speed)
 
     async def sse_generator():
         choices = json_response.get("choices", [])
@@ -182,36 +283,57 @@ def _convert_json_to_sse_stream(json_response: dict):
         content = message.get("content", "")
         role = message.get("role", "assistant")
 
-        # Chunk 1: Role
+        # Common fields for all chunks
+        chunk_base = {
+            "id": json_response.get("id", ""),
+            "object": "chat.completion.chunk",
+            "created": json_response.get("created", 0),
+            "model": json_response.get("model", ""),
+        }
+
+        # Chunk 1: Send the role (assistant)
         if role:
             chunk = {
-                "id": json_response.get("id", ""),
-                "object": "chat.completion.chunk",
-                "created": json_response.get("created", 0),
-                "model": json_response.get("model", ""),
+                **chunk_base,
                 "choices": [
                     {"index": 0, "delta": {"role": role, "content": ""}, "finish_reason": None}
                 ],
             }
             yield f"data: {json.dumps(chunk)}\n\n"
 
-        # Chunk 2: Content
+        # Chunk 2+: Send content in small word groups to simulate streaming
+        # =====================================================================
+        # Instead of sending all content at once, we:
+        # 1. Split into words
+        # 2. Group into small chunks (e.g., 3 words at a time)
+        # 3. Yield each chunk with a small delay
+        # This creates a smooth "typing" effect for the user
+        # =====================================================================
         if content:
-            chunk = {
-                "id": json_response.get("id", ""),
-                "object": "chat.completion.chunk",
-                "created": json_response.get("created", 0),
-                "model": json_response.get("model", ""),
-                "choices": [{"index": 0, "delta": {"content": content}, "finish_reason": None}],
-            }
-            yield f"data: {json.dumps(chunk)}\n\n"
+            words = content.split(" ")
 
-        # Chunk 3: Finish
+            for i in range(0, len(words), words_per_chunk):
+                # Get the next group of words
+                word_group = words[i : i + words_per_chunk]
+
+                # Add space before words (except for the first chunk)
+                text_chunk = " ".join(word_group) if i == 0 else " " + " ".join(word_group)
+
+                chunk = {
+                    **chunk_base,
+                    "choices": [
+                        {"index": 0, "delta": {"content": text_chunk}, "finish_reason": None}
+                    ],
+                }
+                yield f"data: {json.dumps(chunk)}\n\n"
+
+                # Small delay to create natural streaming effect
+                # Without this, all chunks would arrive instantly (defeating the purpose)
+                await asyncio.sleep(delay_between_chunks)
+
+        # Final chunk: Signal completion
         chunk = {
-            "id": json_response.get("id", ""),
-            "object": "chat.completion.chunk",
-            "created": json_response.get("created", 0),
-            "model": json_response.get("model", ""),
+            **chunk_base,
             "choices": [
                 {"index": 0, "delta": {}, "finish_reason": choice.get("finish_reason", "stop")}
             ],
