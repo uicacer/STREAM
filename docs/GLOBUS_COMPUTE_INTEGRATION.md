@@ -11,10 +11,12 @@
 6. [Zero-Friction Browser Authentication Implementation](#6-zero-friction-browser-authentication-implementation)
 7. [Request Flow: From User Query to HPC Response](#7-request-flow-from-user-query-to-hpc-response)
 8. [Code Walkthrough](#8-code-walkthrough)
-9. [Performance & Latency Analysis](#9-performance--latency-analysis)
-10. [Security Considerations](#10-security-considerations)
-11. [Troubleshooting Guide](#11-troubleshooting-guide)
-12. [Q&A](#12-conference-qa-preparation)
+9. [Context Window & Token Management](#9-context-window--token-management)
+10. [Simulated Streaming for Lakeshore](#10-simulated-streaming-for-lakeshore)
+11. [Performance & Latency Analysis](#11-performance--latency-analysis)
+12. [Security Considerations](#12-security-considerations)
+13. [Troubleshooting Guide](#13-troubleshooting-guide)
+14. [Q&A](#14-qa)
 
 ---
 
@@ -791,11 +793,180 @@ services:
 
 ---
 
-## 9. Performance & Latency Analysis
+## 9. Context Window & Token Management
+
+### 9.1 Understanding Context Windows
+
+LLMs have a fixed "context window" - the total number of tokens they can process in a single request. This window must fit both input (your messages) and output (the model's response).
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    CONTEXT WINDOW (8192 tokens)                  │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  ┌───────────────────────────────────────────┐ ┌─────────────┐  │
+│  │         INPUT TOKENS (~85%)               │ │OUTPUT (~15%)│  │
+│  │                                           │ │             │  │
+│  │  • System prompt                          │ │ Model's     │  │
+│  │  • Conversation history                   │ │ response    │  │
+│  │  • Current user message                   │ │             │  │
+│  │                                           │ │             │  │
+│  │         ~7000 tokens                      │ │ ~1000 tokens│  │
+│  │         ~5,250 words                      │ │ ~750 words  │  │
+│  └───────────────────────────────────────────┘ └─────────────┘  │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**The constraint**: `input_tokens + max_tokens <= context_window`
+
+### 9.2 Token to Word Conversion
+
+Rough estimates for English text:
+- 1 token ≈ 0.75 words (or ~4 characters)
+- 1000 tokens ≈ 750 words
+- 8192 tokens ≈ 6,100 words total
+
+### 9.3 Why 85/15 Split for Input/Output?
+
+In chat applications, **conversation history grows over time** while individual responses are typically short:
+
+| Response Type | Typical Tokens | Words |
+|--------------|----------------|-------|
+| Simple answer | 50-200 | 40-150 |
+| Detailed explanation | 200-500 | 150-375 |
+| Code with explanation | 300-800 | 225-600 |
+| Long essay | 500-1000 | 375-750 |
+
+Most responses fit comfortably within 1000 tokens (~750 words), so reserving 85% for conversation history allows for long, multi-turn conversations.
+
+### 9.4 Implementation in Lakeshore Proxy
+
+The Lakeshore proxy defaults to `max_tokens=1024`:
+
+```python
+# stream/proxy/app.py
+
+# With 8192 context and max_tokens=1024:
+#   - ~7000 tokens for conversation history (85%) ≈ 5,250 words of chat
+#   - ~1000 tokens for model response (15%) ≈ 750 words per response
+max_tokens = body.get("max_tokens", 1024)
+```
+
+**Important**: This only affects Lakeshore tier. Cloud tier (Claude) has 200K+ context, and Local tier depends on Ollama configuration.
+
+### 9.5 Error Handling
+
+If `input_tokens + max_tokens > context_window`, vLLM returns an error:
+
+```
+'max_tokens' is too large: 8192. This model's maximum context length is 8192
+tokens and your request has 389 input tokens (8192 > 8192 - 389)
+```
+
+The proxy's 1024 default prevents this for most conversations. For very long conversations approaching the limit, consider clearing history or using Cloud tier.
+
+---
+
+## 10. Simulated Streaming for Lakeshore
+
+### 10.1 The Challenge
+
+Local and Cloud tiers support **true streaming** - tokens are sent as the model generates them, creating a smooth "typing" effect.
+
+Globus Compute is different - it's a **Function-as-a-Service (FaaS)** system:
+- You submit a function
+- It runs remotely
+- You get the **complete result** when done
+
+There's no way to get partial results while the function is running.
+
+### 10.2 Our Solution: Simulated Streaming
+
+To provide consistent UX across all tiers, we simulate streaming for Lakeshore responses:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ TRUE STREAMING (Local/Cloud)                                     │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Model generates: "The" → "quick" → "brown" → "fox"             │
+│  User sees:       "The"    "The quick"  "The quick brown"  ...  │
+│  (Real-time generation)                                         │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│ SIMULATED STREAMING (Lakeshore)                                  │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Wait 3-8 seconds for complete response...                      │
+│  Response: "The quick brown fox jumps over the lazy dog"        │
+│                                                                 │
+│  Then simulate typing:                                          │
+│  Chunk 1: "The quick brown"    → yield + 20ms delay             │
+│  Chunk 2: " fox jumps over"    → yield + 20ms delay             │
+│  Chunk 3: " the lazy dog"      → yield + 20ms delay             │
+│                                                                 │
+│  User sees text appearing progressively (just like true stream) │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 10.3 Implementation Details
+
+**File**: `stream/proxy/app.py`
+
+```python
+def _convert_json_to_sse_stream(json_response: dict):
+    """Convert complete response to simulated streaming."""
+
+    # Configuration
+    words_per_chunk = 3      # Words per SSE event
+    delay_between_chunks = 0.02  # 20ms between chunks
+
+    async def sse_generator():
+        content = json_response["choices"][0]["message"]["content"]
+        words = content.split(" ")
+
+        for i in range(0, len(words), words_per_chunk):
+            word_group = words[i : i + words_per_chunk]
+            text_chunk = " ".join(word_group) if i == 0 else " " + " ".join(word_group)
+
+            # Yield SSE chunk
+            yield f"data: {json.dumps({'choices': [{'delta': {'content': text_chunk}}]})}\n\n"
+
+            # Small delay for natural typing effect
+            await asyncio.sleep(delay_between_chunks)
+
+        yield "data: [DONE]\n\n"
+```
+
+### 10.4 Why This Matters for UX
+
+| Without Simulated Streaming | With Simulated Streaming |
+|-----------------------------|--------------------------|
+| User waits 5 seconds... | User waits 5 seconds... |
+| **ENTIRE response appears at once** | Text appears word-by-word |
+| Feels jarring and inconsistent | Feels smooth, like other tiers |
+| User might think app is frozen | Clear visual feedback |
+
+### 10.5 Trade-offs
+
+| Aspect | Impact |
+|--------|--------|
+| **Added latency** | ~100-500ms total (for chunking delays) |
+| **Consistency** | All tiers now behave similarly |
+| **Code complexity** | Moderate (SSE generator with delays) |
+| **User perception** | Much better - feels interactive |
+
+---
+
+## 11. Performance & Latency Analysis
 
 Understanding latency is crucial when designing systems that span multiple computational tiers. This section breaks down where time is spent in each tier and explains the trade-offs.
 
-### 9.1 Latency Comparison by Tier
+### 11.1 Latency Comparison by Tier
 
 | Tier | Typical Latency | Range | Primary Factor |
 |------|-----------------|-------|----------------|
@@ -803,7 +974,7 @@ Understanding latency is crucial when designing systems that span multiple compu
 | **Lakeshore** | 3-10s | 2-15s | Globus Compute overhead |
 | **Cloud** | 1-3s | 0.5-5s | Network + API processing |
 
-### 9.2 Lakeshore Latency Breakdown
+### 11.2 Lakeshore Latency Breakdown
 
 The 3-10 second latency for Lakeshore tier is primarily due to Globus Compute's function-as-a-service architecture:
 
@@ -829,7 +1000,7 @@ Total: 3-7 seconds typical
 
 **Key Insight**: The majority of latency (~60-70%) comes from Globus Compute's task submission and retrieval overhead, not the actual model inference.
 
-### 9.3 Why Globus Compute Has This Overhead
+### 11.3 Why Globus Compute Has This Overhead
 
 Globus Compute is optimized for **reliability and security**, not low-latency interactive use:
 
@@ -841,7 +1012,7 @@ Globus Compute is optimized for **reliability and security**, not low-latency in
 | OAuth token validation | Secure authentication | +100ms |
 | Endpoint polling | No inbound ports needed | +variable |
 
-### 9.4 The Trade-off: Accessibility vs. Speed
+### 11.4 The Trade-off: Accessibility vs. Speed
 
 | Approach | Latency | Requirements |
 |----------|---------|--------------|
@@ -855,7 +1026,7 @@ STREAM chose Globus Compute because:
 3. **Secure by default** - No firewall holes, OAuth authentication
 4. **Maintained by Globus** - We don't manage endpoint security
 
-### 9.5 Optimization Strategies
+### 11.5 Optimization Strategies
 
 To minimize perceived latency while using Globus Compute:
 
@@ -881,7 +1052,7 @@ Show engaging progress messages so users don't feel the wait:
 - **Caching**: Cache responses for identical queries
 - **Hybrid mode**: Offer SSH tunnel option for power users
 
-### 9.6 When Lakeshore Latency is Worth It
+### 11.6 When Lakeshore Latency is Worth It
 
 Despite the overhead, Lakeshore tier is valuable when:
 
@@ -892,7 +1063,7 @@ Despite the overhead, Lakeshore tier is valuable when:
 | Research workloads | Access to institution's GPUs |
 | Privacy requirements | Data stays on campus network |
 
-### 9.7 Latency Monitoring
+### 11.7 Latency Monitoring
 
 STREAM tracks latency metrics for optimization:
 
@@ -907,9 +1078,9 @@ tracker.record_completion()     # Total request time
 
 ---
 
-## 10. Security Considerations
+## 12. Security Considerations
 
-### 10.1 Token Security
+### 12.1 Token Security
 
 | Aspect | Implementation |
 |--------|----------------|
@@ -918,7 +1089,7 @@ tracker.record_completion()     # Total request time
 | Encryption | Tokens encrypted at rest by Globus SDK |
 | Expiration | Access tokens: ~24 hours, auto-refreshed |
 
-### 10.2 Network Security
+### 12.2 Network Security
 
 | Layer | Protection |
 |-------|------------|
@@ -926,7 +1097,7 @@ tracker.record_completion()     # Total request time
 | Globus ↔ Endpoint | HTTPS/TLS, authenticated connection |
 | Endpoint ↔ vLLM | Localhost only (127.0.0.1) |
 
-### 10.3 Authorization Model
+### 12.3 Authorization Model
 
 ```
 User → Globus Auth → Access Token → Globus Compute API → Endpoint
@@ -942,7 +1113,7 @@ User → Globus Auth → Access Token → Globus Compute API → Endpoint
              - ORCID
 ```
 
-### 10.4 What Users CAN'T Do
+### 12.4 What Users CAN'T Do
 
 - Access other users' tasks
 - Execute arbitrary code on endpoints they don't own
@@ -951,9 +1122,9 @@ User → Globus Auth → Access Token → Globus Compute API → Endpoint
 
 ---
 
-## 11. Troubleshooting Guide
+## 13. Troubleshooting Guide
 
-### 11.1 Authentication Issues
+### 13.1 Authentication Issues
 
 **Symptom**: "Authentication required" error
 ```
@@ -997,7 +1168,7 @@ Affected VPNs: This commonly affects VPNs that use full-tunnel mode or have
 "split tunneling" disabled. Corporate VPNs are more likely to cause this issue.
 ```
 
-### 11.2 Endpoint Issues
+### 13.2 Endpoint Issues
 
 **Symptom**: "Endpoint offline" error
 ```
@@ -1025,24 +1196,64 @@ Diagnosis:
 3. Check GPU: nvidia-smi
 ```
 
-### 11.3 Docker Issues
+### 13.3 Docker & Credential Issues
 
-**Symptom**: Proxy can't authenticate
+**Symptom**: "unable to open database file" error after authentication
+```
+Cause: Docker volume mount timing issue
+
+When the lakeshore-proxy container starts BEFORE you authenticate, the volume
+mount to ~/.globus_compute/ is empty. Even after you authenticate on the host
+(creating storage.db), Docker's volume mount doesn't automatically see the new file.
+
+STREAM handles this automatically:
+1. After authentication, STREAM calls the proxy's /reload-auth endpoint
+2. If reload fails with "unable to open database file", STREAM auto-restarts the container
+3. The restarted container sees the new credentials file
+4. STREAM retries the reload - it should now succeed
+
+If auto-restart fails, manually restart:
+docker-compose restart lakeshore-proxy
+```
+
+**Symptom**: Proxy can't authenticate (storage.db missing)
 ```
 Check volume mount:
-docker exec lakeshore-proxy ls -la /root/.globus_compute/
+docker exec stream-lakeshore-proxy ls -la /root/.globus_compute/
 
 Expected: storage.db file present
 
-If missing:
-1. Run auth on host first
-2. Check docker-compose.yml volume mapping
+If empty:
+1. Ensure you've authenticated on host first (browser OAuth flow)
+2. Check docker-compose.yml volume mapping:
+   volumes:
+     - ${HOME}/.globus_compute:/root/.globus_compute:rw
 3. Ensure ${HOME} is set correctly
+4. Restart the container: docker-compose restart lakeshore-proxy
+```
+
+**Symptom**: max_tokens error (400 Bad Request)
+```
+Error: 'max_tokens' is too large: 8192. This model's maximum context length is
+8192 tokens and your request has 389 input tokens
+
+Cause: max_tokens + input_tokens > context_window
+
+The Lakeshore model (Qwen2.5-1.5B) has an 8192 token context window. If you
+request 8192 output tokens but already have 389 input tokens, there's not
+enough room.
+
+Solution: STREAM now defaults to max_tokens=1024 (15% of context), leaving
+85% for conversation history. This prevents the error in most cases.
+
+For very long conversations that exceed the context window, consider:
+1. Clearing conversation history
+2. Using Cloud tier (200K+ context)
 ```
 
 ---
 
-## 12. Q&A
+## 14. Q&A
 
 ### Q: "How do you access the HPC cluster without VPN or SSH?"
 
