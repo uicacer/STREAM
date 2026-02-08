@@ -4,6 +4,7 @@
 # Simple, clean chat interface for STREAM
 # =============================================================================
 
+import logging
 import time
 
 import streamlit as st
@@ -15,6 +16,65 @@ from config import (
 )
 
 from stream.sdk.python.chat_handler import ChatHandler
+
+# Configure logging to see SDK debug messages
+logging.basicConfig(
+    level=logging.DEBUG, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+
+# =============================================================================
+# GLOBUS AUTHENTICATION HELPER
+# =============================================================================
+
+
+def authenticate_globus_compute() -> tuple[bool, str]:
+    """
+    Zero-friction Globus Compute authentication using automatic OAuth callback.
+
+    This function implements a seamless authentication flow:
+    1. Checks if already authenticated (returns immediately if so)
+    2. Starts a local OAuth callback server on localhost:8765
+    3. Opens your browser to the Globus login page
+    4. You authenticate in the browser (just click "Allow")
+    5. Globus redirects back to our local server
+    6. The OAuth code is captured automatically (no manual copying!)
+    7. Code is exchanged for access tokens
+    8. Tokens are saved to ~/.globus_compute/ for future use
+
+    This is TRUE zero-friction - you only interact with the browser,
+    no terminal commands or code pasting required!
+
+    Returns:
+        (success: bool, message: str)
+    """
+    try:
+        # Import our custom zero-friction OAuth implementation
+        from stream.middleware.core.globus_auth import authenticate_with_browser_callback
+
+        # This handles the entire OAuth flow automatically
+        # It will:
+        # - Open your browser to Globus auth page
+        # - Start a local server to receive the callback
+        # - Capture the auth code automatically
+        # - Exchange it for tokens
+        # - Save the tokens to disk
+        success, message = authenticate_with_browser_callback()
+        return success, message
+
+    except ImportError as e:
+        # Fallback: If our custom module isn't available, explain the issue
+        import traceback
+
+        error_details = traceback.format_exc()
+        return False, f"❌ Zero-friction auth module not available: {str(e)}\n{error_details}"
+
+    except Exception as e:
+        # Any other error during authentication
+        import traceback
+
+        error_details = traceback.format_exc()
+        return False, f"❌ Authentication failed: {str(e)}\n{error_details}"
+
 
 MAX_DISPLAY_MESSAGES = 100  # UI display limit
 MAX_SEND_MESSAGES = 50  # Messages sent to middleware (middleware will trim further if needed)
@@ -70,12 +130,24 @@ with st.sidebar:
         "🏫 Lakeshore (Campus GPU)": "lakeshore",
         "☁️ Cloud (Claude/GPT - Paid)": "cloud",
     }
+    tier_labels = list(tier_options.keys())
+    tier_values = list(tier_options.values())
+
+    # Only sync selectbox when there was a programmatic tier change (flag set by buttons)
+    if st.session_state.get("_sync_tier_selector"):
+        current_pref = st.session_state.tier_preference
+        if current_pref in tier_values:
+            st.session_state.tier_selector = tier_labels[tier_values.index(current_pref)]
+        st.session_state._sync_tier_selector = False  # Clear the flag
 
     selected_tier = st.selectbox(
         "Model Tier",
-        options=list(tier_options.keys()),
+        options=tier_labels,
         help="Auto: Let STREAM decide based on query complexity",
+        key="tier_selector",
     )
+
+    # Update tier_preference from selectbox (this is the user's choice)
     st.session_state.tier_preference = tier_options[selected_tier]
 
     # Advanced Settings (collapsed by default)
@@ -202,9 +274,7 @@ for message in st.session_state.messages:
         elif tier == "lakeshore":
             tier_emoji = "🏫"
             tier_display = "LAKESHORE"
-            # Show which Lakeshore node
-            node = meta.get("node", "ga-001")  # We'll add this metadata
-            model_display = f"vLLM ({node})"
+            model_display = "vLLM"
 
         else:  # cloud
             tier_emoji = "☁️"
@@ -241,6 +311,83 @@ for message in st.session_state.messages:
 # Chat input
 if prompt := st.chat_input("Ask me anything about HPC, SLURM, or general questions..."):
     st.session_state.pending_query = prompt
+
+# =============================================================================
+# HANDLE ONGOING AUTH FLOW (persists across reruns)
+# =============================================================================
+if st.session_state.get("auth_flow_step") and st.session_state.get("auth_pending_message"):
+    # Auth flow is in progress - handle it here
+    user_message = st.session_state.get("auth_pending_message", "")
+
+    with st.chat_message("assistant"):
+        # STEP 1: Authentication prompt
+        if st.session_state.auth_flow_step == "vpn_warning":
+            st.info(
+                "### 🔐 Globus Compute Authentication Required\n\n"
+                "To use the **Lakeshore HPC tier**, you need to authenticate with Globus Compute.\n\n"
+                "A browser window will open for you to log in. This is a **one-time setup** - "
+                "your credentials will be saved for future sessions."
+            )
+
+            st.markdown("---")
+
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button(
+                    "🔐 Authenticate Now",
+                    type="primary",
+                    use_container_width=True,
+                    key="auth_start",
+                ):
+                    st.session_state.auth_flow_step = "authenticating"
+                    st.rerun()
+            with col2:
+                if st.button(
+                    "☁️ Skip - Use Cloud",
+                    use_container_width=True,
+                    type="secondary",
+                    key="auth_skip",
+                ):
+                    st.session_state.tier_preference = "cloud"
+                    st.session_state._sync_tier_selector = True  # Sync the dropdown
+                    st.session_state.auth_flow_step = None
+                    if user_message:
+                        st.session_state.pending_query = user_message
+                    st.session_state.pop("auth_pending_message", None)
+                    st.rerun()
+
+            st.stop()
+
+        # STEP 2: Perform Authentication
+        elif st.session_state.auth_flow_step == "authenticating":
+            st.info(
+                "### 🌐 Opening Browser for Authentication\n\nA browser window will open automatically..."
+            )
+
+            with st.spinner("Authenticating with Globus Compute..."):
+                success, message = authenticate_globus_compute()
+
+            if success:
+                st.session_state.auth_flow_step = "vpn_reconnect"
+                st.rerun()
+            else:
+                st.error(f"Authentication failed: {message}")
+                st.session_state.auth_flow_step = "vpn_warning"
+                if st.button("🔄 Try Again", type="primary"):
+                    st.rerun()
+                st.stop()
+
+        # STEP 3: Success - auto-retry the question
+        elif st.session_state.auth_flow_step == "vpn_reconnect":
+            st.success("### ✅ Authentication Successful!")
+            st.info("Retrying your question...")
+
+            # Auto-retry the question
+            st.session_state.auth_flow_step = None
+            if user_message:
+                st.session_state.pending_query = user_message
+            st.session_state.pop("auth_pending_message", None)
+            st.rerun()
 
 # Handle pending query (from input or example button)
 if "pending_query" in st.session_state:
@@ -291,91 +438,135 @@ if "pending_query" in st.session_state:
                         {"role": "assistant", "content": full_response + " [INTERRUPTED]"}
                     )
 
-            message_placeholder.markdown(full_response)
+                message_placeholder.markdown(full_response)
+
+            # Check for auth error BEFORE displaying empty response
+            stream_meta = st.session_state.chat_handler.get_last_stream_metadata()
+            if stream_meta.get("auth_required"):
+                # Auth required - don't show empty response, show auth flow instead
+                pass  # Will be handled below
+            elif not first_chunk:
+                # No auth error but empty response - show placeholder
+                message_placeholder.markdown("*No response received.*")
 
             # Get metadata from completed stream
             stream_meta = st.session_state.chat_handler.get_last_stream_metadata()
-            tier = stream_meta.get("tier", "unknown")
-            model = stream_meta.get("model", "unknown")
-            duration = time.time() - start_time
 
-            # ========== SHOW FALLBACK WARNING IF IT HAPPENED ==========
-            if stream_meta.get("fallback_used"):
-                original_tier = stream_meta.get("original_tier", "unknown")
-                st.warning(
-                    f"⚠️ **Tier Fallback**: {original_tier.upper()} was unavailable, "
-                    f"automatically switched to {tier.upper()}.",
-                    icon="🔄",
+            # ========== CHECK FOR AUTHENTICATION ERROR IN STREAM METADATA ==========
+            # Use structured error flag instead of parsing emoji/strings
+            if stream_meta.get("auth_required"):
+                # Set up auth flow state and rerun - the outer auth handler will display the UI
+                st.session_state.auth_flow_step = "vpn_warning"
+                st.session_state.auth_pending_message = user_message
+                message_placeholder.empty()
+                # Remove the user message from chat history since we'll retry after auth
+                if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
+                    st.session_state.messages.pop()
+                st.rerun()
+
+            # ========== END AUTH ERROR CHECK ==========
+            else:
+                # No auth error - proceed with normal message handling
+                tier = stream_meta.get("tier", "unknown")
+                model = stream_meta.get("model", "unknown")
+                duration = time.time() - start_time
+
+                # ========== SHOW SLOW RESPONSE WARNING FOR LAKESHORE ==========
+                if tier == "lakeshore" and duration > 15:
+                    st.warning(
+                        f"⏱️ **Response took {duration:.0f}s** - The Lakeshore HPC endpoint may have "
+                        f"experienced a temporary issue and retried automatically.",
+                        icon="🔄",
+                    )
+                # ========== END SLOW RESPONSE WARNING ==========
+
+                # ========== SHOW FALLBACK WARNING IF IT HAPPENED ==========
+                if stream_meta.get("fallback_used"):
+                    original_tier = stream_meta.get("original_tier", "unknown")
+                    st.warning(
+                        f"⚠️ **Tier Fallback**: {original_tier.upper()} was unavailable, "
+                        f"automatically switched to {tier.upper()}.",
+                        icon="🔄",
+                    )
+                # ========== END FALLBACK WARNING ==========
+
+                # **SHOW "CALCULATING..." FOR COST**
+                cost = stream_meta.get("cost", 0.0)
+                correlation_id = result.get("correlation_id")
+
+                # **ESTIMATE COST FOR STREAMING**
+                # Streaming doesn't return usage tokens, so we estimate based on 4 char/token
+                if cost == 0.0 and tier in ["cloud", "lakeshore"]:
+                    # Get last user message length
+                    user_messages = [
+                        m for m in st.session_state.messages if m.get("role") == "user"
+                    ]
+                    input_chars = len(user_messages[-1].get("content", "")) if user_messages else 0
+                    output_chars = len(full_response)
+
+                    # Estimate tokens: ~4 characters per token
+                    input_tokens = input_chars // 4
+                    output_tokens = output_chars // 4
+
+                    # Calculate cost using rates from middleware (single source of truth)
+                    cost = st.session_state.chat_handler.estimate_cost(
+                        model, input_tokens, output_tokens
+                    )
+
+                # Add assistant message to chat
+                st.session_state.messages.append(
+                    {
+                        "role": "assistant",
+                        "content": full_response,
+                        "metadata": {
+                            "tier": tier,
+                            "model": model,
+                            "duration": duration,
+                            "cost": cost,
+                            "fallback_used": stream_meta.get("fallback_used", False),
+                            "original_tier": stream_meta.get("original_tier"),
+                        },
+                    }
                 )
-            # ========== END FALLBACK WARNING ==========
 
-            # **SHOW "CALCULATING..." FOR COST**
-            cost = stream_meta.get("cost", 0.0)
-            correlation_id = result.get("correlation_id")
+                # Track actual tier used
+                st.session_state.last_actual_tier = tier
 
-            # **ESTIMATE COST FOR STREAMING**
-            # Streaming doesn't return usage tokens, so we estimate based on 4 char/token
-            if cost == 0.0 and tier in ["cloud", "lakeshore"]:
-                # Get last user message length
-                user_messages = [m for m in st.session_state.messages if m.get("role") == "user"]
-                input_chars = len(user_messages[-1].get("content", "")) if user_messages else 0
-                output_chars = len(full_response)
+                # Update session stats
+                st.session_state.session_stats["queries"] += 1
+                if tier == "local":
+                    st.session_state.session_stats["local_queries"] += 1
+                elif tier == "cloud":
+                    st.session_state.session_stats["cloud_queries"] += 1
 
-                # Estimate tokens: ~4 characters per token
-                input_tokens = input_chars // 4
-                output_tokens = output_chars // 4
-
-                # Calculate cost using rates from middleware (single source of truth)
-                cost = st.session_state.chat_handler.estimate_cost(
-                    model, input_tokens, output_tokens
-                )
-
-            # Add assistant message to chat
-            st.session_state.messages.append(
-                {
-                    "role": "assistant",
-                    "content": full_response,
-                    "metadata": {
-                        "tier": tier,
-                        "model": model,
-                        "duration": duration,
-                        "cost": cost,
-                        "fallback_used": stream_meta.get("fallback_used", False),
-                        "original_tier": stream_meta.get("original_tier"),
-                    },
-                }
-            )
-
-            # Track actual tier used
-            st.session_state.last_actual_tier = tier
-
-            # Update session stats
-            st.session_state.session_stats["queries"] += 1
-            if tier == "local":
-                st.session_state.session_stats["local_queries"] += 1
-            elif tier == "cloud":
-                st.session_state.session_stats["cloud_queries"] += 1
-
-            # Accumulate cost
-            st.session_state.session_stats["total_cost"] += cost
+                # Accumulate cost
+                st.session_state.session_stats["total_cost"] += cost
 
         else:
             # Show error
             error_msg = result.get("error", "Unknown error")
 
-            # Check if it's a context window error (multiple ways to detect)
-            error_str = str(error_msg).lower()
-            is_context_error = any(
-                [
-                    "context_too_long" in error_str,
-                    "context window" in error_str,
-                    "exceeds" in error_str and "limit" in error_str,
-                    "maximum context length" in error_str,
-                    "too large" in error_str and "tokens" in error_str,
-                ]
+            # ========== USE STRUCTURED ERROR FLAGS (NOT EMOJI/STRING PARSING) ==========
+            # Check if it's an authentication error using explicit flag
+            is_auth_error = (
+                result.get("auth_required") or result.get("error_type") == "authentication"
             )
 
-            if is_context_error:
+            # Check if it's a context window error using error type
+            is_context_error = result.get("error_type") == "context_too_long"
+            # ========== END STRUCTURED ERROR CHECK ==========
+
+            if is_auth_error:
+                # Use the same VPN-aware auth flow as the streaming case
+                st.session_state.auth_flow_step = "vpn_warning"
+                st.session_state.auth_pending_message = user_message
+                message_placeholder.empty()
+                # Remove the user message from chat history since we'll retry after auth
+                if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
+                    st.session_state.messages.pop()
+                st.rerun()
+
+            elif is_context_error:
                 message_placeholder.error("💬 **Conversation Too Long**")
                 st.warning(
                     "This conversation has exceeded the model's context window. "
@@ -401,12 +592,13 @@ if "pending_query" in st.session_state:
                 with col2:
                     if st.button("☁️ Use Cloud Instead", type="secondary", use_container_width=True):
                         st.session_state.tier_preference = "cloud"
+                        st.session_state._sync_tier_selector = True  # Sync the dropdown
                         st.rerun()
             else:
                 message_placeholder.error(f"❌ Error: {error_msg}")
 
                 # ========== ADD HELPFUL MESSAGE FOR 400 ERRORS ==========
-                if "400" in error_str:
+                if "400" in error_msg:
                     st.info(
                         "💡 This might be a context limit issue. Try starting a new conversation or using Cloud tier."
                     )
