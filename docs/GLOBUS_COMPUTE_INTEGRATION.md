@@ -22,7 +22,7 @@
 
 ## 1. Executive Summary
 
-STREAM (Smart Tiered Routing for Efficient AI at Marquette) is a multi-tier AI gateway that intelligently routes user queries to the most appropriate computational resource:
+STREAM (Smart Tiered Routing Engine for AI Models) is a multi-tier AI gateway that intelligently routes user queries to the most appropriate computational resource:
 
 - **Local Tier**: Ollama running on local Docker (free, fast, limited capability)
 - **Lakeshore Tier**: Campus HPC GPU cluster via Globus Compute (low cost, powerful)
@@ -201,7 +201,7 @@ The `lakeshore-proxy` service is a FastAPI application that:
 3. Submits tasks to the Lakeshore endpoint
 4. Returns results to the middleware
 
-**File**: `stream/proxy/app.py`
+**File**: [`stream/proxy/app.py`](stream/proxy/app.py)
 
 ---
 
@@ -330,7 +330,7 @@ The Globus SDK provides `LocalServerLoginFlowManager` which:
 
 ### 6.3 Implementation Details
 
-**File**: `stream/middleware/core/globus_auth.py`
+**File**: [`stream/middleware/core/globus_auth.py`](stream/middleware/core/globus_auth.py)
 
 ```python
 from globus_compute_sdk.sdk.auth.globus_app import get_globus_app
@@ -392,7 +392,7 @@ def authenticate_with_browser_callback() -> Tuple[bool, str]:
 
 When a user's request routes to Lakeshore and authentication is needed:
 
-**File**: `frontends/streamlit/streamlit_app.py`
+**File**: [`frontends/streamlit/streamlit_app.py`](frontends/streamlit/streamlit_app.py)
 
 ```python
 # Detect auth error in streaming response
@@ -437,7 +437,7 @@ Let's trace a request from the user typing a question to receiving a response fr
 │ STEP 2: SDK Sends to Middleware                                            │
 ├────────────────────────────────────────────────────────────────────────────┤
 │                                                                            │
-│  ChatHandler.chat() makes HTTP POST to middleware:                         │
+│  stream/sdk/python/chat_handler.py - ChatHandler.chat() makes HTTP POST:   │
 │                                                                            │
 │  POST http://middleware:5000/v1/chat/completions                           │
 │  {                                                                         │
@@ -453,11 +453,11 @@ Let's trace a request from the user typing a question to receiving a response fr
 │ STEP 3: Middleware Analyzes Query Complexity                               │
 ├────────────────────────────────────────────────────────────────────────────┤
 │                                                                            │
-│  complexity_judge.py analyzes the query:                                   │
+│  stream/middleware/core/complexity_judge.py analyzes the query:            │
 │  - Keywords detected: "architecture", "deep learning", "explain"           │
 │  - Complexity: HIGH (requires detailed technical explanation)              │
 │                                                                            │
-│  query_router.py determines tier:                                          │
+│  stream/middleware/core/query_router.py determines tier:                   │
 │  - HIGH complexity → Prefer LAKESHORE or CLOUD                             │
 │  - Check tier health → LAKESHORE available                                 │
 │  - Decision: Route to LAKESHORE                                            │
@@ -469,7 +469,7 @@ Let's trace a request from the user typing a question to receiving a response fr
 │ STEP 4: Middleware Forwards to Lakeshore Proxy                             │
 ├────────────────────────────────────────────────────────────────────────────┤
 │                                                                            │
-│  streaming.py sends request to lakeshore-proxy:                            │
+│  stream/middleware/core/streaming.py sends request to lakeshore-proxy:     │
 │                                                                            │
 │  POST http://lakeshore-proxy:8001/v1/chat/completions                      │
 │  {                                                                         │
@@ -485,7 +485,7 @@ Let's trace a request from the user typing a question to receiving a response fr
 │ STEP 5: Proxy Submits to Globus Compute                                    │
 ├────────────────────────────────────────────────────────────────────────────┤
 │                                                                            │
-│  globus_compute_client.py:                                                 │
+│  stream/middleware/core/globus_compute_client.py:                          │
 │                                                                            │
 │  1. Check authentication status                                            │
 │  2. Create Executor with endpoint_id                                       │
@@ -589,33 +589,22 @@ Let's trace a request from the user typing a question to receiving a response fr
 
 ### 8.1 Key Files and Their Purposes
 
-```
-STREAM/
-├── frontends/streamlit/
-│   └── streamlit_app.py          # Web UI, auth flow UI, chat interface
-│
-├── stream/
-│   ├── middleware/
-│   │   ├── core/
-│   │   │   ├── globus_auth.py    # Zero-friction OAuth implementation
-│   │   │   ├── globus_compute_client.py  # Task submission to Globus
-│   │   │   ├── query_router.py   # Tier selection logic
-│   │   │   ├── tier_health.py    # Health checks for each tier
-│   │   │   └── streaming.py      # SSE streaming response handler
-│   │   │
-│   │   └── routes/
-│   │       └── chat.py           # /chat/completions endpoint
-│   │
-│   ├── proxy/
-│   │   └── app.py                # Lakeshore proxy FastAPI service
-│   │
-│   └── sdk/python/
-│       └── chat_handler.py       # Python SDK for frontends
-│
-└── docker-compose.yml            # Service orchestration
-```
+| File | Purpose |
+|------|---------|
+| [`frontends/streamlit/streamlit_app.py`](frontends/streamlit/streamlit_app.py) | Web UI, auth flow UI, chat interface |
+| [`stream/middleware/core/globus_auth.py`](stream/middleware/core/globus_auth.py) | Zero-friction OAuth implementation |
+| [`stream/middleware/core/globus_compute_client.py`](stream/middleware/core/globus_compute_client.py) | Task submission to Globus |
+| [`stream/middleware/core/query_router.py`](stream/middleware/core/query_router.py) | Tier selection logic |
+| [`stream/middleware/core/tier_health.py`](stream/middleware/core/tier_health.py) | Health checks for each tier |
+| [`stream/middleware/core/streaming.py`](stream/middleware/core/streaming.py) | SSE streaming response handler |
+| [`stream/middleware/routes/chat.py`](stream/middleware/routes/chat.py) | /chat/completions endpoint |
+| [`stream/proxy/app.py`](stream/proxy/app.py) | Lakeshore proxy FastAPI service |
+| [`stream/sdk/python/chat_handler.py`](stream/sdk/python/chat_handler.py) | Python SDK for frontends |
+| [`docker-compose.yml`](docker-compose.yml) | Service orchestration |
 
 ### 8.2 globus_auth.py - Zero-Friction Authentication
+
+**File**: [`stream/middleware/core/globus_auth.py`](stream/middleware/core/globus_auth.py)
 
 ```python
 """
@@ -671,6 +660,13 @@ def is_authenticated() -> bool:
 ```
 
 ### 8.3 globus_compute_client.py - Task Submission
+
+**File**: [`stream/middleware/core/globus_compute_client.py`](stream/middleware/core/globus_compute_client.py)
+
+Key sections:
+- Lines 49-137: `remote_vllm_inference()` - The function that executes on Lakeshore
+- Lines 145-469: `GlobusComputeClient` class - Task submission and authentication
+- Lines 318-400: `submit_inference()` - Main method for submitting inference tasks
 
 ```python
 """
@@ -731,6 +727,8 @@ class GlobusComputeClient:
 
 ### 8.4 query_router.py - Intelligent Routing
 
+**File**: [`stream/middleware/core/query_router.py`](stream/middleware/core/query_router.py)
+
 ```python
 """
 Routing logic determines which tier handles each query.
@@ -773,6 +771,8 @@ def get_tier_for_query(query: str, user_preference: str = "auto") -> str:
 ```
 
 ### 8.5 Docker Compose - Service Orchestration
+
+**File**: [`docker-compose.yml`](docker-compose.yml)
 
 ```yaml
 # Key parts of docker-compose.yml
@@ -842,11 +842,11 @@ Most responses fit comfortably within 1000 tokens (~750 words), so reserving 85%
 
 ### 9.4 Implementation in Lakeshore Proxy
 
+**File**: [`stream/proxy/app.py:100-139`](stream/proxy/app.py#L100-L139)
+
 The Lakeshore proxy defaults to `max_tokens=1024`:
 
 ```python
-# stream/proxy/app.py
-
 # With 8192 context and max_tokens=1024:
 #   - ~7000 tokens for conversation history (85%) ≈ 5,250 words of chat
 #   - ~1000 tokens for model response (15%) ≈ 750 words per response
@@ -915,7 +915,7 @@ To provide consistent UX across all tiers, we simulate streaming for Lakeshore r
 
 ### 10.3 Implementation Details
 
-**File**: `stream/proxy/app.py`
+**File**: [`stream/proxy/app.py:251-345`](stream/proxy/app.py#L251-L345)
 
 ```python
 def _convert_json_to_sse_stream(json_response: dict):
@@ -1065,6 +1065,8 @@ Despite the overhead, Lakeshore tier is valuable when:
 
 ### 11.7 Latency Monitoring
 
+**File**: [`stream/middleware/core/streaming.py`](stream/middleware/core/streaming.py) - MetricsTracker class
+
 STREAM tracks latency metrics for optimization:
 
 ```python
@@ -1199,6 +1201,12 @@ Diagnosis:
 ### 13.3 Docker & Credential Issues
 
 **Symptom**: "unable to open database file" error after authentication
+
+**Related Files**:
+- [`stream/proxy/app.py:67-86`](stream/proxy/app.py#L67-L86) - `/reload-auth` endpoint
+- [`stream/middleware/core/globus_compute_client.py:226-276`](stream/middleware/core/globus_compute_client.py#L226-L276) - `reload_credentials()` method
+- [`frontends/streamlit/streamlit_app.py`](frontends/streamlit/streamlit_app.py) - Auto-restart logic
+
 ```
 Cause: Docker volume mount timing issue
 
@@ -1233,6 +1241,9 @@ If empty:
 ```
 
 **Symptom**: max_tokens error (400 Bad Request)
+
+**Related File**: [`stream/proxy/app.py:100-139`](stream/proxy/app.py#L100-L139) - max_tokens handling with educational comments
+
 ```
 Error: 'max_tokens' is too large: 8192. This model's maximum context length is
 8192 tokens and your request has 389 input tokens
