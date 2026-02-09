@@ -163,6 +163,7 @@ class ChatHandler:
         full_text = ""
         tier = "unknown"
         model = "unknown"
+        complexity = "unknown"
         cost = 0.0
         input_tokens = 0
         output_tokens = 0
@@ -284,9 +285,10 @@ class ChatHandler:
                             tier = metadata.get("current_tier", tier)
                             logger.warning(f"⚠️ Fallback detected: {original_tier} → {tier}")
 
-                        # Update tier/model
+                        # Update tier/model/complexity
                         tier = metadata.get("tier", tier)
                         model = metadata.get("model", model)
+                        complexity = metadata.get("complexity", complexity)
 
                         # Update metadata immediately so UI can access tier info
                         # during streaming (before generator completes)
@@ -294,6 +296,9 @@ class ChatHandler:
                             {
                                 "tier": tier,
                                 "model": model,
+                                "complexity": complexity,
+                                "fallback_used": fallback_used,
+                                "original_tier": original_tier,
                             }
                         )
 
@@ -373,6 +378,7 @@ class ChatHandler:
         self._last_stream_metadata = {
             "tier": tier,
             "model": model,
+            "complexity": complexity,
             "cost": cost,
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,

@@ -119,6 +119,7 @@ async def create_streaming_response(
             "tier": current_tier,
             "model": current_model,
             "correlation_id": correlation_id,
+            "complexity": complexity,  # Actual query complexity for UI display
         }
     }
 
@@ -267,6 +268,7 @@ async def create_streaming_response(
                     "stream_metadata": {
                         "tier": current_tier,
                         "model": current_model,
+                        "complexity": complexity,  # Actual query complexity
                         "fallback_used": len(tiers_tried) > 1,  # Did we use fallback?
                         "tiers_tried": tiers_tried,  # Which tiers did we try?
                         "cost": {
@@ -369,6 +371,7 @@ async def create_streaming_response(
                             "original_tier": tier,
                             "current_tier": current_tier,
                             "model": current_model,
+                            "complexity": complexity,  # Preserve original complexity
                             "reason": get_fallback_reason(e),
                         }
                     }

@@ -28,7 +28,7 @@ STREAM (Smart Tiered Routing Engine for AI Models) is a multi-tier AI gateway th
 - **Lakeshore Tier**: Campus HPC GPU cluster via Globus Compute (low cost, powerful)
 - **Cloud Tier**: Commercial APIs like Claude/GPT (paid, most capable)
 
-The **Globus Compute integration** enables STREAM to leverage Marquette's Lakeshore HPC cluster for AI inference without requiring users to:
+The **Globus Compute integration** enables STREAM to leverage UIC's Lakeshore HPC cluster for AI inference without requiring users to:
 - SSH into the cluster
 - Write SLURM job scripts
 - Manage job queues
@@ -89,7 +89,7 @@ User → API Call → Globus Compute → HPC Cluster → Results → User
 
 ### 3.1 The Challenge
 
-Marquette's Lakeshore HPC cluster has NVIDIA GPUs capable of running large language models via vLLM. However:
+UIC's Lakeshore HPC cluster has NVIDIA GPUs capable of running large language models via vLLM. However:
 
 - vLLM runs on compute nodes, not login nodes
 - Compute nodes are behind a firewall (no direct external access)
@@ -1043,7 +1043,7 @@ elif complexity == "high":
 
 #### 2. User Feedback (Implemented)
 Show engaging progress messages so users don't feel the wait:
-- "🏔️ Connecting to Marquette's Lakeshore HPC..."
+- "🏫 Connecting to UIC's Lakeshore HPC..."
 - "💡 Did you know? vLLM serves models with continuous batching!"
 
 #### 3. Future Optimizations (Potential)

@@ -260,15 +260,15 @@ TIER_MESSAGES = {
         ],
     },
     "lakeshore": {
-        "icon": "🏔️",
+        "icon": "🏫",
         "name": "Lakeshore HPC",
-        "connecting": "Connecting to Marquette's Lakeshore HPC...",
+        "connecting": "Connecting to UIC's Lakeshore HPC...",
         "thinking": "Lakeshore is processing your query...",
         "facts": [
-            "🖥️ Running on NVIDIA A100 GPUs at Marquette University",
+            "🖥️ Running on GPUs at UIC",
             "🔐 Secured via Globus Compute authentication",
             "🌐 Route: You → Globus Cloud → HPC → vLLM → You",
-            "💰 Free for Marquette researchers - no API costs!",
+            "💰 Free for UIC researchers - no API costs!",
             "🚀 vLLM uses continuous batching for high throughput",
             "⏱️ First request may take longer (cold start)",
             "🔬 Same GPUs used for cutting-edge research",
@@ -293,7 +293,7 @@ TIER_MESSAGES = {
         "thinking": "AI is generating your response...",
         "facts": [
             "🧠 STREAM analyzes your query to pick the best tier automatically.",
-            "📊 Low complexity → Local,  Medium → Lakeshore HPC,  High → Cloud.",
+            "📊 Low complexity → Local,    Medium → Lakeshore HPC,    High → Cloud.",
             "🎯 Smart routing optimizes for both cost and quality.",
             "⚖️ The LLM judge evaluates query complexity in real-time.",
         ],
@@ -725,29 +725,42 @@ if "pending_query" in st.session_state:
             try:
                 for chunk in result["response"]:
                     if not first_chunk_received:
-                        # First chunk arrived! Get the actual tier from metadata
+                        # First chunk arrived! Get the actual tier and complexity from metadata
                         actual_meta = st.session_state.chat_handler.get_last_stream_metadata()
                         actual_tier = actual_meta.get("tier", "unknown")
+                        actual_complexity = actual_meta.get("complexity", "unknown")
+                        is_fallback = actual_meta.get("fallback_used", False)
+                        original_tier = actual_meta.get("original_tier")
 
-                        # Tier display info for routing decision
-                        tier_display = {
-                            "local": {"icon": "💻", "name": "Local", "desc": "Low complexity"},
-                            "lakeshore": {
-                                "icon": "🏫",
-                                "name": "Lakeshore HPC",
-                                "desc": "Medium complexity",
-                            },
-                            "cloud": {"icon": "☁️", "name": "Cloud", "desc": "High complexity"},
+                        # Tier display info
+                        tier_icons = {
+                            "local": {"icon": "💻", "name": "Local"},
+                            "lakeshore": {"icon": "🏫", "name": "Lakeshore"},
+                            "cloud": {"icon": "☁️", "name": "Cloud"},
                         }
-                        display = tier_display.get(
-                            actual_tier, {"icon": "🤖", "name": actual_tier.title(), "desc": ""}
+                        tier_info_display = tier_icons.get(
+                            actual_tier, {"icon": "🤖", "name": actual_tier.title()}
                         )
 
+                        # Complexity display (use actual complexity from middleware)
+                        complexity_display = {
+                            "low": "Low complexity",
+                            "medium": "Medium complexity",
+                            "high": "High complexity",
+                        }
+                        complexity_desc = complexity_display.get(actual_complexity, "")
+
                         # Show routing decision in status
-                        if tier_pref == "auto" and display["desc"]:
-                            label = f"{display['icon']} {display['desc']} → {display['name']}"
+                        if is_fallback and original_tier:
+                            # Fallback occurred - show original tier that failed
+                            original_name = tier_icons.get(original_tier, {}).get(
+                                "name", original_tier.title()
+                            )
+                            label = f"🔄 {complexity_desc} → {tier_info_display['name']} ({original_name} unavailable)"
+                        elif tier_pref == "auto" and complexity_desc:
+                            label = f"{tier_info_display['icon']} {complexity_desc} → {tier_info_display['name']}"
                         else:
-                            label = f"{display['icon']} {display['name']}"
+                            label = f"{tier_info_display['icon']} {tier_info_display['name']}"
 
                         status_container.update(
                             label=label,
