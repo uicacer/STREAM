@@ -338,6 +338,15 @@ class ChatHandler:
                         tier = metadata.get("tier", tier)
                         model = metadata.get("model", model)
 
+                        # Update metadata immediately so UI can access tier info
+                        # during streaming (before generator completes)
+                        self._last_stream_metadata.update(
+                            {
+                                "tier": tier,
+                                "model": model,
+                            }
+                        )
+
                         # Extract cost
                         if "cost" in metadata:
                             cost = metadata["cost"].get("total", 0.0)

@@ -269,8 +269,11 @@ def _convert_json_to_sse_stream(json_response: dict):
     =========================================================================
     """
     # Configuration for simulated streaming
-    words_per_chunk = 3  # How many words to send at once (smaller = smoother)
-    delay_between_chunks = 0.02  # Seconds between chunks (20ms = natural typing speed)
+    # Speed calculation: words_per_chunk / delay = words per second
+    # Current: 2 words / 0.05s = ~40 words/second (comfortable reading pace)
+    # For reference: average reading speed is ~250 words/minute = ~4 words/second
+    words_per_chunk = 2  # Fewer words per chunk = smoother appearance
+    delay_between_chunks = 0.05  # 50ms between chunks (comfortable pace)
 
     async def sse_generator():
         choices = json_response.get("choices", [])

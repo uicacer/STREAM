@@ -114,9 +114,11 @@ OLLAMA_MODELS = {
 # =============================================================================
 
 MODEL_CONTEXT_LIMITS = {
-    "local-llama-tiny": {"total": 2048, "reserve_output": 300},
-    "local-llama": {"total": 2048, "reserve_output": 300},
-    "local-llama-quality": {"total": 8192, "reserve_output": 500},
+    # Llama 3.2 models support up to 128K context, but we limit to 8K for performance
+    # Higher context = more memory usage and slower inference on local machines
+    "local-llama-tiny": {"total": 8192, "reserve_output": 1024},
+    "local-llama": {"total": 8192, "reserve_output": 1024},
+    "local-llama-quality": {"total": 8192, "reserve_output": 1024},
     "lakeshore-qwen": {"total": 8192, "reserve_output": 500},
     "cloud-claude": {"total": 200000, "reserve_output": 4000},
     "cloud-gpt": {"total": 128000, "reserve_output": 4000},

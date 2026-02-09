@@ -6,6 +6,7 @@
 
 import logging
 import os
+import random
 import subprocess
 import time
 import traceback
@@ -264,11 +265,13 @@ TIER_MESSAGES = {
         "connecting": "Connecting to Marquette's Lakeshore HPC...",
         "thinking": "Lakeshore is processing your query...",
         "facts": [
-            "🖥️ Lakeshore runs on NVIDIA A100 GPUs at Marquette University.",
-            "🔐 Globus Compute provides secure, authenticated access to HPC resources.",
-            "🌐 Your request travels: You → Globus Cloud → HPC → vLLM → Back to you!",
-            "💰 HPC tier is free for Marquette researchers - no cloud API costs!",
-            "🚀 vLLM serves models with continuous batching for high throughput.",
+            "🖥️ Running on NVIDIA A100 GPUs at Marquette University",
+            "🔐 Secured via Globus Compute authentication",
+            "🌐 Route: You → Globus Cloud → HPC → vLLM → You",
+            "💰 Free for Marquette researchers - no API costs!",
+            "🚀 vLLM uses continuous batching for high throughput",
+            "⏱️ First request may take longer (cold start)",
+            "🔬 Same GPUs used for cutting-edge research",
         ],
     },
     "cloud": {
@@ -290,7 +293,7 @@ TIER_MESSAGES = {
         "thinking": "AI is generating your response...",
         "facts": [
             "🧠 STREAM analyzes your query to pick the best tier automatically.",
-            "📊 Simple questions → Local (fast & free), Complex → HPC or Cloud.",
+            "📊 Low complexity → Local, Medium → Lakeshore HPC, High → Cloud.",
             "🎯 Smart routing optimizes for both cost and quality.",
             "⚖️ The LLM judge evaluates query complexity in real-time.",
         ],
@@ -695,41 +698,53 @@ if "pending_query" in st.session_state:
             start_time = time.time()
             first_chunk_received = False
 
-            # Create a status container for engaging progress messages
-            status_container = st.empty()
-            last_status_update = 0
-
             # Get tier-specific info for status messages
             tier_pref = st.session_state.tier_preference
             tier_info = TIER_MESSAGES.get(tier_pref, TIER_MESSAGES["auto"])
 
-            # Show initial connecting message with tier-specific info
-            status_container.info(
-                f"{tier_info['icon']} **{tier_info['connecting']}**\n\n"
-                f"_{tier_info['facts'][0]}_"
+            # Use st.status() which has a built-in animated spinner
+            # This keeps animating even while we wait for chunks (unlike st.info)
+            initial_fact = random.choice(tier_info["facts"])
+            status_container = st.status(
+                f"{tier_info['icon']} {tier_info['connecting']}",
+                expanded=True,
             )
+            status_container.write(f"_{initial_fact}_")
 
             # Stream response with engaging progress updates
             try:
                 for chunk in result["response"]:
-                    elapsed = time.time() - start_time
-
                     if not first_chunk_received:
-                        # Update status message while waiting (rotate fun facts)
-                        if elapsed > 2 and elapsed - last_status_update >= 2:
-                            last_status_update = elapsed
-                            fact_index = int(elapsed / 2) % len(tier_info["facts"])
-                            wait_msg = (
-                                tier_info["thinking"] if elapsed > 1 else tier_info["connecting"]
-                            )
-                            status_container.info(
-                                f"{tier_info['icon']} **{wait_msg}**\n\n"
-                                f"_{tier_info['facts'][fact_index]}_"
-                            )
+                        # First chunk arrived! Get the actual tier from metadata
+                        actual_meta = st.session_state.chat_handler.get_last_stream_metadata()
+                        actual_tier = actual_meta.get("tier", "unknown")
 
-                        # First chunk arrived! Clear status and start showing response
+                        # Tier display info for routing decision
+                        tier_display = {
+                            "local": {"icon": "💻", "name": "Local", "desc": "Low complexity"},
+                            "lakeshore": {
+                                "icon": "🏫",
+                                "name": "Lakeshore HPC",
+                                "desc": "Medium complexity",
+                            },
+                            "cloud": {"icon": "☁️", "name": "Cloud", "desc": "High complexity"},
+                        }
+                        display = tier_display.get(
+                            actual_tier, {"icon": "🤖", "name": actual_tier.title(), "desc": ""}
+                        )
+
+                        # Show routing decision in status
+                        if tier_pref == "auto" and display["desc"]:
+                            label = f"{display['icon']} {display['desc']} → {display['name']}"
+                        else:
+                            label = f"{display['icon']} {display['name']}"
+
+                        status_container.update(
+                            label=label,
+                            state="complete",
+                            expanded=False,
+                        )
                         first_chunk_received = True
-                        status_container.empty()
                         full_response = chunk
                         message_placeholder.markdown(full_response + "▌")
                     else:
@@ -737,15 +752,23 @@ if "pending_query" in st.session_state:
                         message_placeholder.markdown(full_response + "▌")
 
             except Exception as e:
-                status_container.empty()
+                status_container.update(
+                    label="❌ Stream interrupted",
+                    state="error",
+                    expanded=False,
+                )
                 st.error(f"Stream interrupted: {e}")
                 # Save partial response
                 st.session_state.messages.append(
                     {"role": "assistant", "content": full_response + " [INTERRUPTED]"}
                 )
 
-            # Clear status container
-            status_container.empty()
+            # Ensure status is marked complete (if we got here without chunks)
+            if not first_chunk_received:
+                status_container.update(
+                    label=f"{tier_info['icon']} Waiting for response...",
+                    state="running",
+                )
 
             # Show final response or placeholder
             if first_chunk_received:
