@@ -1,37 +1,20 @@
 # =============================================================================
-# Lakeshore vLLM Proxy - Dockerfile
+# Lakeshore vLLM Proxy - Simplified Dockerfile (reuses middleware base)
 # =============================================================================
-# Lightweight HTTP proxy that routes requests to Lakeshore via:
-# - Globus Compute (preferred)
-# - SSH port forwarding (fallback)
+# This version reuses the existing middleware image to avoid pulling new images
 # =============================================================================
 
-FROM python:3.11-slim
+FROM stream-middleware:latest
 
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    --no-install-recommends \
-    gcc \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy project files
-# We need the entire stream package for imports
-COPY pyproject.toml uv.lock ./
-COPY stream/ ./stream/
-
-# Install Python dependencies using uv
-RUN pip install --no-cache-dir uv && \
-    uv pip install --system --no-cache-dir -e .
+# Copy the proxy module and its dependency (middleware image was built before these existed)
+COPY stream/proxy /app/stream/proxy
+COPY stream/middleware/core/globus_compute_client.py /app/stream/middleware/core/globus_compute_client.py
 
 # Expose proxy port
 EXPOSE 8001
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import httpx; httpx.get('http://localhost:8001/health', timeout=5.0)" || exit 1
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1

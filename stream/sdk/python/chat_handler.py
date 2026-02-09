@@ -76,59 +76,9 @@ class ChatHandler:
         self.total_cost = 0.0
         self.query_count = 0
         self._last_stream_metadata = {}
-        self._cost_rates = {}  # Cost rates from middleware (for UI display only)
 
         # HTTP client for middleware communication
         self.client = httpx.Client(timeout=REQUEST_TIMEOUT, follow_redirects=True)
-
-        # Load cost rates from middleware (for UI cost estimates only)
-        self._load_cost_rates()
-
-    def _load_cost_rates(self):
-        """
-        Load cost rates from middleware (for UI display only)
-
-        Note: This is NOT used for routing decisions (middleware handles that).
-        It's only used to show estimated costs in the UI when middleware
-        doesn't return them (e.g., during streaming before completion).
-        """
-        try:
-            response = self.client.get(f"{MIDDLEWARE_BASE_URL}/v1/costs/models", timeout=5.0)
-            if response.status_code == 200:
-                data = response.json()
-                self._cost_rates = data.get("costs", {})
-                logger.debug(f"Loaded cost rates for {len(self._cost_rates)} models")
-            else:
-                logger.warning(f"⚠️ Failed to load cost rates: HTTP {response.status_code}")
-        except Exception as e:
-            logger.error(f"⚠️ Failed to load cost rates: {e}")
-
-    def estimate_cost(self, model: str, input_tokens: int, output_tokens: int) -> float:
-        """
-        Estimate cost for UI display only
-
-        IMPORTANT: This is NOT used for routing decisions!
-        Middleware calculates authoritative costs.
-
-        This method only exists to show estimated costs in the UI
-        when middleware doesn't provide them (e.g., during streaming).
-
-        Args:
-            model: Model identifier (e.g., "cloud-claude")
-            input_tokens: Number of input tokens
-            output_tokens: Number of output tokens
-
-        Returns:
-            Estimated cost in dollars (for display purposes only)
-        """
-        if model not in self._cost_rates:
-            return 0.0
-
-        rates = self._cost_rates[model]
-        input_cost = input_tokens * rates.get("input", 0.0)
-        output_cost = output_tokens * rates.get("output", 0.0)
-
-        return input_cost + output_cost
 
     def chat(
         self,
@@ -352,6 +302,10 @@ class ChatHandler:
                             cost = metadata["cost"].get("total", 0.0)
                             input_tokens = metadata["cost"].get("input_tokens", 0)
                             output_tokens = metadata["cost"].get("output_tokens", 0)
+                            logger.info(
+                                f"💰 Cost extracted from stream_metadata: ${cost:.6f} "
+                                f"(in={input_tokens}, out={output_tokens})"
+                            )
 
                     # Extract content
                     if "choices" in data and len(data["choices"]) > 0:
@@ -432,7 +386,8 @@ class ChatHandler:
 
         logger.info(
             f"Stream completed - tier={tier}, model={model}, "
-            f"cost=${cost:.6f}, tokens={input_tokens + output_tokens}"
+            f"cost=${cost:.6f}, tokens={input_tokens + output_tokens}, "
+            f"fallback_used={fallback_used}"
         )
 
     def _handle_non_streaming_request(

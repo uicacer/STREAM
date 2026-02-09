@@ -165,6 +165,17 @@ async def create_streaming_response(
                 if first_chunk:
                     tracker.record_first_token()
                     first_chunk = False
+
+                # ---------------------------------------------------------------------
+                # IMPORTANT: Intercept [DONE] marker - don't forward it yet!
+                # We need to send cost metadata BEFORE [DONE] so SDK can process it.
+                # ---------------------------------------------------------------------
+                if line.startswith("data: "):
+                    data_str = line[6:].strip()
+                    if data_str == "[DONE]":
+                        # Don't yield [DONE] yet - we'll send it after cost metadata
+                        continue
+
                 # Forward the line to the client immediately
                 # This provides real-time streaming (no buffering)
                 yield f"{line}\n\n"  # Add extra newline for SSE format
@@ -179,7 +190,7 @@ async def create_streaming_response(
                         # Extract JSON payload (skip "data: " prefix and trim whitespace)
                         data_str = line[6:].strip()
 
-                        # Skip the "[DONE]" marker (end of stream)
+                        # [DONE] already handled above
                         if data_str == "[DONE]":
                             continue
 
@@ -268,28 +279,31 @@ async def create_streaming_response(
 
                 yield f"data: {json.dumps(cost_event)}\n\n"
 
-                # Log success metrics
-                if len(tiers_tried) > 1:
-                    logger.warning(
-                        f"[{correlation_id}] Fallback successful: {tiers_tried[0]} → {current_tier}",
-                        extra={
-                            "correlation_id": correlation_id,
-                            "tiers_tried": tiers_tried,
-                        },
-                    )
+            # Send [DONE] AFTER cost metadata so SDK can process cost first
+            yield "data: [DONE]\n\n"
 
-                logger.info(
-                    f"[{correlation_id}] Stream completed successfully: "
-                    f"cost=${cost:.6f}, tokens={input_tokens + output_tokens}",
+            # Log success metrics
+            if len(tiers_tried) > 1:
+                logger.warning(
+                    f"[{correlation_id}] Fallback successful: {tiers_tried[0]} → {current_tier}",
                     extra={
                         "correlation_id": correlation_id,
-                        "tier": current_tier,
-                        "cost": cost,
-                        "total_tokens": input_tokens + output_tokens,
-                        "input_tokens": input_tokens,
-                        "output_tokens": output_tokens,
+                        "tiers_tried": tiers_tried,
                     },
                 )
+
+            logger.info(
+                f"[{correlation_id}] Stream completed successfully: "
+                f"cost=${cost:.6f}, tokens={input_tokens + output_tokens}",
+                extra={
+                    "correlation_id": correlation_id,
+                    "tier": current_tier,
+                    "cost": cost,
+                    "total_tokens": input_tokens + output_tokens,
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                },
+            )
 
             # Exit retry loop - we succeeded!
             return

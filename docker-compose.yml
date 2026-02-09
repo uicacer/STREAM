@@ -61,7 +61,7 @@ services:
   lakeshore-proxy:
     build:
       context: .
-      dockerfile: Dockerfile.proxy.simple
+      dockerfile: Dockerfile.proxy
     container_name: stream-lakeshore-proxy
     ports:
       - "8001:8001"  # Proxy port (internal service, not usually accessed from host)
@@ -188,42 +188,43 @@ services:
   # ==========================================================================
   # Streamlit Frontend - Chat Interface
   # ==========================================================================
-  frontend:
-    build:
-      context: .
-      dockerfile: Dockerfile.frontend
-    container_name: stream-frontend
-    ports:
-      - "${FRONTEND_EXTERNAL_PORT}:${FRONTEND_PORT}" # Left side: Port on your laptop/server; Right side: Port in Docker container
-    env_file:
-      - .env
-    environment:
-      # Middleware connection (internal Docker network)
-      - MIDDLEWARE_URL=${MIDDLEWARE_URL}
-
-      # Streamlit config
-      - STREAMLIT_SERVER_PORT=${FRONTEND_PORT}
-    depends_on:
-      middleware:
-        condition: service_healthy
-    restart: unless-stopped
-    networks:
-      - stream-network
-    healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:${FRONTEND_PORT}/health')\" || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s # Give Streamlit extra time to start
-      # The difference between "start_period" and "interval" is that "start_period" is the initial delay before starting health checks, while "interval" is the time between subsequent checks.
-    deploy:
-      resources:
-        limits:
-          memory: 1G
-          cpus: '1.0'
-        reservations:
-          memory: 256M
-          cpus: '0.25'
+  # COMMENTED OUT: Frontend runs on host for Globus OAuth authentication.
+  # The browser-based OAuth flow requires the frontend to run on the host
+  # machine so it can open the browser and receive the OAuth callback.
+  # To run: streamlit run frontends/streamlit/streamlit_app.py
+  # ==========================================================================
+  # frontend:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile.frontend
+  #   container_name: stream-frontend
+  #   ports:
+  #     - "${FRONTEND_EXTERNAL_PORT}:${FRONTEND_PORT}"
+  #   env_file:
+  #     - .env
+  #   environment:
+  #     - MIDDLEWARE_URL=${MIDDLEWARE_URL}
+  #     - STREAMLIT_SERVER_PORT=${FRONTEND_PORT}
+  #   depends_on:
+  #     middleware:
+  #       condition: service_healthy
+  #   restart: unless-stopped
+  #   networks:
+  #     - stream-network
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:${FRONTEND_PORT}/health')\" || exit 1"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+  #     start_period: 60s
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         memory: 1G
+  #         cpus: '1.0'
+  #       reservations:
+  #         memory: 256M
+  #         cpus: '0.25'
 # =============================================================================
 # Networks
 # =============================================================================

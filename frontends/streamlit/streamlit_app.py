@@ -293,7 +293,7 @@ TIER_MESSAGES = {
         "thinking": "AI is generating your response...",
         "facts": [
             "🧠 STREAM analyzes your query to pick the best tier automatically.",
-            "📊 Low complexity → Local, Medium → Lakeshore HPC, High → Cloud.",
+            "📊 Low complexity → Local,  Medium → Lakeshore HPC,  High → Cloud.",
             "🎯 Smart routing optimizes for both cost and quality.",
             "⚖️ The LLM judge evaluates query complexity in real-time.",
         ],
@@ -416,7 +416,7 @@ with st.sidebar:
     with st.expander("ℹ️ Context Window Limits"):
         st.caption("""
         **Per-tier context limits:**
-        - 💻 LOCAL: ~2,000 tokens
+        - 💻 LOCAL: ~8,000 tokens
         - 🏫 LAKESHORE: ~8,000 tokens
         - ☁️ CLOUD: ~200,000 tokens
 
@@ -431,10 +431,12 @@ with st.sidebar:
         st.metric("Total Cost", f"${stats['total_cost']:.4f}")
     with col2:
         st.metric("💻 Local", stats["local_queries"], delta="Free")
-        st.metric("🏫 Lakeshore", stats.get("lakeshore_queries", 0), delta="Free")
+        st.metric("🏫 Lakeshore", stats.get("lakeshore_queries", 0), delta="Low cost")
         st.metric("☁️ Cloud", stats["cloud_queries"])
 
-    st.caption("_💡 Cloud costs are estimated (~4 char/token). Actual costs may vary._")
+    st.caption(
+        "_💡 Costs are estimated from token usage. Local is free, Lakeshore is minimal cost._"
+    )
 
     st.divider()
 
@@ -546,10 +548,15 @@ for message in st.session_state.messages:
             st.caption(f"⏱️ {duration:.2f}s")
         with col3:
             cost = meta.get("cost", 0)
-            if tier in ["cloud", "lakeshore"] and cost > 0:
-                st.caption(f"💰 ~${cost:.6f} (estimate)")
-            elif tier == "lakeshore" and cost == 0:
-                st.caption("💰 Campus GPU (low cost)")
+            if tier == "local":
+                st.caption("💰 FREE")
+            elif tier == "lakeshore":
+                if cost > 0:
+                    st.caption(f"💰 ~${cost:.6f}")
+                else:
+                    st.caption("💰 Low cost")
+            elif tier == "cloud":
+                st.caption(f"💰 ~${cost:.6f}")
             else:
                 st.caption("💰 FREE")
 
@@ -824,28 +831,9 @@ if "pending_query" in st.session_state:
                     )
                 # ========== END FALLBACK WARNING ==========
 
-                # **SHOW "CALCULATING..." FOR COST**
+                # Get cost from middleware (single source of truth)
+                # If cost is 0 for cloud/lakeshore, that's a middleware issue to fix there
                 cost = stream_meta.get("cost", 0.0)
-                correlation_id = result.get("correlation_id")
-
-                # **ESTIMATE COST FOR STREAMING**
-                # Streaming doesn't return usage tokens, so we estimate based on 4 char/token
-                if cost == 0.0 and tier in ["cloud", "lakeshore"]:
-                    # Get last user message length
-                    user_messages = [
-                        m for m in st.session_state.messages if m.get("role") == "user"
-                    ]
-                    input_chars = len(user_messages[-1].get("content", "")) if user_messages else 0
-                    output_chars = len(full_response)
-
-                    # Estimate tokens: ~4 characters per token
-                    input_tokens = input_chars // 4
-                    output_tokens = output_chars // 4
-
-                    # Calculate cost using rates from middleware (single source of truth)
-                    cost = st.session_state.chat_handler.estimate_cost(
-                        model, input_tokens, output_tokens
-                    )
 
                 # Add assistant message to chat
                 st.session_state.messages.append(
