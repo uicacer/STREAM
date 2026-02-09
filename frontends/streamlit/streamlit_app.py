@@ -346,6 +346,7 @@ if "session_stats" not in st.session_state:
     st.session_state.session_stats = {
         "queries": 0,
         "local_queries": 0,
+        "lakeshore_queries": 0,
         "cloud_queries": 0,
         "total_cost": 0.0,
     }
@@ -427,10 +428,11 @@ with st.sidebar:
     col1, col2 = st.columns(2)
     with col1:
         st.metric("Total Queries", stats["queries"])
-        st.metric("Local", stats["local_queries"], delta="Free")
-    with col2:
-        st.metric("Cloud", stats["cloud_queries"])
         st.metric("Total Cost", f"${stats['total_cost']:.4f}")
+    with col2:
+        st.metric("💻 Local", stats["local_queries"], delta="Free")
+        st.metric("🏫 Lakeshore", stats.get("lakeshore_queries", 0), delta="Free")
+        st.metric("☁️ Cloud", stats["cloud_queries"])
 
     st.caption("_💡 Cloud costs are estimated (~4 char/token). Actual costs may vary._")
 
@@ -445,6 +447,7 @@ with st.sidebar:
         st.session_state.session_stats = {
             "queries": 0,
             "local_queries": 0,
+            "lakeshore_queries": 0,
             "cloud_queries": 0,
             "total_cost": 0.0,
         }
@@ -867,6 +870,8 @@ if "pending_query" in st.session_state:
                 st.session_state.session_stats["queries"] += 1
                 if tier == "local":
                     st.session_state.session_stats["local_queries"] += 1
+                elif tier == "lakeshore":
+                    st.session_state.session_stats["lakeshore_queries"] += 1
                 elif tier == "cloud":
                     st.session_state.session_stats["cloud_queries"] += 1
 
@@ -916,6 +921,7 @@ if "pending_query" in st.session_state:
                         st.session_state.session_stats = {
                             "queries": 0,
                             "local_queries": 0,
+                            "lakeshore_queries": 0,
                             "cloud_queries": 0,
                             "total_cost": 0.0,
                         }
