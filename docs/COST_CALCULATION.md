@@ -217,9 +217,9 @@ st.session_state.session_stats["total_cost"] += cost
 | `cloud-gpt` | $0.00001 | $0.00003 | Cloud |
 | `cloud-gpt-cheap` | $0.0000005 | $0.0000015 | Cloud |
 
-### Cost Per 1000 Tokens
+### Cost Per 1 Million Tokens
 
-| Model | Input (per 1K) | Output (per 1K) | Tier |
+| Model | Input (per 1M) | Output (per 1M) | Tier |
 |-------|----------------|-----------------|------|
 | `local-llama-*` | $0.00 | $0.00 | Local |
 | `lakeshore-qwen` | $0.0005 | $0.0005 | Lakeshore |
