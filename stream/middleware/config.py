@@ -61,6 +61,12 @@ LITELLM_API_KEY = os.getenv("LITELLM_MASTER_KEY")
 LAKESHORE_VLLM_ENDPOINT = os.getenv(
     "LAKESHORE_VLLM_ENDPOINT"
 )  # SSH port forward URL (e.g., http://host.docker.internal:8000)
+
+# Lakeshore proxy service configuration (configurable host and port)
+LAKESHORE_PROXY_HOST = os.getenv("LAKESHORE_PROXY_HOST", "lakeshore-proxy")
+LAKESHORE_PROXY_PORT = int(os.getenv("LAKESHORE_PROXY_PORT", "8001"))
+LAKESHORE_PROXY_URL = f"http://{LAKESHORE_PROXY_HOST}:{LAKESHORE_PROXY_PORT}"
+
 USE_GLOBUS_COMPUTE = (
     os.getenv("USE_GLOBUS_COMPUTE", "true").lower() == "true"
 )  # Enable Globus Compute mode
@@ -75,15 +81,44 @@ VLLM_SERVER_URL = os.getenv(
 # HEALTH CHECKS
 # =============================================================================
 
-HEALTH_CHECK_TTL = 3600  # Recheck every hour
+HEALTH_CHECK_TTL = 360  # 6 minutes - slightly longer than background monitor interval (5 min)
 HEALTH_CHECK_TIMEOUT = 5.0
 
 # =============================================================================
 # JUDGE CONFIGURATION
 # =============================================================================
 
-JUDGE_MODEL = "local-llama"
-JUDGE_TIMEOUT = 60
+# Judge strategy options (user can select in UI)
+JUDGE_STRATEGIES = {
+    "ollama-1b": {
+        "model": "local-llama-tiny",
+        "name": "Ollama 1b",
+        "description": "Fastest local, less accurate, free",
+        "icon": "⚡",
+        "timeout": 30,
+    },
+    "ollama-3b": {
+        "model": "local-llama",
+        "name": "Ollama 3b",
+        "description": "Balanced accuracy, free",
+        "icon": "🎯",
+        "timeout": 60,
+    },
+    "haiku": {
+        "model": "cloud-haiku",
+        "name": "Claude Haiku",
+        "description": "Fastest & most accurate, ~$1 per 5,000 judgments",
+        "icon": "🚀",
+        "timeout": 15,
+    },
+}
+
+# Default judge strategy
+DEFAULT_JUDGE_STRATEGY = "ollama-3b"
+
+# Legacy config (for backwards compatibility)
+JUDGE_MODEL = JUDGE_STRATEGIES[DEFAULT_JUDGE_STRATEGY]["model"]
+JUDGE_TIMEOUT = JUDGE_STRATEGIES[DEFAULT_JUDGE_STRATEGY]["timeout"]
 LLM_JUDGE_ENABLED = True
 JUDGE_CACHE_TTL = 3600
 

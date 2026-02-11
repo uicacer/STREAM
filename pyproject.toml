@@ -43,6 +43,11 @@ dev = [
     "ipykernel>=7.1.0",
     "jupyter>=1.1.1",
     "ruff>=0.8.0",
+    "pre-commit>=3.6.0",
+    # Benchmarking tools
+    "matplotlib>=3.8.0",
+    "numpy>=1.26.0",
+    "psutil>=5.9.0",
 ]
 
 # Tell hatchling where the package is

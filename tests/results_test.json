@@ -1,0 +1,353 @@
+{
+  "timestamp": "2026-02-11T12:54:35.403596",
+  "config": {
+    "iterations": 3,
+    "warmup": 1,
+    "test_query": "What is Python?",
+    "hardware": {
+      "local": {
+        "description": "Apple M4 Pro, 24GB, Apple M4 Pro (Metal), macOS 15.6.1",
+        "cpu": "Apple M4 Pro",
+        "ram": "24GB",
+        "gpu": "Apple M4 Pro (Metal)",
+        "os": "macOS 15.6.1",
+        "detection_method": "auto"
+      },
+      "lakeshore": {
+        "description": "UIC Lakeshore HPC - NVIDIA A100 80GB",
+        "cpu": null,
+        "ram": null,
+        "gpu": "NVIDIA A100 80GB",
+        "os": null,
+        "detection_method": "queried from proxy"
+      },
+      "cloud": {
+        "description": "Anthropic Cloud Infrastructure (undisclosed)",
+        "cpu": null,
+        "ram": null,
+        "gpu": null,
+        "os": null,
+        "detection_method": "manual (proprietary)"
+      }
+    },
+    "models_tested": [
+      "local-llama",
+      "lakeshore-qwen",
+      "cloud-claude"
+    ]
+  },
+  "results": [
+    {
+      "label": "local-llama",
+      "model": "local-llama",
+      "judge": null,
+      "iterations": 3,
+      "warmup": 1,
+      "results": [
+        {
+          "ttfb": 0.013265132904052734,
+          "ttft": 0.17670392990112305,
+          "total_time": 15.0816969871521,
+          "success": true,
+          "actual_tier": "local",
+          "actual_model": "local-llama",
+          "error": null
+        },
+        {
+          "ttfb": 0.00732111930847168,
+          "ttft": 0.11688590049743652,
+          "total_time": 11.744791984558105,
+          "success": true,
+          "actual_tier": "local",
+          "actual_model": "local-llama",
+          "error": null
+        },
+        {
+          "ttfb": 0.010764122009277344,
+          "ttft": 0.13863611221313477,
+          "total_time": 10.359899282455444,
+          "success": true,
+          "actual_tier": "local",
+          "actual_model": "local-llama",
+          "error": null
+        }
+      ],
+      "ttft_stats": {
+        "p50": 0.1386,
+        "p95": 0.1729,
+        "p99": 0.1759,
+        "mean": 0.1441,
+        "std": 0.0303,
+        "min": 0.1169,
+        "max": 0.1767,
+        "count": 3,
+        "raw": [
+          0.1767,
+          0.1169,
+          0.1386
+        ]
+      },
+      "success_rate": 100.0
+    },
+    {
+      "label": "lakeshore-qwen",
+      "model": "lakeshore-qwen",
+      "judge": null,
+      "iterations": 3,
+      "warmup": 1,
+      "results": [
+        {
+          "ttfb": 0.016631126403808594,
+          "ttft": 0.18656635284423828,
+          "total_time": 15.88493800163269,
+          "success": true,
+          "actual_tier": "local",
+          "actual_model": "local-llama",
+          "error": null
+        },
+        {
+          "ttfb": 0.01463770866394043,
+          "ttft": 0.17578983306884766,
+          "total_time": 15.39627480506897,
+          "success": true,
+          "actual_tier": "local",
+          "actual_model": "local-llama",
+          "error": null
+        },
+        {
+          "ttfb": 0.020472049713134766,
+          "ttft": 0.24944210052490234,
+          "total_time": 14.377968072891235,
+          "success": true,
+          "actual_tier": "local",
+          "actual_model": "local-llama",
+          "error": null
+        }
+      ],
+      "ttft_stats": {
+        "p50": 0.1866,
+        "p95": 0.2432,
+        "p99": 0.2482,
+        "mean": 0.2039,
+        "std": 0.0398,
+        "min": 0.1758,
+        "max": 0.2494,
+        "count": 3,
+        "raw": [
+          0.1866,
+          0.1758,
+          0.2494
+        ]
+      },
+      "success_rate": 100.0
+    },
+    {
+      "label": "cloud-claude",
+      "model": "cloud-claude",
+      "judge": null,
+      "iterations": 3,
+      "warmup": 1,
+      "results": [
+        {
+          "ttfb": 0.014458179473876953,
+          "ttft": 0.16070199012756348,
+          "total_time": 12.593042850494385,
+          "success": true,
+          "actual_tier": "local",
+          "actual_model": "local-llama",
+          "error": null
+        },
+        {
+          "ttfb": 0.015371084213256836,
+          "ttft": 0.18958830833435059,
+          "total_time": 15.150442361831665,
+          "success": true,
+          "actual_tier": "local",
+          "actual_model": "local-llama",
+          "error": null
+        },
+        {
+          "ttfb": 0.020186901092529297,
+          "ttft": 0.14705801010131836,
+          "total_time": 10.300765991210938,
+          "success": true,
+          "actual_tier": "local",
+          "actual_model": "local-llama",
+          "error": null
+        }
+      ],
+      "ttft_stats": {
+        "p50": 0.1607,
+        "p95": 0.1867,
+        "p99": 0.189,
+        "mean": 0.1658,
+        "std": 0.0217,
+        "min": 0.1471,
+        "max": 0.1896,
+        "count": 3,
+        "raw": [
+          0.1607,
+          0.1896,
+          0.1471
+        ]
+      },
+      "success_rate": 100.0
+    },
+    {
+      "label": "auto + ollama-1b",
+      "model": "auto",
+      "judge": "ollama-1b",
+      "iterations": 3,
+      "warmup": 1,
+      "results": [
+        {
+          "ttfb": 0.009320974349975586,
+          "ttft": 0.14125418663024902,
+          "total_time": 14.105611085891724,
+          "success": true,
+          "actual_tier": "local",
+          "actual_model": "local-llama",
+          "error": null
+        },
+        {
+          "ttfb": 0.018724918365478516,
+          "ttft": 0.18825173377990723,
+          "total_time": 11.924383878707886,
+          "success": true,
+          "actual_tier": "local",
+          "actual_model": "local-llama",
+          "error": null
+        },
+        {
+          "ttfb": 0.01568007469177246,
+          "ttft": 0.13082385063171387,
+          "total_time": 13.591235876083374,
+          "success": true,
+          "actual_tier": "local",
+          "actual_model": "local-llama",
+          "error": null
+        }
+      ],
+      "ttft_stats": {
+        "p50": 0.1413,
+        "p95": 0.1836,
+        "p99": 0.1873,
+        "mean": 0.1534,
+        "std": 0.0306,
+        "min": 0.1308,
+        "max": 0.1883,
+        "count": 3,
+        "raw": [
+          0.1413,
+          0.1883,
+          0.1308
+        ]
+      },
+      "success_rate": 100.0
+    },
+    {
+      "label": "auto + ollama-3b",
+      "model": "auto",
+      "judge": "ollama-3b",
+      "iterations": 3,
+      "warmup": 1,
+      "results": [
+        {
+          "ttfb": 0.016378164291381836,
+          "ttft": 0.15624713897705078,
+          "total_time": 12.678216934204102,
+          "success": true,
+          "actual_tier": "local",
+          "actual_model": "local-llama",
+          "error": null
+        },
+        {
+          "ttfb": 0.06301379203796387,
+          "ttft": 0.21427464485168457,
+          "total_time": 15.844858884811401,
+          "success": true,
+          "actual_tier": "local",
+          "actual_model": "local-llama",
+          "error": null
+        },
+        {
+          "ttfb": 0.03458809852600098,
+          "ttft": 0.20780301094055176,
+          "total_time": 14.38098406791687,
+          "success": true,
+          "actual_tier": "local",
+          "actual_model": "local-llama",
+          "error": null
+        }
+      ],
+      "ttft_stats": {
+        "p50": 0.2078,
+        "p95": 0.2136,
+        "p99": 0.2141,
+        "mean": 0.1928,
+        "std": 0.0318,
+        "min": 0.1562,
+        "max": 0.2143,
+        "count": 3,
+        "raw": [
+          0.1562,
+          0.2143,
+          0.2078
+        ]
+      },
+      "success_rate": 100.0
+    },
+    {
+      "label": "auto + haiku",
+      "model": "auto",
+      "judge": "haiku",
+      "iterations": 3,
+      "warmup": 1,
+      "results": [
+        {
+          "ttfb": 0.01872706413269043,
+          "ttft": 0.1958160400390625,
+          "total_time": 16.202364921569824,
+          "success": true,
+          "actual_tier": "local",
+          "actual_model": "local-llama",
+          "error": null
+        },
+        {
+          "ttfb": 0.024206876754760742,
+          "ttft": 0.19173002243041992,
+          "total_time": 12.749917030334473,
+          "success": true,
+          "actual_tier": "local",
+          "actual_model": "local-llama",
+          "error": null
+        },
+        {
+          "ttfb": 0.0182950496673584,
+          "ttft": 0.19001412391662598,
+          "total_time": 12.880311012268066,
+          "success": true,
+          "actual_tier": "local",
+          "actual_model": "local-llama",
+          "error": null
+        }
+      ],
+      "ttft_stats": {
+        "p50": 0.1917,
+        "p95": 0.1954,
+        "p99": 0.1957,
+        "mean": 0.1925,
+        "std": 0.003,
+        "min": 0.19,
+        "max": 0.1958,
+        "count": 3,
+        "raw": [
+          0.1958,
+          0.1917,
+          0.19
+        ]
+      },
+      "success_rate": 100.0
+    }
+  ]
+}

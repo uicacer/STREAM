@@ -20,6 +20,7 @@ from stream.middleware.config import (
 )
 from stream.middleware.core.complexity_judge import judge_complexity_with_llm
 from stream.middleware.core.database import close_database_pool, initialize_database_pool
+from stream.middleware.core.health_monitor import health_monitor
 from stream.middleware.core.ollama_manager import OllamaModelManager
 from stream.middleware.core.tier_health import check_all_tiers
 
@@ -56,7 +57,11 @@ async def startup():
     logger.info("🔍 Running startup health checks...")
     check_all_tiers()
 
-    # Step 4: Warm up judge (optional)
+    # Step 4: Start background health monitor
+    logger.info("🔍 Starting background health monitor...")
+    health_monitor.start()
+
+    # Step 5: Warm up judge (optional)
     logger.info("🔍 Warming up LLM judge...")
     judge_complexity_with_llm("warmup test")
 
@@ -73,6 +78,9 @@ async def shutdown():
     2. Log shutdown message
     """
     logger.info(f"👋 {SERVICE_NAME} shutting down...")
+
+    # Stop background health monitor
+    health_monitor.stop()
 
     # Close database pool
     close_database_pool()

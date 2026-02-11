@@ -3,20 +3,26 @@ Query complexity classification using LLM and keyword fallback.
 
 This module determines whether a query is LOW, MEDIUM, or HIGH complexity
 to route it to the appropriate AI tier.
+
+Supports multiple judge strategies:
+- ollama-1b: Fastest local, less accurate, free
+- ollama-3b: Balanced accuracy, free (default)
+- haiku: Fastest & most accurate, ~$1 per 5,000 judgments
 """
 
 import hashlib
 import logging
 import time
+from dataclasses import dataclass
 
 import httpx
 
 from stream.middleware.config import (
     COMPLEXITY_KEYWORDS,
+    DEFAULT_JUDGE_STRATEGY,
     JUDGE_CACHE_TTL,
-    JUDGE_MODEL,
     JUDGE_PROMPT,
-    JUDGE_TIMEOUT,
+    JUDGE_STRATEGIES,
     LITELLM_API_KEY,
     LITELLM_BASE_URL,
     LLM_JUDGE_ENABLED,
@@ -26,6 +32,16 @@ logger = logging.getLogger(__name__)
 
 # Judge cache (module-level state)
 _judge_cache = {}
+
+
+@dataclass
+class JudgmentResult:
+    """Result of complexity judgment with metadata."""
+
+    complexity: str  # "low", "medium", "high"
+    method: str  # "llm", "keyword_fallback", "default_fallback"
+    strategy_used: str | None = None  # e.g., "ollama-3b", "haiku"
+    fallback_reason: str | None = None  # Why fallback was used
 
 
 def _get_cache_key(query: str) -> str:
@@ -52,40 +68,44 @@ def _cache_judgment(query: str, judgment: str):
     _judge_cache[key] = (judgment, time.time())
 
 
-def judge_complexity_with_llm(query: str) -> str | None:
+def judge_complexity_with_llm(query: str, strategy: str = None) -> tuple[str | None, str | None]:
     """
-    Use a lightweight LLM to judge query complexity
+    Use an LLM to judge query complexity.
 
     Args:
         query: User's question
+        strategy: Judge strategy to use ("ollama-1b", "ollama-3b", "haiku")
 
     Returns:
-        "low", "medium", "high", or None if failed
+        Tuple of (complexity, error_reason) where complexity is "low", "medium", "high", or None if failed
     """
-    # Check cache first
+    strategy = strategy or DEFAULT_JUDGE_STRATEGY
+
+    # Validate strategy
+    if strategy not in JUDGE_STRATEGIES:
+        logger.warning(f"Unknown judge strategy '{strategy}', using default")
+        strategy = DEFAULT_JUDGE_STRATEGY
+
+    strategy_config = JUDGE_STRATEGIES[strategy]
+    model = strategy_config["model"]
+    timeout = strategy_config["timeout"]
+
+    # Check cache first (cache is strategy-agnostic for same queries)
     cached = get_cached_judgment(query)
     if cached:
-        logger.debug(
-            "🔍 Using cached complexity result",
-            # extra={
-            #     "correlation_id": correlation_id,
-            #     "complexity": "LOW",
-            #     "cached": True
-            # }
-        )
-        return cached
+        logger.debug("🔍 Using cached complexity result")
+        return cached, None
 
     # Build judge prompt
     prompt = JUDGE_PROMPT.format(query=query)
 
     try:
-        # Call LiteLLM with judge model
-        # This is needed for query complexity assessment
-        with httpx.Client(timeout=JUDGE_TIMEOUT) as client:
+        # Call LiteLLM with the selected judge model
+        with httpx.Client(timeout=timeout) as client:
             response = client.post(
                 f"{LITELLM_BASE_URL}/v1/chat/completions",
                 json={
-                    "model": JUDGE_MODEL,
+                    "model": model,
                     "messages": [{"role": "user", "content": prompt}],
                     "max_tokens": 10,  # Just need one word
                     "temperature": 0.0,  # Deterministic
@@ -97,8 +117,9 @@ def judge_complexity_with_llm(query: str) -> str | None:
             )
 
         if response.status_code != 200:
-            print(f"⚠️ JUDGE: Failed with status {response.status_code}")
-            return None
+            error_msg = f"HTTP {response.status_code}"
+            print(f"⚠️ JUDGE [{strategy}]: Failed with status {response.status_code}")
+            return None, error_msg
 
         # Parse response
         data = response.json()
@@ -112,63 +133,129 @@ def judge_complexity_with_llm(query: str) -> str | None:
         elif "HIGH" in judgment_text:
             judgment = "high"
         else:
-            print(f"⚠️ JUDGE: Unexpected response: {judgment_text}")
-            return None
+            error_msg = f"Unexpected response: {judgment_text}"
+            print(f"⚠️ JUDGE [{strategy}]: {error_msg}")
+            return None, error_msg
 
         # Cache the judgment
         _cache_judgment(query, judgment)
 
-        print(f"🔍 JUDGE: LLM classified as → {judgment.upper()}")
-        return judgment
+        print(f"🔍 JUDGE [{strategy}]: LLM classified as → {judgment.upper()}")
+        return judgment, None
 
     except httpx.TimeoutException:
-        print(f"⚠️ JUDGE: Timeout after {JUDGE_TIMEOUT}s")
-        return None
+        error_msg = f"Timeout after {timeout}s"
+        print(f"⚠️ JUDGE [{strategy}]: {error_msg}")
+        return None, error_msg
 
     except Exception as e:
-        print(f"⚠️ JUDGE: Error: {str(e)}")
-        return None
+        error_msg = str(e)
+        print(f"⚠️ JUDGE [{strategy}]: Error: {error_msg}")
+        return None, error_msg
 
 
-def judge_complexity_with_keywords(query: str) -> str:
-    """Fallback: Use keyword matching to judge complexity."""
+def judge_complexity_with_keywords(query: str) -> tuple[str, str | None]:
+    """
+    Fallback: Use keyword matching to judge complexity.
+
+    Returns:
+        Tuple of (complexity, matched_keyword) where matched_keyword is None if default was used
+    """
     query_lower = query.lower()
 
     # Check LOW keywords FIRST (most specific patterns)
-    # "what is" is more specific than just "is"
     for kw in COMPLEXITY_KEYWORDS["low"]:
         if kw in query_lower:
             logger.debug(f"Matched LOW keyword: '{kw}'")
-            return "low"
+            print(f"🔍 JUDGE [keywords]: Matched '{kw}' → LOW")
+            return "low", kw
 
     # Then check MEDIUM
     for kw in COMPLEXITY_KEYWORDS["medium"]:
         if kw in query_lower:
             logger.debug(f"Matched MEDIUM keyword: '{kw}'")
-            return "medium"
+            print(f"🔍 JUDGE [keywords]: Matched '{kw}' → MEDIUM")
+            return "medium", kw
 
     # Then check HIGH
     for kw in COMPLEXITY_KEYWORDS["high"]:
         if kw in query_lower:
             logger.debug(f"Matched HIGH keyword: '{kw}'")
-            return "high"
+            print(f"🔍 JUDGE [keywords]: Matched '{kw}' → HIGH")
+            return "high", kw
 
     # Default: medium (safer to overestimate)
     logger.debug("No keywords matched, defaulting to MEDIUM")
-    return "medium"
+    print("🔍 JUDGE [default]: No keywords matched → MEDIUM")
+    return "medium", None
 
 
-def judge_complexity(query: str) -> str:
+def judge_complexity(query: str, strategy: str = None) -> JudgmentResult:
     """
     Judge query complexity using LLM with keyword fallback.
 
-    Returns:
-        "low", "medium", or "high"
-    """
-    if LLM_JUDGE_ENABLED:
-        complexity = judge_complexity_with_llm(query)
-        if complexity:
-            return complexity
-        logger.warning("LLM judge failed, falling back to keywords")
+    Args:
+        query: User's question
+        strategy: Judge strategy ("ollama-1b", "ollama-3b", "haiku"). Default: ollama-3b
 
-    return judge_complexity_with_keywords(query)
+    Returns:
+        JudgmentResult with complexity, method used, and fallback info if applicable
+    """
+    strategy = strategy or DEFAULT_JUDGE_STRATEGY
+
+    if LLM_JUDGE_ENABLED:
+        complexity, error = judge_complexity_with_llm(query, strategy)
+        if complexity:
+            return JudgmentResult(
+                complexity=complexity,
+                method="llm",
+                strategy_used=strategy,
+                fallback_reason=None,
+            )
+
+        # LLM failed - try keyword fallback
+        logger.warning(f"LLM judge ({strategy}) failed: {error}. Falling back to keywords.")
+        keyword_complexity, matched_keyword = judge_complexity_with_keywords(query)
+
+        if matched_keyword:
+            return JudgmentResult(
+                complexity=keyword_complexity,
+                method="keyword_fallback",
+                strategy_used=strategy,
+                fallback_reason=f"LLM judge failed ({error}), used keyword matching",
+            )
+        else:
+            # No keywords matched - defaulted to MEDIUM
+            return JudgmentResult(
+                complexity=keyword_complexity,
+                method="default_fallback",
+                strategy_used=strategy,
+                fallback_reason=f"LLM judge failed ({error}) and no keywords matched",
+            )
+
+    # LLM judge disabled - use keywords
+    keyword_complexity, matched_keyword = judge_complexity_with_keywords(query)
+    if matched_keyword:
+        return JudgmentResult(
+            complexity=keyword_complexity,
+            method="keyword_fallback",
+            strategy_used=None,
+            fallback_reason="LLM judge disabled",
+        )
+    else:
+        return JudgmentResult(
+            complexity=keyword_complexity,
+            method="default_fallback",
+            strategy_used=None,
+            fallback_reason="LLM judge disabled and no keywords matched",
+        )
+
+
+# Legacy function for backwards compatibility
+def judge_complexity_simple(query: str, strategy: str = None) -> str:
+    """
+    Simple wrapper that returns just the complexity string.
+    Use judge_complexity() for full metadata.
+    """
+    result = judge_complexity(query, strategy)
+    return result.complexity

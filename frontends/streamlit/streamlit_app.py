@@ -6,7 +6,6 @@
 
 import logging
 import os
-import random
 import subprocess
 import time
 import traceback
@@ -245,80 +244,29 @@ MAX_SEND_MESSAGES = 50  # Messages sent to middleware (middleware will trim furt
 # ENGAGING PROGRESS MESSAGES
 # =============================================================================
 
-# Tier-specific connection messages
+# Tier-specific status messages (simplified for faster rendering)
 TIER_MESSAGES = {
     "local": {
         "icon": "🏠",
         "name": "Local AI",
-        "connecting": "Waking up local Ollama...",
-        "thinking": "Local model is thinking...",
-        "facts": [
-            "💡 Local inference runs entirely on your machine - zero network latency!",
-            "🔒 Your data never leaves your computer with local models.",
-            "⚡ Ollama uses optimized inference for Apple Silicon and CUDA GPUs.",
-            "🆓 Local tier is completely free - no API costs!",
-        ],
+        "status": "Generating response...",
     },
     "lakeshore": {
         "icon": "🏫",
         "name": "Lakeshore HPC",
-        "connecting": "Connecting to UIC's Lakeshore HPC...",
-        "thinking": "Lakeshore is processing your query...",
-        "facts": [
-            "🖥️ Running on GPUs at UIC",
-            "🔐 Secured via Globus Compute authentication",
-            "🌐 Route: You → Globus Cloud → HPC → vLLM → You",
-            "💰 Free for UIC researchers - no API costs!",
-            "🚀 vLLM uses continuous batching for high throughput",
-            "⏱️ First request may take longer (cold start)",
-            "🔬 Same GPUs used for cutting-edge research",
-        ],
+        "status": "Generating response...",
     },
     "cloud": {
         "icon": "☁️",
         "name": "Cloud AI",
-        "connecting": "Connecting to cloud AI service...",
-        "thinking": "Cloud model is generating response...",
-        "facts": [
-            "🌍 Cloud tier connects to state-of-the-art models like Claude and GPT-4.",
-            "⚡ Cloud APIs offer the fastest response times (~1-2 seconds).",
-            "💰 Cloud usage incurs API costs - shown after each response.",
-            "🧠 Cloud models excel at complex reasoning and creative tasks.",
-        ],
+        "status": "Generating response...",
     },
     "auto": {
         "icon": "🤖",
         "name": "Smart Router",
-        "connecting": "Analyzing query complexity...",
-        "thinking": "AI is generating your response...",
-        "facts": [
-            "🧠 STREAM analyzes your query to pick the best tier automatically.",
-            "📊 Low complexity → Local,    Medium → Lakeshore HPC,    High → Cloud.",
-            "🎯 Smart routing optimizes for both cost and quality.",
-            "⚖️ The LLM judge evaluates query complexity in real-time.",
-        ],
+        "status": "Routing and generating...",
     },
 }
-
-
-def get_progress_message(tier_preference: str, elapsed_seconds: float) -> str:
-    """Generate an engaging progress message based on tier and elapsed time."""
-
-    tier_info = TIER_MESSAGES.get(tier_preference, TIER_MESSAGES["auto"])
-
-    # Phase 1: Connecting (0-1 seconds)
-    if elapsed_seconds < 1:
-        return f"{tier_info['icon']} {tier_info['connecting']}"
-
-    # Phase 2: Thinking (1-3 seconds)
-    elif elapsed_seconds < 3:
-        return f"{tier_info['icon']} {tier_info['thinking']}"
-
-    # Phase 3: Show fun facts (3+ seconds, rotate every 3 seconds)
-    else:
-        fact_index = int((elapsed_seconds - 3) / 3) % len(tier_info["facts"])
-        fact = tier_info["facts"][fact_index]
-        return f"{tier_info['icon']} {tier_info['thinking']}\n\n{fact}"
 
 
 # =============================================================================
@@ -350,6 +298,9 @@ if "session_stats" not in st.session_state:
         "cloud_queries": 0,
         "total_cost": 0.0,
     }
+
+if "judge_strategy" not in st.session_state:
+    st.session_state.judge_strategy = "ollama-3b"  # Default
 
 if "last_actual_tier" not in st.session_state:
     st.session_state.last_actual_tier = None
@@ -407,6 +358,50 @@ with st.sidebar:
         show_routing = st.checkbox(
             "Show Routing Details", value=True, help="Display which tier handled each query"
         )
+
+        # Judge Strategy Selector (only enabled in Auto mode)
+        st.markdown("---")
+        st.markdown("**🧠 Complexity Judge**")
+
+        # Check if Auto mode is selected
+        is_auto_mode = st.session_state.tier_preference == "auto"
+
+        if is_auto_mode:
+            st.caption("_Choose how STREAM analyzes query complexity_")
+        else:
+            st.caption("_Disabled when using a specific tier_")
+
+        judge_options = {
+            "⚡ Ollama 1b (Fastest local, free)": "ollama-1b",
+            "🎯 Ollama 3b (Balanced, free)": "ollama-3b",
+            "🚀 Claude Haiku (~$1/5K judgments)": "haiku",
+        }
+
+        selected_judge = st.radio(
+            "Judge Strategy",
+            options=list(judge_options.keys()),
+            index=1,  # Default to Ollama 3b
+            help="Choose how STREAM analyzes query complexity. Only used in Auto mode.",
+            label_visibility="collapsed",
+            disabled=not is_auto_mode,  # Disable when specific tier is selected
+        )
+
+        st.session_state.judge_strategy = judge_options[selected_judge]
+
+        # Show info about current selection (only when enabled)
+        if is_auto_mode:
+            if st.session_state.judge_strategy == "haiku":
+                st.info(
+                    "💰 Claude Haiku costs approximately **$1 per 5,000 query judgments**. Most accurate option."
+                )
+            elif st.session_state.judge_strategy == "ollama-1b":
+                st.info(
+                    "🆓 Completely free! Speed depends on your machine's hardware. Less accurate for complex queries."
+                )
+            else:
+                st.info(
+                    "🆓 Completely free! Speed depends on your machine's hardware. Good balance of speed and accuracy."
+                )
 
     st.divider()
 
@@ -696,11 +691,16 @@ if "pending_query" in st.session_state:
         message_placeholder = st.empty()
 
         # Get streaming response
+        # Only pass judge_strategy when in Auto mode
+        judge_strategy = (
+            st.session_state.judge_strategy if st.session_state.tier_preference == "auto" else None
+        )
         result = st.session_state.chat_handler.chat(
             user_message,
             user_preference=st.session_state.tier_preference,
             stream=True,  # ENABLE STREAMING
             temperature=temperature,
+            judge_strategy=judge_strategy,
         )
 
         if result["success"]:
@@ -712,16 +712,13 @@ if "pending_query" in st.session_state:
             tier_pref = st.session_state.tier_preference
             tier_info = TIER_MESSAGES.get(tier_pref, TIER_MESSAGES["auto"])
 
-            # Use st.status() which has a built-in animated spinner
-            # This keeps animating even while we wait for chunks (unlike st.info)
-            initial_fact = random.choice(tier_info["facts"])
+            # Simple spinner - minimal overhead before streaming starts
             status_container = st.status(
-                f"{tier_info['icon']} {tier_info['connecting']}",
-                expanded=True,
+                f"{tier_info['icon']} {tier_info['status']}",
+                expanded=False,  # Collapsed by default - less visual noise
             )
-            status_container.write(f"_{initial_fact}_")
 
-            # Stream response with engaging progress updates
+            # Stream response
             try:
                 for chunk in result["response"]:
                     if not first_chunk_received:
@@ -789,7 +786,7 @@ if "pending_query" in st.session_state:
             # Ensure status is marked complete (if we got here without chunks)
             if not first_chunk_received:
                 status_container.update(
-                    label=f"{tier_info['icon']} Waiting for response...",
+                    label=f"{tier_info['icon']} Waiting...",
                     state="running",
                 )
 
@@ -843,6 +840,25 @@ if "pending_query" in st.session_state:
                         icon="🔄",
                     )
                 # ========== END FALLBACK WARNING ==========
+
+                # ========== SHOW JUDGE FALLBACK NOTIFICATION ==========
+                judge_fallback = stream_meta.get("judge_fallback")
+                if judge_fallback:
+                    method = judge_fallback.get("method", "")
+                    if method == "keyword_fallback":
+                        st.info(
+                            "ℹ️ **Smart routing used keyword matching** - "
+                            "The LLM judge was unavailable, so routing was based on keywords in your query.",
+                            icon="🔤",
+                        )
+                    elif method == "default_fallback":
+                        st.info(
+                            "ℹ️ **Smart routing used default (MEDIUM)** - "
+                            "The LLM judge was unavailable and no keywords matched. "
+                            "Your query was routed to the Lakeshore tier.",
+                            icon="📊",
+                        )
+                # ========== END JUDGE FALLBACK NOTIFICATION ==========
 
                 # Get cost from middleware (single source of truth)
                 # If cost is 0 for cloud/lakeshore, that's a middleware issue to fix there

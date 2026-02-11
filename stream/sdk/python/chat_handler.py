@@ -86,6 +86,7 @@ class ChatHandler:
         user_preference: str = "auto",
         stream: bool = False,
         temperature: float = 0.7,
+        judge_strategy: str = None,
     ) -> dict:
         """
         Send a chat request to middleware
@@ -95,6 +96,7 @@ class ChatHandler:
             user_preference: "auto", "local", "lakeshore", or "cloud"
             stream: Enable streaming responses
             temperature: Response creativity (0.0-1.0)
+            judge_strategy: Complexity judge strategy ("ollama-1b", "ollama-3b", "haiku")
 
         Returns:
             Dictionary with success, response, tier, model, cost, duration, error
@@ -110,6 +112,10 @@ class ChatHandler:
             "temperature": temperature,
             "stream": stream,
         }
+
+        # Add judge strategy if specified
+        if judge_strategy:
+            payload["judge_strategy"] = judge_strategy
 
         try:
             if stream:
@@ -171,6 +177,7 @@ class ChatHandler:
         original_tier = None
         auth_error_detected = False
         error_message = None
+        judge_fallback = None  # Track if judge fallback occurred
 
         with self.client.stream(
             "POST",
@@ -290,6 +297,13 @@ class ChatHandler:
                         model = metadata.get("model", model)
                         complexity = metadata.get("complexity", complexity)
 
+                        # Check for judge fallback info
+                        if "judge_fallback" in metadata:
+                            judge_fallback = metadata["judge_fallback"]
+                            logger.info(
+                                f"⚠️ Judge fallback detected: {judge_fallback.get('reason')}"
+                            )
+
                         # Update metadata immediately so UI can access tier info
                         # during streaming (before generator completes)
                         self._last_stream_metadata.update(
@@ -299,6 +313,7 @@ class ChatHandler:
                                 "complexity": complexity,
                                 "fallback_used": fallback_used,
                                 "original_tier": original_tier,
+                                "judge_fallback": judge_fallback,
                             }
                         )
 
@@ -385,6 +400,7 @@ class ChatHandler:
             "total_tokens": input_tokens + output_tokens,
             "fallback_used": fallback_used,
             "original_tier": original_tier,
+            "judge_fallback": judge_fallback,
             "auth_required": False,  # No auth error if we got here
             "error_type": None,
             "error": None,

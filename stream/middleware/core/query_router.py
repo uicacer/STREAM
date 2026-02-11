@@ -75,16 +75,18 @@ def get_tier_for_query(query: str, user_preference: str = "auto") -> str:
     method = "unknown"
 
     if LLM_JUDGE_ENABLED:
-        complexity = judge_complexity_with_llm(query)
+        complexity, error = judge_complexity_with_llm(query)
         if complexity:
             method = "LLM judge"
         else:
-            print("⚠️ ROUTING: LLM judge failed, falling back to keywords")
+            print(f"⚠️ ROUTING: LLM judge failed ({error}), falling back to keywords")
 
     # Fallback to keyword-based if LLM failed or disabled
     if complexity is None:
-        complexity = judge_complexity_with_keywords(query)
-        method = "keyword matching"
+        complexity, matched_keyword = judge_complexity_with_keywords(query)
+        method = (
+            f"keyword matching ('{matched_keyword}')" if matched_keyword else "default (medium)"
+        )
 
     # Map complexity to preferred tier
     if complexity == "low":

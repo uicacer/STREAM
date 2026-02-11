@@ -56,6 +56,17 @@ model_list:
       # rpm: 60  # Rate limit (requests per minute)
       # tpm: 100000  # Token limit (tokens per minute)
 
+  # Claude Haiku - Fast & cheap model for complexity judging
+  - model_name: cloud-haiku
+    litellm_params:
+      model: claude-3-5-haiku-20241022
+      api_key: os.environ/ANTHROPIC_API_KEY
+    model_info:
+      input_cost_per_token: 0.0000008   # $0.80 per 1M input tokens
+      output_cost_per_token: 0.000004   # $4 per 1M output tokens
+      # Cost per judgment: ~$0.0002 (conservative estimate)
+      # Approximate: ~$1 per 5,000 judgments
+
   - model_name: cloud-gpt
     litellm_params:
       model: gpt-4-turbo-2024-04-09

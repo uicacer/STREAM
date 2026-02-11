@@ -43,6 +43,7 @@ async def create_streaming_response(
     tier: str,
     user_query: str = "",
     complexity: str = "medium",
+    judge_fallback_info: dict | None = None,
 ) -> AsyncGenerator[str, None]:
     """
     Create a streaming Server-Sent Events (SSE) response with metrics tracking and automatic fallback.
@@ -122,6 +123,10 @@ async def create_streaming_response(
             "complexity": complexity,  # Actual query complexity for UI display
         }
     }
+
+    # Include judge fallback info if LLM judge failed
+    if judge_fallback_info:
+        metadata_event["stream_metadata"]["judge_fallback"] = judge_fallback_info
 
     # Format as SSE: "data: <JSON>\n\n"
     yield f"data: {json.dumps(metadata_event)}\n\n"

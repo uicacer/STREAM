@@ -27,11 +27,8 @@ from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from stream.middleware.config import LLM_JUDGE_ENABLED
-from stream.middleware.core.complexity_judge import (
-    judge_complexity_with_keywords,
-    judge_complexity_with_llm,
-)
+from stream.middleware.config import DEFAULT_JUDGE_STRATEGY, JUDGE_STRATEGIES
+from stream.middleware.core.complexity_judge import judge_complexity
 from stream.middleware.core.query_router import get_model_for_tier, get_tier_for_query
 from stream.middleware.core.streaming import create_streaming_response
 from stream.middleware.utils.context_window import check_context_limit
@@ -121,6 +118,11 @@ class ChatCompletionRequest(BaseModel):
 
     user: str | None = Field(
         default=None, description="User ID (for future rate limiting/authentication)"
+    )
+
+    judge_strategy: str | None = Field(
+        default=None,
+        description="Judge strategy for complexity analysis (ollama-1b, ollama-3b, haiku). Default: ollama-3b",
     )
 
 
@@ -233,21 +235,44 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
     # - Low: Simple factual queries ("What's 2+2?")
     # - Medium: Moderate tasks ("Summarize this article")
     # - High: Complex reasoning ("Design a database schema for...")
+    #
+    # OPTIMIZATION: Skip complexity judgment if user explicitly selected a tier
+    # (not "auto"). This saves 500-2000ms per request.
 
-    if LLM_JUDGE_ENABLED:
-        # Use LLM to judge complexity (more accurate but slower)
-        complexity = judge_complexity_with_llm(user_query)
+    user_selected_tier = request_body.model in ["local", "lakeshore", "cloud"]
+    judge_strategy = request_body.judge_strategy or DEFAULT_JUDGE_STRATEGY
+    judge_fallback_info = None  # Track fallback for UI notification
 
-        # Fallback to keyword-based if LLM fails
-        if not complexity:
+    # Validate judge strategy
+    if judge_strategy not in JUDGE_STRATEGIES:
+        logger.warning(
+            f"[{correlation_id}] Unknown judge strategy '{judge_strategy}', using default"
+        )
+        judge_strategy = DEFAULT_JUDGE_STRATEGY
+
+    if user_selected_tier:
+        # User explicitly chose a tier - skip the slow LLM judge
+        complexity = "user_override"
+        logger.debug(
+            f"[{correlation_id}] Skipping complexity judge (user selected tier: {request_body.model})",
+            extra={"correlation_id": correlation_id},
+        )
+    else:
+        # Use the judge_complexity function with selected strategy
+        judgment_result = judge_complexity(user_query, judge_strategy)
+        complexity = judgment_result.complexity
+
+        # Track fallback info for UI notification
+        if judgment_result.method in ["keyword_fallback", "default_fallback"]:
+            judge_fallback_info = {
+                "method": judgment_result.method,
+                "reason": judgment_result.fallback_reason,
+                "strategy_attempted": judgment_result.strategy_used,
+            }
             logger.warning(
-                f"[{correlation_id}] LLM judge failed, using keyword fallback",
+                f"[{correlation_id}] Judge fallback: {judgment_result.fallback_reason}",
                 extra={"correlation_id": correlation_id},
             )
-            complexity = judge_complexity_with_keywords(user_query)
-    else:
-        # Use keyword-based complexity (faster, less accurate)
-        complexity = judge_complexity_with_keywords(user_query)
 
     logger.debug(
         f"[{correlation_id}] Query complexity: {complexity}",
@@ -344,6 +369,7 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
                 tier=tier,
                 user_query=user_query,
                 complexity=complexity,
+                judge_fallback_info=judge_fallback_info,
             ),
             media_type="text/event-stream",  # SSE content type
             headers={
