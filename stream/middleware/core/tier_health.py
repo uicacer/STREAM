@@ -61,37 +61,82 @@ def check_tier_health(tier: str) -> tuple[bool, str | None]:
 
                 return True, None
 
-        # LAKESHORE: Check proxy service WITH RETRY
-        # The proxy handles routing via Globus Compute or SSH port forwarding
+        # LAKESHORE: Test ACTUAL inference capability through LiteLLM
+        # Going through LiteLLM ensures model name translation works correctly
+        # (LiteLLM maps "lakeshore-qwen" → actual vLLM model name)
         elif tier == "lakeshore":
-            # Retry 3 times with delays (proxy might be starting up)
-            for attempt in range(3):
+            # First, quick check if proxy is even running
+            try:
+                with httpx.Client(timeout=5.0) as client:
+                    response = client.get(f"{LAKESHORE_PROXY_URL}/health")
+                    if response.status_code != 200:
+                        return (
+                            False,
+                            f"Lakeshore proxy not responding (HTTP {response.status_code})",
+                        )
+                    health_data = response.json()
+                    if health_data.get("status") != "healthy":
+                        return False, "Lakeshore proxy unhealthy"
+                    # Check for Globus auth errors
+                    if health_data.get("globus_authenticated") is False:
+                        return False, "Globus Compute authentication required"
+            except httpx.ConnectError:
+                return False, "Cannot connect to Lakeshore proxy. Is the proxy service running?"
+            except Exception as e:
+                return False, f"Lakeshore proxy error: {str(e)}"
+
+            # Proxy is running - now test ACTUAL inference through LiteLLM
+            # LiteLLM handles model name translation and routing
+            for attempt in range(2):
                 try:
-                    with httpx.Client(timeout=10.0) as client:
-                        # Check if the Lakeshore proxy is healthy
-                        response = client.get(f"{LAKESHORE_PROXY_URL}/health")
+                    with httpx.Client(timeout=30.0) as client:  # Longer timeout for HPC
+                        response = client.post(
+                            f"{LITELLM_BASE_URL}/v1/chat/completions",
+                            json={
+                                "model": model,  # LiteLLM translates this
+                                "messages": [{"role": "user", "content": "ping"}],
+                                "max_tokens": 1,  # Minimal response
+                                "stream": False,
+                            },
+                            headers={
+                                "Authorization": f"Bearer {LITELLM_API_KEY}",
+                                "Content-Type": "application/json",
+                            },
+                        )
 
                         if response.status_code == 200:
-                            # Proxy is healthy
-                            # The proxy's health endpoint tells us if it's configured properly
-                            health_data = response.json()
-                            if health_data.get("status") == "healthy":
-                                return True, None
-                            else:
-                                return False, "Lakeshore proxy unhealthy"
+                            return True, None
                         else:
-                            return (
-                                False,
-                                f"Lakeshore proxy not responding (HTTP {response.status_code})",
-                            )
+                            # Parse error to get useful info
+                            try:
+                                error_data = response.json()
+                                error_msg = str(
+                                    error_data.get(
+                                        "detail",
+                                        error_data.get("error", f"HTTP {response.status_code}"),
+                                    )
+                                )
+                                # Check for common HPC issues
+                                if "ManagerLost" in error_msg:
+                                    return False, "HPC workers crashed (ManagerLost)"
+                                if "authentication" in error_msg.lower():
+                                    return (
+                                        False,
+                                        f"Globus Compute authentication required: {error_msg[:80]}",
+                                    )
+                                return False, f"Inference failed: {error_msg[:100]}"
+                            except Exception:
+                                return False, f"HTTP {response.status_code}"
 
-                except httpx.ConnectError:
-                    if attempt < 2:  # Don't sleep on last attempt
-                        time.sleep(2)  # Wait 2 seconds before retrying
+                except httpx.TimeoutException:
+                    if attempt < 1:
+                        time.sleep(2)
                         continue
-                    return False, "Cannot connect to Lakeshore proxy. Is the proxy service running?"
+                    return False, "Inference timeout (HPC workers may be unavailable)"
                 except Exception as e:
-                    return False, f"Lakeshore proxy error: {str(e)}"
+                    return False, f"Inference error: {str(e)}"
+
+            return False, "Inference failed after retries"
 
         # CLOUD: Test through LiteLLM WITH RETRY
         elif tier == "cloud":
@@ -177,13 +222,17 @@ def _quick_health_check(tier: str) -> tuple[bool, str | None]:
 
                 return True, None
 
-        # LAKESHORE: Single attempt to proxy
+        # LAKESHORE: Quick check - proxy health only (full check tests inference)
+        # For quick checks, we trust the cached status from warm ping / periodic checks
+        # The full check_tier_health() tests actual inference every 5 minutes
         elif tier == "lakeshore":
             with httpx.Client(timeout=5.0) as client:
                 response = client.get(f"{LAKESHORE_PROXY_URL}/health")
                 if response.status_code == 200:
                     health_data = response.json()
                     if health_data.get("status") == "healthy":
+                        # Proxy is up - trust cached inference status
+                        # If HPC workers are dead, periodic check will catch it
                         return True, None
                     else:
                         return False, "Lakeshore proxy unhealthy"

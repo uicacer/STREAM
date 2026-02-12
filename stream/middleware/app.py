@@ -38,7 +38,9 @@ from stream.middleware.config import (
     SERVICE_VERSION,
 )
 from stream.middleware.core import lifecycle
+from stream.middleware.routes.auth import router as auth_router
 from stream.middleware.routes.chat import router as chat_router
+from stream.middleware.routes.config import router as config_router
 from stream.middleware.routes.costs import router as costs_router
 from stream.middleware.routes.health import router as health_router
 from stream.middleware.utils.logging_config import configure_logging
@@ -319,6 +321,8 @@ async def global_exception_handler(request: Request, exc: Exception):
 # =============================================================================
 
 app.include_router(health_router, tags=["Health"])
+app.include_router(auth_router, prefix="/v1", tags=["Auth"])
+app.include_router(config_router, prefix="/v1", tags=["Config"])
 app.include_router(chat_router, prefix="/v1", tags=["Chat"])
 app.include_router(costs_router, prefix="/v1", tags=["Costs"])
 

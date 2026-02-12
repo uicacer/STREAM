@@ -23,6 +23,7 @@ from stream.middleware.core.database import close_database_pool, initialize_data
 from stream.middleware.core.health_monitor import health_monitor
 from stream.middleware.core.ollama_manager import OllamaModelManager
 from stream.middleware.core.tier_health import check_all_tiers
+from stream.middleware.core.warm_ping import warm_up_all_tiers
 
 logger = logging.getLogger(__name__)
 console = Console()
@@ -64,6 +65,14 @@ async def startup():
     # Step 5: Warm up judge (optional)
     logger.info("🔍 Warming up LLM judge...")
     judge_complexity_with_llm("warmup test")
+
+    # Step 6: Warm ping all tiers
+    # This sends a small test request to each tier to:
+    # - Pre-load models into memory (especially Ollama)
+    # - Detect actual availability (not just proxy health)
+    # - Establish connections early
+    logger.info("🔍 Warming up inference tiers...")
+    await warm_up_all_tiers()
 
     logger.info("✅ Middleware ready!")
 

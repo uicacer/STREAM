@@ -1,0 +1,202 @@
+/**
+ * Message.tsx - Single Chat Message
+ * ==================================
+ *
+ * This component renders one message in the chat - either from the user
+ * or from the AI assistant. It handles:
+ *
+ * - Different styling for user vs assistant messages
+ * - Thinking block display (for reasoning models)
+ * - Routing details display (tier, model, duration, cost)
+ * - Copy to clipboard button
+ * - Responsive layout
+ *
+ * DESIGN PRINCIPLES:
+ * - User messages: Right-aligned, primary color background
+ * - Assistant messages: Left-aligned, no background (cleaner look)
+ * - Metadata: Small, unobtrusive, but accessible
+ */
+
+import { useState } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkMath from 'remark-math'
+import rehypeKatex from 'rehype-katex'
+import 'katex/dist/katex.min.css'
+import { Copy, Check, Cpu, Building2, Cloud, Clock } from 'lucide-react'
+import { cn } from '../../lib/utils'
+import { ThinkingBlock } from './ThinkingBlock'
+import type { Message as MessageType } from '../../types'
+
+/**
+ * Tier configuration for display with colors
+ */
+const TIER_CONFIG = {
+  local: {
+    icon: Cpu,
+    label: 'LOCAL',
+    color: 'text-orange-600 dark:text-orange-400',
+    bgColor: 'bg-orange-500/10',
+  },
+  lakeshore: {
+    icon: Building2,
+    label: 'LAKESHORE',
+    color: 'text-green-600 dark:text-green-400',
+    bgColor: 'bg-green-500/10',
+  },
+  cloud: {
+    icon: Cloud,
+    label: 'CLOUD',
+    color: 'text-blue-600 dark:text-blue-400',
+    bgColor: 'bg-blue-500/10',
+  },
+} as const
+
+interface MessageProps {
+  message: MessageType
+  isStreaming?: boolean
+}
+
+export function Message({ message, isStreaming = false }: MessageProps) {
+  const [copied, setCopied] = useState(false)
+  const isUser = message.role === 'user'
+
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(message.content)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  /**
+   * Get tier configuration for this message
+   */
+  const tierKey = message.metadata?.tier as keyof typeof TIER_CONFIG | undefined
+  const tierConfig = tierKey ? TIER_CONFIG[tierKey] : null
+  const TierIcon = tierConfig?.icon
+
+  /**
+   * Format model name for display
+   */
+  const formatModelName = (model: string): string => {
+    if (model.includes('tiny')) return 'Llama 3.2 1B'
+    if (model.includes('quality')) return 'Llama 3.1 8B'
+    if (model.includes('llama')) return 'Llama 3.2 3B'
+    if (model.includes('claude')) return 'Claude Sonnet 4'
+    if (model.includes('gpt-4')) return 'GPT-4 Turbo'
+    if (model.includes('qwen')) return 'Qwen vLLM'
+    return model
+  }
+
+  return (
+    <div
+      className={cn(
+        "flex flex-col gap-2",
+        isUser ? "items-end" : "items-start"
+      )}
+    >
+      {/* Message content */}
+      <div
+        className={cn(
+          "max-w-[95%] md:max-w-[90%]",
+          isUser
+            ? "rounded-2xl px-5 py-3 bg-primary text-primary-foreground"
+            : "px-1" // No background for assistant - cleaner look
+        )}
+      >
+        {/* Thinking block for reasoning models */}
+        {!isUser && message.thinking && (
+          <ThinkingBlock
+            thinking={message.thinking}
+            isStreaming={isStreaming}
+          />
+        )}
+
+        {/* Message content */}
+        {isUser ? (
+          <p className="whitespace-pre-wrap text-base">{message.content}</p>
+        ) : (
+          <div className="prose prose-lg dark:prose-invert max-w-none
+                          prose-p:my-3 prose-p:leading-7 prose-p:text-base
+                          prose-headings:my-4 prose-headings:font-semibold
+                          prose-h1:text-2xl prose-h2:text-xl prose-h3:text-lg
+                          prose-pre:bg-slate-900 prose-pre:text-slate-50 prose-pre:rounded-xl prose-pre:p-4 prose-pre:my-4
+                          prose-pre:text-base prose-pre:leading-7 prose-pre:overflow-x-auto
+                          prose-code:bg-slate-100 dark:prose-code:bg-slate-800 prose-code:rounded-md prose-code:px-1.5 prose-code:py-0.5
+                          prose-code:text-base prose-code:font-medium
+                          prose-code:before:content-none prose-code:after:content-none
+                          prose-ul:my-3 prose-ol:my-3 prose-li:my-1 prose-li:text-base
+                          prose-strong:font-semibold prose-strong:text-foreground
+                          prose-a:text-primary prose-a:no-underline hover:prose-a:underline">
+            <ReactMarkdown
+              remarkPlugins={[remarkMath]}
+              rehypePlugins={[rehypeKatex]}
+            >
+              {message.content}
+            </ReactMarkdown>
+          </div>
+        )}
+      </div>
+
+      {/**
+       * Routing details row (assistant messages only)
+       */}
+      {!isUser && message.metadata && (
+        <div className="flex items-center gap-3 text-sm text-muted-foreground px-1 flex-wrap">
+          {/* Tier badge with color */}
+          <div className={cn(
+            "flex items-center gap-1.5 px-2.5 py-1 rounded-full",
+            tierConfig?.bgColor || 'bg-muted'
+          )}>
+            {TierIcon && <TierIcon className={cn("w-3.5 h-3.5", tierConfig?.color)} />}
+            <span className={cn("font-medium text-xs", tierConfig?.color)}>
+              {tierConfig?.label}
+            </span>
+          </div>
+
+          {/* Model name */}
+          <span className="text-muted-foreground">
+            {formatModelName(message.metadata.model || 'unknown')}
+          </span>
+
+          {/* Duration (if available and valid number) */}
+          {(() => {
+            const duration = parseFloat(String(message.metadata.duration))
+            return !isNaN(duration) && duration > 0 ? (
+              <div className="flex items-center gap-1 text-muted-foreground">
+                <Clock className="w-3.5 h-3.5" />
+                <span>{duration.toFixed(2)}s</span>
+              </div>
+            ) : null
+          })()}
+
+          {/* Cost */}
+          <div className="flex items-center gap-1">
+            <span>💰</span>
+            {tierKey === 'local' ? (
+              <span className="text-green-600 dark:text-green-400 font-medium">FREE</span>
+            ) : (() => {
+              const cost = parseFloat(String(message.metadata.cost))
+              return !isNaN(cost) && cost > 0 ? (
+                <span>~${cost.toFixed(6)}</span>
+              ) : (
+                <span className="text-muted-foreground">calculating...</span>
+              )
+            })()}
+          </div>
+
+          {/* Copy button */}
+          <button
+            onClick={handleCopy}
+            className="p-1.5 hover:bg-muted rounded-lg transition-colors ml-auto"
+            aria-label="Copy message"
+          >
+            {copied ? (
+              <Check className="w-4 h-4 text-green-500" />
+            ) : (
+              <Copy className="w-4 h-4" />
+            )}
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
