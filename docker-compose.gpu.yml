@@ -1,0 +1,46 @@
+# =============================================================================
+# STREAM GPU Override - NVIDIA GPU Acceleration
+# =============================================================================
+#
+# Enables NVIDIA GPU for Ollama on Linux and Windows.
+# Mac users: This has no effect - Docker cannot access Apple Metal.
+#
+# SUPPORTED PLATFORMS:
+# - Linux with NVIDIA GPU: Full support
+# - Windows with NVIDIA GPU: Full support (via WSL2)
+# - Mac (any): Not supported - use Lakeshore or Cloud tier instead
+#
+# REQUIREMENTS:
+#
+# Linux:
+#   1. NVIDIA GPU + drivers installed
+#   2. Install nvidia-container-toolkit:
+#      sudo apt install nvidia-container-toolkit  # Ubuntu/Debian
+#      sudo systemctl restart docker
+#
+# Windows:
+#   1. NVIDIA GPU + Windows drivers installed
+#   2. Docker Desktop with WSL2 backend (default)
+#   3. GPU support is automatic in modern Docker Desktop
+#
+# USAGE:
+#   docker-compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+#
+# Or set as default by adding to .env:
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml
+#
+# VERIFY GPU IS WORKING:
+#   docker exec stream-ollama nvidia-smi  # Should show GPU info
+#   # Or check ollama ps - size_vram should be > 0
+#
+# =============================================================================
+
+services:
+  ollama:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

@@ -33,7 +33,8 @@ import { useSettingsStore } from './stores/settingsStore'
 import { useConversationStore } from './stores/conversationStore'
 import { useChatStore } from './stores/chatStore'
 import { fetchConfig } from './api/config'
-import { Bot, Loader2, Menu, X, PanelLeftClose, PanelLeft } from 'lucide-react'
+import { Bot, Loader2, Menu, X, PanelLeftClose, PanelLeft, Plus } from 'lucide-react'
+import { TierStatus } from './components/header/TierStatus'
 
 /**
  * App Component
@@ -109,7 +110,17 @@ export default function App() {
    */
   const initializeFromBackend = useSettingsStore((state) => state.initializeFromBackend)
   const loadConversations = useConversationStore((state) => state.loadConversations)
+  const startNewConversation = useConversationStore((state) => state.startNewConversation)
   const setPendingQuery = useChatStore((state) => state.setPendingQuery)
+  const clearChat = useChatStore((state) => state.clearChat)
+
+  /**
+   * Handle starting a new conversation
+   */
+  const handleNewChat = () => {
+    clearChat()
+    startNewConversation()
+  }
 
   /**
    * Fetch backend config and load conversations on mount
@@ -216,9 +227,19 @@ export default function App() {
             </div>
           </div>
 
-          {/* Right side - future: settings, theme toggle */}
-          <div className="flex items-center gap-2">
-            {/* Future: Theme toggle, settings, etc. */}
+          {/* Right side: New Chat button + Tier status indicators */}
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleNewChat}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg
+                         bg-primary text-primary-foreground text-sm font-medium
+                         hover:bg-primary/90 transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+              <span className="hidden sm:inline">New Chat</span>
+            </button>
+            <div className="hidden md:block h-6 w-px bg-border" />
+            <TierStatus />
           </div>
         </div>
       </header>
@@ -254,7 +275,7 @@ export default function App() {
         <aside
           className={`
             hidden md:flex flex-col relative
-            border-r bg-background
+            border-r-2 border-border/50 bg-background
             transition-all duration-300 ease-in-out
             ${sidebarCollapsed ? 'w-0 overflow-hidden border-r-0' : ''}
           `}
@@ -320,7 +341,7 @@ export default function App() {
         <aside
           className={`
             md:hidden fixed inset-y-0 left-0 z-40
-            w-64 border-r bg-background
+            w-64 border-r-2 border-border/50 bg-background
             transform transition-transform duration-200 ease-in-out
             ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
             top-14

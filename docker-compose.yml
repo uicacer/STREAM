@@ -40,6 +40,10 @@ services:
       - "${OLLAMA_EXTERNAL_PORT}:${OLLAMA_PORT}" # Left side: Port on your laptop/server; Right side: Port in Docker container
     volumes:
       - ollama_models:/root/.ollama
+    environment:
+      # Keep models loaded in memory for 30 minutes (default is 5m)
+      # This prevents slow first-request latency after idle periods
+      - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-30m}
     deploy:
       resources:
         limits:

@@ -24,9 +24,45 @@ from stream.middleware.config import LITELLM_API_KEY, LITELLM_BASE_URL
 
 logger = logging.getLogger(__name__)
 
-# HTTP timeout in seconds
-# 120s allows for slow model inference on large contexts
-REQUEST_TIMEOUT = 120.0
+# =============================================================================
+# HTTP TIMEOUT CONFIGURATION
+# =============================================================================
+#
+# Why granular timeouts prevent the "hang" problem:
+# -------------------------------------------------
+# With a single timeout (timeout=120), httpx waits 120s for the ENTIRE request.
+# If cloud provider hiccups mid-stream, user sees UI freeze for 2 minutes!
+#
+# With granular timeouts, we detect problems in seconds:
+#
+#   Normal streaming: chunks arrive every 100-500ms
+#   If 10s pass with no chunk → something's wrong → timeout → user can retry
+#
+# Quick glossary:
+# ---------------
+# • TCP connection: The network "pipe" between your computer and the server.
+#                   Must be opened before any data can flow.
+#
+# • Connection pool: Reuses open connections instead of creating new ones
+#                    for each request. Faster, less resource-intensive.
+#
+# Timeout values:
+# ---------------
+# • connect (10s):  Time to open connection to server. Usually <1s.
+# • read (10s):     Max gap between chunks during streaming. KEY TIMEOUT!
+#                   Detects mid-stream hangs from provider issues.
+# • write (30s):    Time to send request (long conversations need more).
+# • pool (10s):     Time to get connection from pool. Should be instant.
+#
+# NOTE: For user feedback BEFORE timeout (e.g., "taking a while..."),
+#       see the chunk gap warning in streaming.py
+#
+REQUEST_TIMEOUT = httpx.Timeout(
+    connect=10.0,  # 10s to establish connection
+    read=10.0,  # 10s max gap between chunks (key for detecting hangs!)
+    write=30.0,  # 30s to send request body
+    pool=10.0,  # 10s to get pooled connection
+)
 
 
 async def forward_to_litellm(
@@ -111,6 +147,7 @@ async def forward_to_litellm(
                 # Read error details from response body
                 error_text = await response.aread()  # aread means "asynchronous read"
                 error_message = error_text.decode("utf-8")
+                error_lower = error_message.lower()
 
                 logger.error(
                     f"[{correlation_id}] LiteLLM error: {response.status_code} - {error_message}",
@@ -121,9 +158,71 @@ async def forward_to_litellm(
                     },
                 )
 
+                # -------------------------------------------------------------------------
+                # CLASSIFY ERROR TYPE for better user messages
+                # -------------------------------------------------------------------------
+                # Cloud providers return different error codes/messages:
+                # - 401: Invalid API key
+                # - 403: Forbidden (subscription expired, no access)
+                # - 429: Rate limit exceeded
+                # - 400: Bad request (often contains "credit", "billing", "quota")
+                #
+                # We detect these to show CLEAR messages instead of raw API errors.
+
+                error_type = "unknown"
+                user_message = error_message
+
+                # Authentication / Subscription errors
+                if response.status_code in [401, 403] or any(
+                    keyword in error_lower
+                    for keyword in [
+                        "authentication",
+                        "invalid api key",
+                        "api key",
+                        "unauthorized",
+                        "forbidden",
+                        "credit",
+                        "billing",
+                        "subscription",
+                        "expired",
+                        "quota exceeded",
+                        "insufficient_quota",
+                        "account",
+                    ]
+                ):
+                    error_type = "auth_subscription"
+                    user_message = (
+                        "Cloud provider authentication failed. "
+                        "Your API key may be invalid or your subscription may have expired. "
+                        "Please check your API key in .env or try a different cloud provider."
+                    )
+
+                # Rate limiting
+                elif response.status_code == 429 or "rate limit" in error_lower:
+                    error_type = "rate_limit"
+                    user_message = (
+                        "Cloud provider rate limit exceeded. "
+                        "Please wait a moment and try again, or switch to a different provider."
+                    )
+
+                # Model not found / not available
+                elif "model" in error_lower and (
+                    "not found" in error_lower or "does not exist" in error_lower
+                ):
+                    error_type = "model_not_found"
+                    user_message = (
+                        "The selected cloud model is not available. "
+                        "Please try a different cloud provider in settings."
+                    )
+
                 raise HTTPException(
                     status_code=response.status_code,
-                    detail=f"LiteLLM error: {error_message}",
+                    detail={
+                        "error_type": error_type,
+                        "message": user_message,
+                        "raw_error": error_message,  # Keep raw for debugging
+                        "provider": "cloud",  # Will be enhanced later with actual provider
+                    },
                 )
 
             # Stream lines from LiteLLM

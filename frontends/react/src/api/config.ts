@@ -96,3 +96,48 @@ export function getCachedConfig(): AppConfig | null {
 export function clearConfigCache(): void {
   cachedConfig = null
 }
+
+/**
+ * Cloud provider configuration
+ */
+export interface CloudProviderConfig {
+  name: string
+  provider: string
+  description: string
+}
+
+export interface CloudProvidersResponse {
+  providers: Record<string, CloudProviderConfig>
+  current: string
+  timestamp: string
+}
+
+/**
+ * Cached cloud providers
+ */
+let cachedCloudProviders: CloudProvidersResponse | null = null
+
+/**
+ * Fetch available cloud providers from the backend
+ */
+export async function fetchCloudProviders(): Promise<CloudProvidersResponse> {
+  if (cachedCloudProviders) {
+    return cachedCloudProviders
+  }
+
+  const response = await fetch('/health/cloud-providers')
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch cloud providers: ${response.status}`)
+  }
+
+  cachedCloudProviders = await response.json()
+  return cachedCloudProviders!
+}
+
+/**
+ * Get cached cloud providers
+ */
+export function getCachedCloudProviders(): CloudProvidersResponse | null {
+  return cachedCloudProviders
+}

@@ -22,7 +22,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import 'katex/dist/katex.min.css'
-import { Copy, Check, Cpu, Building2, Cloud, Clock } from 'lucide-react'
+import { Copy, Check, Cpu, Building2, Cloud, Clock, AlertTriangle } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { ThinkingBlock } from './ThinkingBlock'
 import type { Message as MessageType } from '../../types'
@@ -86,20 +86,32 @@ export function Message({ message, isStreaming = false }: MessageProps) {
     return model
   }
 
+  // Check if this is a summarized message (shown for reference only)
+  const isSummarized = message.summarized && !message.isSummaryMarker
+
   return (
     <div
       className={cn(
         "flex flex-col gap-2",
-        isUser ? "items-end" : "items-start"
+        isUser ? "items-end" : "items-start",
+        isSummarized && "opacity-50" // Dim summarized messages
       )}
     >
+      {/* Summarized indicator */}
+      {isSummarized && (
+        <div className="text-xs text-muted-foreground italic px-1">
+          (summarized - for reference only)
+        </div>
+      )}
+
       {/* Message content */}
       <div
         className={cn(
           "max-w-[95%] md:max-w-[90%]",
           isUser
             ? "rounded-2xl px-5 py-3 bg-primary text-primary-foreground"
-            : "px-1" // No background for assistant - cleaner look
+            : "px-1", // No background for assistant - cleaner look
+          message.isSummaryMarker && "bg-purple-500/10 border border-purple-500/30 rounded-lg px-4 py-3" // Summary marker styling
         )}
       >
         {/* Thinking block for reasoning models */}
@@ -175,11 +187,25 @@ export function Message({ message, isStreaming = false }: MessageProps) {
               <span className="text-green-600 dark:text-green-400 font-medium">FREE</span>
             ) : (() => {
               const cost = parseFloat(String(message.metadata.cost))
-              return !isNaN(cost) && cost > 0 ? (
-                <span>~${cost.toFixed(6)}</span>
-              ) : (
-                <span className="text-muted-foreground">calculating...</span>
-              )
+              const wasStopped = message.content.includes('[Generation stopped]')
+              const isEstimated = message.metadata.cost_estimated === true
+              const hasCost = !isNaN(cost) && cost > 0
+
+              // If we have cost data, show it
+              if (hasCost) {
+                // Show "estimated" suffix if cost was estimated due to interrupted streaming
+                // Estimation is based on ~4 characters per token using pricing from litellm_config.yaml
+                const suffix = isEstimated ? ' (estimated)' : ''
+                return <span>~${cost.toFixed(6)}{suffix}</span>
+              }
+
+              // No cost data
+              if (wasStopped) {
+                // Stopped before cost could be calculated
+                return <span className="text-muted-foreground">--</span>
+              }
+
+              return <span className="text-muted-foreground">calculating...</span>
             })()}
           </div>
 
@@ -195,6 +221,19 @@ export function Message({ message, isStreaming = false }: MessageProps) {
               <Copy className="w-4 h-4" />
             )}
           </button>
+        </div>
+      )}
+
+      {/**
+       * Fallback warning (shown when tier was unavailable and we switched)
+       */}
+      {!isUser && !isStreaming && message.metadata?.fallback_used && message.metadata?.original_tier && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-yellow-500/10 border border-yellow-500/30 text-yellow-600 dark:text-yellow-400 mt-2">
+          <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+          <span className="text-sm">
+            <span className="font-medium">Tier Fallback:</span>{' '}
+            {message.metadata.original_tier.charAt(0).toUpperCase() + message.metadata.original_tier.slice(1)} was unavailable, automatically switched to {message.metadata.tier.charAt(0).toUpperCase() + message.metadata.tier.slice(1)}.
+          </span>
         </div>
       )}
     </div>

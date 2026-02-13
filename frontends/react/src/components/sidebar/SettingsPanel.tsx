@@ -13,7 +13,7 @@
  * DESIGN: Matches the Streamlit sidebar functionality
  */
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import {
   Bot,
   Cpu,
@@ -33,8 +33,9 @@ import {
 } from 'lucide-react'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useChatStore } from '../../stores/chatStore'
-import { checkAuthStatus, authenticateGlobus } from '../../api/auth'
-import type { Tier, JudgeStrategy } from '../../types'
+import { useHealthStore, getTierDisplayInfo } from '../../stores/healthStore'
+import { authenticateGlobus } from '../../api/auth'
+import type { Tier, JudgeStrategy, CloudProvider } from '../../types'
 
 /**
  * Example queries for quick start
@@ -97,6 +98,29 @@ const JUDGE_CONFIG: Record<JudgeStrategy, { icon: typeof Zap; label: string; des
   },
 }
 
+/**
+ * Cloud provider configuration
+ *
+ * Source: stream/gateway/litellm_config.yaml
+ * - cloud-claude: claude-sonnet-4-20250514
+ * - cloud-gpt: gpt-4-turbo-2024-04-09
+ * - cloud-gpt-cheap: gpt-3.5-turbo-0125
+ */
+const CLOUD_PROVIDER_CONFIG: Record<CloudProvider, { label: string; provider: string }> = {
+  'cloud-claude': {
+    label: 'Claude Sonnet 4',
+    provider: 'Anthropic',
+  },
+  'cloud-gpt': {
+    label: 'GPT-4 Turbo',
+    provider: 'OpenAI',
+  },
+  'cloud-gpt-cheap': {
+    label: 'GPT-3.5 Turbo',
+    provider: 'OpenAI',
+  },
+}
+
 interface SettingsPanelProps {
   onExampleQuery?: (query: string) => void
 }
@@ -108,14 +132,39 @@ export function SettingsPanel({ onExampleQuery }: SettingsPanelProps) {
   const tier = useSettingsStore((state) => state.tier)
   const judgeStrategy = useSettingsStore((state) => state.judgeStrategy)
   const temperature = useSettingsStore((state) => state.temperature)
+  const cloudProvider = useSettingsStore((state) => state.cloudProvider)
   const setTier = useSettingsStore((state) => state.setTier)
   const setJudgeStrategy = useSettingsStore((state) => state.setJudgeStrategy)
   const setTemperature = useSettingsStore((state) => state.setTemperature)
+  const setCloudProvider = useSettingsStore((state) => state.setCloudProvider)
 
   /**
    * Get messages for stats calculation
    */
   const messages = useChatStore((state) => state.messages)
+
+  /**
+   * Get tier health status and fetch function
+   */
+  const localHealth = useHealthStore((state) => state.local)
+  const lakeshoreHealth = useHealthStore((state) => state.lakeshore)
+  const cloudHealth = useHealthStore((state) => state.cloud)
+  const fetchHealth = useHealthStore((state) => state.fetchHealth)
+
+  /**
+   * Handle cloud provider change - updates setting AND triggers health check
+   * This gives immediate feedback on whether the new provider is available
+   */
+  const handleCloudProviderChange = (provider: CloudProvider) => {
+    console.log('[SettingsPanel] Cloud provider changing to:', provider)
+    setCloudProvider(provider)
+    // Trigger health check after a brief delay to allow state to update
+    // This ensures the health check uses the new provider
+    setTimeout(() => {
+      console.log('[SettingsPanel] Triggering fetchHealth()')
+      fetchHealth()
+    }, 50)
+  }
 
   /**
    * Local state for expandable sections
@@ -125,23 +174,14 @@ export function SettingsPanel({ onExampleQuery }: SettingsPanelProps) {
 
   /**
    * Globus authentication state
+   * Note: We use lakeshoreHealth?.authenticated from healthStore for display (polled every 30s)
+   * These local states are only for the authentication button logic
    */
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null)
   const [isAuthenticating, setIsAuthenticating] = useState(false)
   const [authError, setAuthError] = useState<string | null>(null)
 
-  /**
-   * Check Globus auth status on mount
-   */
-  useEffect(() => {
-    async function checkAuth() {
-      console.log('[SettingsPanel] Checking Globus auth status...')
-      const status = await checkAuthStatus()
-      console.log('[SettingsPanel] Auth status:', status)
-      setIsAuthenticated(status.authenticated)
-    }
-    checkAuth()
-  }, [])
+  // Use healthStore's auth status (polled every 30 seconds) instead of local state
+  const isAuthenticated = lakeshoreHealth?.authenticated === true
 
   /**
    * Handle Globus authentication
@@ -155,8 +195,8 @@ export function SettingsPanel({ onExampleQuery }: SettingsPanelProps) {
     setIsAuthenticating(false)
 
     if (result.success) {
-      setIsAuthenticated(true)
       setAuthError(null)
+      // Auth status will be updated via healthStore polling
     } else {
       setAuthError(result.message)
     }
@@ -186,8 +226,9 @@ export function SettingsPanel({ onExampleQuery }: SettingsPanelProps) {
 
   /**
    * Is auth status still loading?
+   * Check if healthStore has loaded lakeshore data yet
    */
-  const isAuthLoading = isAuthenticated === null
+  const isAuthLoading = lakeshoreHealth === null
 
   /**
    * Should we show the Lakeshore auth prompt?
@@ -220,10 +261,24 @@ export function SettingsPanel({ onExampleQuery }: SettingsPanelProps) {
               const isSelected = tier === tierKey
               const isLakeshoreUnavailable = tierKey === 'lakeshore' && !isAuthenticated
 
+              // Get health status for this tier (auto doesn't have health status)
+              const healthStatus = tierKey === 'local' ? localHealth
+                : tierKey === 'lakeshore' ? lakeshoreHealth
+                : tierKey === 'cloud' ? cloudHealth
+                : null
+
+              // Get display info from centralized function (single source of truth)
+              const displayInfo = tierKey === 'auto' ? null
+                : getTierDisplayInfo(tierKey, healthStatus)
+
+              const statusDot = displayInfo?.color ?? null
+              const statusTooltip = displayInfo?.tooltip ?? ''
+
               return (
                 <button
                   key={tierKey}
                   onClick={() => setTier(tierKey)}
+                  title={statusTooltip}
                   className={`
                     w-full flex items-center gap-2 px-3 py-2 rounded-lg text-left text-sm
                     transition-colors
@@ -237,6 +292,9 @@ export function SettingsPanel({ onExampleQuery }: SettingsPanelProps) {
                   <div className="min-w-0 flex-1">
                     <div className="font-medium truncate flex items-center gap-1.5">
                       {config.label}
+                      {statusDot && (
+                        <span className={`w-2 h-2 rounded-full ${statusDot} flex-shrink-0`} />
+                      )}
                       {isLakeshoreUnavailable && (
                         <Lock className="w-3 h-3 text-yellow-500" />
                       )}
@@ -253,49 +311,92 @@ export function SettingsPanel({ onExampleQuery }: SettingsPanelProps) {
       </div>
 
       {/**
+       * Cloud Provider Selector (only when tier is 'cloud')
+       */}
+      {tier === 'cloud' && (
+        <div className="border rounded-lg p-3 bg-muted/30">
+          <label className="text-sm text-muted-foreground block mb-2">
+            Cloud Provider
+          </label>
+          <div className="space-y-1">
+            {(Object.entries(CLOUD_PROVIDER_CONFIG) as [CloudProvider, typeof CLOUD_PROVIDER_CONFIG['cloud-claude']][]).map(
+              ([providerKey, config]) => {
+                const isSelected = cloudProvider === providerKey
+
+                return (
+                  <button
+                    key={providerKey}
+                    onClick={() => handleCloudProviderChange(providerKey)}
+                    className={`
+                      w-full flex items-center justify-between px-3 py-2 rounded-lg text-left text-sm
+                      transition-colors
+                      ${isSelected
+                        ? 'bg-primary/10 text-primary border border-primary/30'
+                        : 'hover:bg-muted text-foreground'
+                      }
+                    `}
+                  >
+                    <span className="font-medium">{config.label}</span>
+                    <span className="text-xs text-muted-foreground">{config.provider}</span>
+                  </button>
+                )
+              }
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Cloud auth errors are shown via AuthErrorDialog when requests fail,
+          not proactively in settings panel */}
+
+      {/**
        * Lakeshore Authentication Panel
        */}
       {showLakeshoreAuth && (
         <div className="border rounded-lg p-3 bg-yellow-500/10 border-yellow-500/30">
-          <div className="flex items-start gap-2">
-            <AlertTriangle className="w-4 h-4 text-yellow-600 dark:text-yellow-400 mt-0.5 flex-shrink-0" />
-            <div className="flex-1 min-w-0">
-              <h4 className="text-sm font-medium text-yellow-600 dark:text-yellow-400">
-                Lakeshore Authentication Required
-              </h4>
-              <p className="text-xs text-muted-foreground mt-1">
-                To use the UIC HPC cluster, you need to authenticate with Globus Compute.
-              </p>
-
-              {authError && (
-                <p className="text-xs text-red-500 mt-2">{authError}</p>
-              )}
-
-              <button
-                onClick={handleAuthenticate}
-                disabled={isAuthenticating}
-                className="mt-2 w-full flex items-center justify-center gap-2 px-3 py-2
-                           bg-yellow-600 hover:bg-yellow-700 text-white rounded-lg text-sm
-                           disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                {isAuthenticating ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    Authenticating...
-                  </>
-                ) : (
-                  <>
-                    <Unlock className="w-4 h-4" />
-                    Authenticate with Globus
-                  </>
-                )}
-              </button>
-
-              <p className="text-xs text-muted-foreground mt-2">
-                A browser window will open for authentication.
-              </p>
-            </div>
+          {/* Centered title with warning icon */}
+          <div className="flex items-center justify-center gap-2 mb-2">
+            <AlertTriangle className="w-4 h-4 text-yellow-600 dark:text-yellow-400" />
+            <h4 className="text-sm font-medium text-yellow-600 dark:text-yellow-400">
+              Lakeshore Authentication Required
+            </h4>
           </div>
+
+          {/* Left-aligned content */}
+          <p className="text-xs text-muted-foreground">
+            To use the UIC HPC cluster, you need to authenticate with Globus Compute.
+          </p>
+          <p className="text-xs text-muted-foreground mt-1">
+            <strong>Disable VPN before authenticating.</strong> You can reconnect after.
+          </p>
+
+          {authError && (
+            <p className="text-xs text-red-500 mt-2">{authError}</p>
+          )}
+
+          <button
+            onClick={handleAuthenticate}
+            disabled={isAuthenticating}
+            className="mt-3 w-full flex items-center justify-center gap-2 px-3 py-2
+                       bg-yellow-600 hover:bg-yellow-700 text-white rounded-lg text-sm
+                       disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {isAuthenticating ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Authenticating...
+              </>
+            ) : (
+              <>
+                <Unlock className="w-4 h-4" />
+                Authenticate with Globus
+              </>
+            )}
+          </button>
+
+          <p className="text-xs text-muted-foreground mt-2 text-center">
+            A browser window will open for authentication.
+          </p>
         </div>
       )}
 

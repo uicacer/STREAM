@@ -19,7 +19,7 @@
 
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { Tier, JudgeStrategy, ChatSettings } from '../types'
+import type { Tier, JudgeStrategy, ChatSettings, CloudProvider } from '../types'
 
 /**
  * SettingsState - The shape of our settings store
@@ -30,6 +30,7 @@ interface SettingsState {
   judgeStrategy: JudgeStrategy
   temperature: number
   theme: 'system' | 'light' | 'dark'
+  cloudProvider: CloudProvider
 
   /**
    * Has the store been initialized with backend defaults?
@@ -42,6 +43,7 @@ interface SettingsState {
   setJudgeStrategy: (strategy: JudgeStrategy) => void
   setTemperature: (temp: number) => void
   setTheme: (theme: 'system' | 'light' | 'dark') => void
+  setCloudProvider: (provider: CloudProvider) => void
   getSettings: () => ChatSettings
 
   /**
@@ -85,6 +87,7 @@ export const useSettingsStore = create<SettingsState>()(
       judgeStrategy: 'ollama-3b',  // Safe fallback (matches backend default)
       temperature: 0.7,
       theme: 'system',
+      cloudProvider: 'cloud-claude',  // Default cloud provider
       _initialized: false,
 
       // ============= Actions =============
@@ -94,6 +97,8 @@ export const useSettingsStore = create<SettingsState>()(
       setJudgeStrategy: (judgeStrategy) => set({ judgeStrategy }),
 
       setTemperature: (temperature) => set({ temperature }),
+
+      setCloudProvider: (cloudProvider) => set({ cloudProvider }),
 
       setTheme: (theme) => {
         set({ theme })
@@ -117,6 +122,7 @@ export const useSettingsStore = create<SettingsState>()(
           tier: state.tier,
           judgeStrategy: state.judgeStrategy,
           temperature: state.temperature,
+          cloudProvider: state.cloudProvider,
         }
       },
 
@@ -188,6 +194,7 @@ export const useSettingsStore = create<SettingsState>()(
         judgeStrategy: state.judgeStrategy,
         temperature: state.temperature,
         theme: state.theme,
+        cloudProvider: state.cloudProvider,  // Persist cloud provider choice
         _initialized: state._initialized,
       }),
     }

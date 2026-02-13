@@ -135,6 +135,7 @@ export async function streamChat(
       // User's preferences
       temperature: settings.temperature,
       judge_strategy: settings.judgeStrategy,
+      cloud_provider: settings.cloudProvider,
     }),
     signal: abortSignal,
   })
@@ -144,9 +145,51 @@ export async function streamChat(
    *
    * A non-OK response means something went wrong before streaming started.
    * Common causes: server down, invalid request, auth failure.
+   *
+   * We parse the response body to get detailed error info from the backend.
    */
   if (!response.ok) {
-    callbacks.onError(`HTTP ${response.status}: ${response.statusText}`)
+    try {
+      const errorBody = await response.json()
+      // Backend sends structured errors in detail field
+      const detail = errorBody.detail || errorBody
+
+      if (detail.error === 'context_too_long') {
+        // Context window exceeded - pass structured error for dialog
+        callbacks.onError(JSON.stringify({
+          type: 'context_exceeded',
+          message: detail.message,
+          estimated_tokens: detail.estimated_tokens,
+          model_limit: detail.model_limit,
+        }))
+      } else if (detail.error_type === 'auth_subscription') {
+        // API key invalid or subscription expired
+        callbacks.onError(JSON.stringify({
+          type: 'auth_subscription',
+          message: detail.message,
+          raw_error: detail.raw_error,
+          provider: detail.provider,
+        }))
+      } else if (detail.error_type === 'rate_limit') {
+        // Rate limit exceeded
+        callbacks.onError(JSON.stringify({
+          type: 'rate_limit',
+          message: detail.message,
+        }))
+      } else if (detail.error_type) {
+        // Other structured errors from backend
+        callbacks.onError(JSON.stringify({
+          type: detail.error_type,
+          message: detail.message,
+        }))
+      } else {
+        // Other errors - show the message
+        callbacks.onError(detail.message || `HTTP ${response.status}: ${response.statusText}`)
+      }
+    } catch {
+      // Couldn't parse JSON - fall back to status text
+      callbacks.onError(`HTTP ${response.status}: ${response.statusText}`)
+    }
     return
   }
 
@@ -168,27 +211,35 @@ export async function streamChat(
    *
    * Each read() call returns:
    * - done: true if stream ended
-   * - value: raw bytes of data
+   * - value: raw bytes of data (may be present even when done=true!)
    *
    * We keep reading until done is true.
    */
   while (true) {
     const { done, value } = await reader.read()
-    if (done) break
 
     /**
      * STEP 5: Decode bytes to text and handle buffering
      *
+     * IMPORTANT: Process value BEFORE checking done!
+     * The final read may return { done: true, value: <final bytes> }
+     * and we need to process those bytes (which may contain [DONE]).
+     *
      * { stream: true } tells the decoder to handle partial characters.
      * We add to buffer because SSE events might be split across reads.
      */
-    buffer += decoder.decode(value, { stream: true })
+    if (value) {
+      buffer += decoder.decode(value, { stream: true })
+    }
 
     /**
      * STEP 6: Split into lines and process
      *
      * SSE events are newline-separated.
      * The last element (pop()) might be incomplete - keep it in buffer.
+     *
+     * IMPORTANT: Process lines BEFORE checking done!
+     * The final read may have { done: true, value: "[DONE]" }
      */
     const lines = buffer.split('\n')
     buffer = lines.pop() || '' // Keep incomplete last line in buffer
@@ -226,16 +277,26 @@ export async function streamChat(
         const parsed = JSON.parse(data)
 
         // Handle STREAM-specific metadata (which tier, model, etc.)
-        // Backend sends metadata in TWO events:
+        // Backend sends metadata in THREE types of events:
         // 1. Initial: {"stream_metadata": {"tier": "local", "model": "..."}}
-        // 2. Final:   {"stream_metadata": {"cost": {"total": 0.001}, "duration": 1.23}}
+        // 2. Fallback: {"stream_metadata": {"fallback": true, "original_tier": "lakeshore", "current_tier": "cloud", ...}}
+        // 3. Final:   {"stream_metadata": {"cost": {"total": 0.001}, "duration": 1.23, "fallback_used": true, "tiers_tried": [...]}}
         if (parsed.stream_metadata) {
           const meta = parsed.stream_metadata
           console.log('[stream] Received metadata:', meta)
 
-          // Extract nested cost if present (cost.total structure from backend)
+          // Derive original_tier from tiers_tried if not explicitly set
+          // tiers_tried[0] is always the originally requested tier
+          const derivedOriginalTier = meta.original_tier ??
+            (meta.tiers_tried && meta.tiers_tried.length > 1 ? meta.tiers_tried[0] : undefined)
+
+          // Normalize the metadata structure
           const normalizedMeta = {
             ...meta,
+            // Backend sends "current_tier" in fallback events, normalize to "tier"
+            tier: meta.tier ?? meta.current_tier,
+            // Ensure original_tier is set for fallback scenarios
+            original_tier: derivedOriginalTier,
             // Flatten nested cost structure: cost.total -> cost
             cost: meta.cost?.total ?? meta.cost,
             // Duration comes directly
@@ -256,17 +317,58 @@ export async function streamChat(
           callbacks.onToken(content)
         }
 
-        // Check for errors in the response
+        // Check for errors in the response (including mid-stream errors from LLM)
         if (parsed.error) {
           console.error('[stream] Server error:', parsed.error)
-          callbacks.onError(parsed.error.message || 'Server error')
+          const errorMsg = typeof parsed.error === 'string' ? parsed.error : (parsed.error.message || 'Server error')
+
+          // Check if this is a context length error from the LLM
+          const isContextError = errorMsg.toLowerCase().includes('context') ||
+                                 errorMsg.toLowerCase().includes('token') ||
+                                 errorMsg.toLowerCase().includes('too long') ||
+                                 errorMsg.toLowerCase().includes('maximum')
+
+          if (isContextError) {
+            // Format as structured error for the dialog
+            callbacks.onError(JSON.stringify({
+              type: 'context_exceeded',
+              message: errorMsg,
+              estimated_tokens: 0, // Unknown mid-stream
+              model_limit: 0,      // Unknown mid-stream
+            }))
+          } else {
+            callbacks.onError(errorMsg)
+          }
         }
       } catch (e) {
         // Skip malformed JSON - sometimes happens with partial data
         console.warn('[stream] Failed to parse SSE data:', data, e)
       }
     }
+
+    // Check done AFTER processing all lines from this read
+    // This ensures we process [DONE] even if it arrives with done=true
+    if (done) break
   }
+
+  // Process any remaining buffer content after stream ends
+  // This handles the case where [DONE] is in the final chunk
+  if (buffer.trim()) {
+    const remainingLines = buffer.split('\n')
+    for (const line of remainingLines) {
+      if (!line.startsWith('data: ')) continue
+      const data = line.slice(6).trim()
+      if (data === '[DONE]') {
+        callbacks.onComplete()
+        return
+      }
+    }
+  }
+
+  // If we reach here without seeing [DONE], still complete the stream
+  // This handles edge cases where the server closes without [DONE]
+  console.warn('[stream] Stream ended without [DONE] marker')
+  callbacks.onComplete()
 }
 
 /**

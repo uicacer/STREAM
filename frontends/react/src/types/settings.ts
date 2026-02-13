@@ -45,6 +45,27 @@ export type Tier = 'auto' | 'local' | 'lakeshore' | 'cloud'
 export type JudgeStrategy = 'ollama-1b' | 'ollama-3b' | 'haiku'
 
 /**
+ * CloudProvider - Available cloud model providers
+ *
+ * When using the "cloud" tier, users can choose which provider to use.
+ * Each has different capabilities and pricing.
+ *
+ * - "cloud-claude" → Claude Sonnet (Anthropic) - Best for reasoning/coding
+ * - "cloud-gpt"    → GPT-4 Turbo (OpenAI) - Strong general-purpose
+ * - "cloud-gpt-cheap" → GPT-3.5 Turbo (OpenAI) - Fast and affordable
+ */
+export type CloudProvider = 'cloud-claude' | 'cloud-gpt' | 'cloud-gpt-cheap'
+
+/**
+ * CloudProviderInfo - Metadata about a cloud provider
+ */
+export interface CloudProviderInfo {
+  name: string
+  provider: string
+  description: string
+}
+
+/**
  * ChatSettings - All user-configurable options for chat
  *
  * These settings affect how requests are processed.
@@ -73,4 +94,10 @@ export interface ChatSettings {
    * Lower for factual tasks, higher for creative writing.
    */
   temperature: number
+
+  /**
+   * Which cloud provider to use when tier is "cloud"
+   * Users can switch providers if one is unavailable
+   */
+  cloudProvider?: CloudProvider
 }

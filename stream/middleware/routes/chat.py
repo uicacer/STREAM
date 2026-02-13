@@ -29,7 +29,7 @@ from pydantic import BaseModel, Field
 
 from stream.middleware.config import DEFAULT_JUDGE_STRATEGY, JUDGE_STRATEGIES
 from stream.middleware.core.complexity_judge import judge_complexity
-from stream.middleware.core.query_router import get_model_for_tier, get_tier_for_query
+from stream.middleware.core.query_router import AuthError, get_model_for_tier, get_tier_for_query
 from stream.middleware.core.streaming import create_streaming_response
 from stream.middleware.utils.context_window import check_context_limit
 from stream.middleware.utils.token_estimator import estimate_tokens
@@ -123,6 +123,11 @@ class ChatCompletionRequest(BaseModel):
     judge_strategy: str | None = Field(
         default=None,
         description="Judge strategy for complexity analysis (ollama-1b, ollama-3b, haiku). Default: ollama-3b",
+    )
+
+    cloud_provider: str | None = Field(
+        default=None,
+        description="Cloud provider to use when tier is 'cloud' (cloud-claude, cloud-gpt, cloud-gpt-cheap). Default: cloud-claude",
     )
 
 
@@ -242,6 +247,7 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
     user_selected_tier = request_body.model in ["local", "lakeshore", "cloud"]
     judge_strategy = request_body.judge_strategy or DEFAULT_JUDGE_STRATEGY
     judge_fallback_info = None  # Track fallback for UI notification
+    judge_cost = 0.0  # Track judge cost (for paid judges like Haiku)
 
     # Validate judge strategy
     if judge_strategy not in JUDGE_STRATEGIES:
@@ -261,6 +267,7 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
         # Use the judge_complexity function with selected strategy
         judgment_result = judge_complexity(user_query, judge_strategy)
         complexity = judgment_result.complexity
+        judge_cost = judgment_result.judge_cost  # Capture judge cost
 
         # Track fallback info for UI notification
         if judgment_result.method in ["keyword_fallback", "default_fallback"]:
@@ -286,8 +293,54 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
     # - User's model preference (from request_body.model)
     # - Query complexity
     # - Tier availability
-    tier = get_tier_for_query(user_query, request_body.model)
-    model = get_model_for_tier(tier)
+    try:
+        # Pass cloud_provider to routing so health checks use the ACTUAL provider
+        # the user selected, not the default one.
+        #
+        # Why this matters:
+        # - Health check tests if Cloud tier is available
+        # - Without cloud_provider, it tests with DEFAULT model (e.g., Claude)
+        # - If Claude has auth error but user selected GPT, health check fails
+        # - User gets stuck unable to use Cloud even though GPT works fine
+        #
+        # By passing cloud_provider, the health check tests the RIGHT model,
+        # so switching providers actually works.
+        print(
+            f"🔍 CHAT: Received request - tier={request_body.model}, cloud_provider={request_body.cloud_provider}"
+        )
+        routing_result = get_tier_for_query(
+            user_query,
+            request_body.model,
+            cloud_provider=request_body.cloud_provider,
+        )
+    except AuthError as e:
+        # Auth error on a tier - don't fallback, show error to user
+        logger.error(
+            f"[{correlation_id}] Auth error on {e.tier}: {e.message}",
+            extra={"correlation_id": correlation_id, "tier": e.tier},
+        )
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "error_type": "auth_subscription",
+                "message": "Cloud API authentication failed. Your API key may be invalid or your subscription may have expired.",
+                "raw_error": e.message,
+                "provider": e.tier,
+            },
+        ) from e
+
+    tier = routing_result.tier
+    model = get_model_for_tier(tier, cloud_provider=request_body.cloud_provider)
+
+    # Track routing fallback info for UI notification
+    routing_fallback_info = None
+    if routing_result.fallback_used:
+        routing_fallback_info = {
+            "fallback_used": True,
+            "original_tier": routing_result.original_tier,
+            "actual_tier": routing_result.tier,
+            "unavailable_tiers": routing_result.unavailable_tiers,
+        }
 
     logger.debug(
         f"[{correlation_id}] Routing decision: tier={tier}, model={model}",
@@ -370,6 +423,8 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
                 user_query=user_query,
                 complexity=complexity,
                 judge_fallback_info=judge_fallback_info,
+                routing_fallback_info=routing_fallback_info,
+                judge_cost=judge_cost,
             ),
             media_type="text/event-stream",  # SSE content type
             headers={

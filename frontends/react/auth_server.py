@@ -27,7 +27,10 @@ ENDPOINTS:
 import json
 import logging
 import os
+import subprocess
 import sys
+import time
+import urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 # Add project root to path so we can import stream modules
@@ -126,16 +129,48 @@ class AuthHandler(BaseHTTPRequestHandler):
             self._send_json({"success": False, "message": f"Error: {e}"})
 
     def _reload_proxy(self):
-        """Reload credentials in the Lakeshore proxy (Docker)."""
-        import urllib.request
+        """Restart the Lakeshore proxy Docker container to pick up new credentials.
+
+        The Globus credentials are volume-mounted into the container. After
+        authentication, we need to restart the container for it to load
+        the new credentials from the mounted volume.
+
+        Also refreshes the middleware's health cache so the UI updates immediately.
+        """
+        container_name = "stream-lakeshore-proxy"
+        logger.info(f"Restarting {container_name} to load new credentials...")
 
         try:
-            req = urllib.request.Request(f"{LAKESHORE_PROXY_URL}/reload-auth", method="POST")
-            with urllib.request.urlopen(req, timeout=10) as response:
-                result = json.loads(response.read().decode())
-                logger.info(f"Proxy reload: {result.get('message')}")
+            result = subprocess.run(
+                ["docker", "restart", container_name],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+
+            if result.returncode == 0:
+                logger.info(f"✅ {container_name} restarted successfully")
+                # Wait for proxy to be ready, then refresh middleware health cache
+                time.sleep(3)
+                self._refresh_health_cache()
+            else:
+                logger.warning(f"Failed to restart container: {result.stderr}")
+        except subprocess.TimeoutExpired:
+            logger.warning(f"Timeout restarting {container_name}")
+        except FileNotFoundError:
+            logger.warning("Docker command not found. Please restart the proxy manually.")
         except Exception as e:
-            logger.warning(f"Could not reload proxy: {e}")
+            logger.warning(f"Could not restart proxy: {e}")
+
+    def _refresh_health_cache(self):
+        """Refresh the middleware's tier health cache so UI updates immediately."""
+        middleware_url = "http://localhost:5000/health/tiers/refresh"
+        try:
+            req = urllib.request.Request(middleware_url, method="POST")
+            with urllib.request.urlopen(req, timeout=10):
+                logger.info("✅ Health cache refreshed - UI should update shortly")
+        except Exception as e:
+            logger.warning(f"Could not refresh health cache: {e}")
 
     def log_message(self, format, *args):
         """Suppress default HTTP logging."""

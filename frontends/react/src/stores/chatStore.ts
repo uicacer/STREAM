@@ -33,6 +33,7 @@
 import { create } from 'zustand'
 import type { Message, StreamMetadata } from '../types'
 import { useConversationStore } from './conversationStore'
+import { fetchModelPricing, estimatePartialCost } from '../api/costs'
 
 /**
  * ChatState - The shape of our chat store
@@ -136,6 +137,12 @@ interface ChatState {
    * Clear all messages (start fresh)
    */
   clearChat: () => void
+
+  /**
+   * Trim history to fit context limits
+   * Keeps only the most recent user message (aggressive but reliable)
+   */
+  trimHistory: () => void
 
   /**
    * Pending query (e.g., from example query button)
@@ -282,6 +289,48 @@ export const useChatStore = create<ChatState>((set, get) => ({
     streamMetadata: null,
   }),
 
+  trimHistory: () => {
+    /**
+     * Trim older messages to fit within context limits.
+     *
+     * Strategy: Keep only the most recent user message.
+     * This is aggressive but guarantees we fit within any context limit
+     * since even the smallest models support at least one turn.
+     *
+     * Why not keep pairs? Because a single long assistant response
+     * (like "Design a microservices architecture...") can exceed limits.
+     */
+    const state = get()
+    const messages = state.messages
+
+    if (messages.length <= 1) {
+      // Nothing to trim
+      return
+    }
+
+    // Find the most recent user message (iterate backwards)
+    let lastUserMessage: Message | null = null
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === 'user') {
+        lastUserMessage = messages[i]
+        break
+      }
+    }
+
+    if (!lastUserMessage) {
+      // No user messages - clear all
+      set({ messages: [] })
+      return
+    }
+
+    // Keep only the last user message (not the response that caused the issue)
+    const trimmedMessages = [lastUserMessage]
+
+    set({ messages: trimmedMessages })
+
+    console.log(`[chatStore] Trimmed history: ${messages.length} -> ${trimmedMessages.length} messages (kept last user query)`)
+  },
+
   // Pending query (for example queries from sidebar)
   pendingQuery: null,
   setPendingQuery: (query) => set({ pendingQuery: query }),
@@ -289,14 +338,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
   // Abort controller for cancelling streams
   setAbortController: (controller) => set({ abortController: controller }),
 
-  stopStreaming: () => {
+  stopStreaming: async () => {
     /**
      * Stop the current stream (user cancelled)
      *
      * This does:
      * 1. Abort the fetch request
-     * 2. Save whatever we have so far as a message
-     * 3. Reset streaming state
+     * 2. Estimate cost for partial response (since backend won't send it)
+     * 3. Save whatever we have so far as a message
+     * 4. Reset streaming state
      */
     const state = get()
 
@@ -307,12 +357,37 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     // If we have partial content, save it as a message
     if (state.currentResponse) {
+      // Estimate cost since backend won't send it when aborted
+      // Cost is estimated at ~4 characters per token (rough approximation)
+      let estimatedCost = 0
+      const model = state.streamMetadata?.model
+
+      if (model && state.streamMetadata?.tier !== 'local') {
+        try {
+          const pricing = await fetchModelPricing()
+          console.log('[chatStore] Cost estimation:', { model, pricingKeys: Object.keys(pricing), hasModel: !!pricing[model] })
+          estimatedCost = estimatePartialCost(state.currentResponse, model, pricing)
+          console.log('[chatStore] Estimated cost:', estimatedCost)
+        } catch (err) {
+          console.warn('[chatStore] Failed to estimate cost:', err)
+        }
+      } else {
+        console.log('[chatStore] Skipping cost estimation:', { model, tier: state.streamMetadata?.tier })
+      }
+
+      // Build metadata with estimated cost
+      const metadata: StreamMetadata = {
+        ...state.streamMetadata,
+        cost: estimatedCost,
+        cost_estimated: true, // Flag to indicate this is an estimate
+      } as StreamMetadata
+
       const message: Message = {
         id: crypto.randomUUID(),
         role: 'assistant',
         content: state.currentResponse + '\n\n*[Generation stopped]*',
         thinking: state.currentThinking || undefined,
-        metadata: state.streamMetadata || undefined,
+        metadata,
         createdAt: new Date().toISOString(),
       }
 

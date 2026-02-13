@@ -15,7 +15,7 @@
  */
 
 import { useEffect, useState } from 'react'
-import { Plus, MessageSquare, Star, Settings, History } from 'lucide-react'
+import { MessageSquare, Star, Settings, History } from 'lucide-react'
 import { useConversationStore } from '../../stores/conversationStore'
 import { useChatStore } from '../../stores/chatStore'
 import { ConversationItem } from './ConversationItem'
@@ -53,9 +53,7 @@ export function Sidebar({ onClose, isMobile: _isMobile, onExampleQuery }: Sideba
    * Get actions from stores
    */
   const loadConversations = useConversationStore((state) => state.loadConversations)
-  const startNewConversation = useConversationStore((state) => state.startNewConversation)
   const switchConversation = useConversationStore((state) => state.switchConversation)
-  const clearChat = useChatStore((state) => state.clearChat)
   const setMessages = useChatStore((state) => state.setMessages)
 
   /**
@@ -64,15 +62,6 @@ export function Sidebar({ onClose, isMobile: _isMobile, onExampleQuery }: Sideba
   useEffect(() => {
     loadConversations()
   }, [loadConversations])
-
-  /**
-   * Handle clicking "New Conversation"
-   */
-  const handleNewConversation = () => {
-    clearChat()
-    startNewConversation()
-    onClose?.()
-  }
 
   /**
    * Handle clicking on a conversation in the list
@@ -152,21 +141,8 @@ export function Sidebar({ onClose, isMobile: _isMobile, onExampleQuery }: Sideba
          * Conversation History
          */
         <>
-          {/* New Conversation Button */}
-          <div className="p-3 border-b">
-            <button
-              onClick={handleNewConversation}
-              className="w-full flex items-center gap-2 px-3 py-2 rounded-lg
-                         bg-primary text-primary-foreground
-                         hover:bg-primary/90 transition-colors"
-            >
-              <Plus className="w-4 h-4" />
-              <span className="text-sm font-medium">New conversation</span>
-            </button>
-          </div>
-
           {/* Conversation List */}
-          <div className="flex-1 overflow-y-auto p-2">
+          <div className="flex-1 overflow-y-auto p-2 pt-3">
             {isLoading ? (
               <div className="flex items-center justify-center p-4 text-muted-foreground">
                 <span className="text-sm">Loading conversations...</span>
@@ -222,20 +198,6 @@ export function Sidebar({ onClose, isMobile: _isMobile, onExampleQuery }: Sideba
         </>
       )}
 
-      {/**
-       * Sidebar Footer
-       */}
-      <div className="p-3 border-t bg-gradient-to-r from-blue-500/10 via-purple-500/10 to-pink-500/10">
-        <div className="text-center">
-          <span className="text-sm font-semibold bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 bg-clip-text text-transparent">
-            🌊 STREAM
-          </span>
-          <span className="text-xs text-muted-foreground ml-1">v1.0</span>
-        </div>
-        <p className="text-[10px] text-muted-foreground text-center mt-1">
-          Smart Tiered Routing Engine for AI Models
-        </p>
-      </div>
     </div>
   )
 }

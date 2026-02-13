@@ -15,12 +15,15 @@ Architecture:
     User → chat.py (endpoint) → streaming.py (orchestration) → litellm_client.py → LiteLLM
 """
 
+import asyncio
 import json
 import logging
+import time
 from collections.abc import AsyncGenerator
 
 from fastapi import HTTPException
 
+from stream.middleware.config import TIER_TIMEOUT_WARNING
 from stream.middleware.core.litellm_client import forward_to_litellm
 from stream.middleware.core.metrics import MetricsTracker
 from stream.middleware.core.query_router import get_model_for_tier
@@ -34,6 +37,82 @@ logger = logging.getLogger(__name__)
 # This prevents infinite retry loops while still giving reasonable coverage
 MAX_FALLBACK_ATTEMPTS = 3
 
+# Chunk gap warning threshold (seconds)
+# If no chunk arrives within this time, warn the user that something's slow
+CHUNK_GAP_WARNING_SECONDS = 5.0
+
+
+async def stream_with_gap_warnings(
+    generator: AsyncGenerator[str, None],
+    tier: str,
+    correlation_id: str,
+) -> AsyncGenerator[str, None]:
+    """
+    Wrap a streaming generator to detect and warn about long gaps between chunks.
+
+    Why this matters for UX:
+    ------------------------
+    When streaming pauses (cloud provider hiccup, rate limiting, network issue),
+    users see the UI freeze with no feedback. This feels broken.
+
+    With gap warnings, after 5 seconds of no data, we send:
+    ⚠️ "Cloud is taking longer than usual, please wait..."
+
+    This tells the user "we know it's slow, we're working on it" - building trust.
+
+    How it works:
+    -------------
+    1. Wait for next chunk with a 5-second timeout
+    2. If chunk arrives → yield it, reset timer
+    3. If timeout → send warning event, then continue waiting
+    4. The underlying httpx 10s read timeout is the hard limit
+
+    Args:
+        generator: The original streaming generator (from forward_to_litellm)
+        tier: Current tier name (for warning message)
+        correlation_id: Request ID for logging
+
+    Yields:
+        Original chunks from generator, plus warning events during long gaps
+    """
+    warning_sent = False
+    async_gen = generator.__aiter__()
+
+    while True:
+        try:
+            # Wait for next chunk, but timeout after 5 seconds
+            chunk = await asyncio.wait_for(
+                async_gen.__anext__(),
+                timeout=CHUNK_GAP_WARNING_SECONDS,
+            )
+            # Reset warning flag when we get data (gap ended)
+            if warning_sent:
+                warning_sent = False
+            yield chunk
+
+        except TimeoutError:
+            # No chunk for 5 seconds - send warning (once per gap)
+            if not warning_sent:
+                warning_sent = True
+                warning_event = {
+                    "stream_metadata": {
+                        "warning": "slow_stream",
+                        "tier": tier,
+                        "message": f"{tier.title()} is taking longer than usual, please wait...",
+                    }
+                }
+                # Yield in same format as LiteLLM chunks (main loop adds \n\n)
+                yield f"data: {json.dumps(warning_event)}"
+                logger.warning(
+                    f"[{correlation_id}] Chunk gap warning: no data for {CHUNK_GAP_WARNING_SECONDS}s on {tier}",
+                    extra={"correlation_id": correlation_id, "tier": tier},
+                )
+            # Continue waiting - the httpx 10s timeout will eventually catch true hangs
+
+        except StopAsyncIteration:
+            # Generator exhausted - we're done
+            break
+
 
 async def create_streaming_response(
     model: str,
@@ -44,6 +123,8 @@ async def create_streaming_response(
     user_query: str = "",
     complexity: str = "medium",
     judge_fallback_info: dict | None = None,
+    routing_fallback_info: dict | None = None,
+    judge_cost: float = 0.0,
 ) -> AsyncGenerator[str, None]:
     """
     Create a streaming Server-Sent Events (SSE) response with metrics tracking and automatic fallback.
@@ -128,6 +209,41 @@ async def create_streaming_response(
     if judge_fallback_info:
         metadata_event["stream_metadata"]["judge_fallback"] = judge_fallback_info
 
+    # -------------------------------------------------------------------------
+    # PRE-ROUTING FALLBACK vs RUNTIME FALLBACK
+    # -------------------------------------------------------------------------
+    # There are TWO types of fallback in STREAM:
+    #
+    # 1. PRE-ROUTING FALLBACK (handled here via routing_fallback_info):
+    #    - Happens BEFORE any API call is made
+    #    - The query_router checks tier health status and finds the preferred
+    #      tier is unavailable (e.g., Lakeshore health check failed)
+    #    - Router silently selects the next tier in the fallback chain
+    #    - Example: User in auto mode, medium query → should go to Lakeshore
+    #               but Lakeshore is marked unhealthy → routes to Cloud instead
+    #    - The streaming code receives the final tier (Cloud) but needs to
+    #      notify the user that their preferred tier was skipped
+    #
+    # 2. RUNTIME FALLBACK (handled in STEP 2 below):
+    #    - Happens DURING the API call attempt
+    #    - The tier was selected and we tried to call it, but it failed
+    #      (connection refused, timeout, HTTP error, etc.)
+    #    - We catch the exception and try the next tier in the fallback chain
+    #    - Example: Lakeshore was healthy at routing time but the actual
+    #               request to vLLM timed out → fall back to Cloud
+    #    - A separate fallback event is yielded to notify the client in real-time
+    #
+    # Both types should show the same user-facing message:
+    # "Lakeshore unavailable — using Cloud instead"
+    # -------------------------------------------------------------------------
+    if routing_fallback_info:
+        metadata_event["stream_metadata"]["fallback"] = True
+        metadata_event["stream_metadata"]["original_tier"] = routing_fallback_info["original_tier"]
+        metadata_event["stream_metadata"]["fallback_used"] = True
+        metadata_event["stream_metadata"]["unavailable_tiers"] = routing_fallback_info.get(
+            "unavailable_tiers", []
+        )
+
     # Format as SSE: "data: <JSON>\n\n"
     yield f"data: {json.dumps(metadata_event)}\n\n"
 
@@ -143,6 +259,10 @@ async def create_streaming_response(
     # =========================================================================
     # STEP 2: Retry Loop with Automatic Fallback
     # =========================================================================
+    # Track time for timeout warnings
+    stream_start_time = time.perf_counter()
+    timeout_warning_sent = False
+
     for attempt in range(MAX_FALLBACK_ATTEMPTS):
         try:
             first_chunk = True  # Track if this is the first chunk for TTFT
@@ -152,25 +272,54 @@ async def create_streaming_response(
             )
 
             # ---------------------------------------------------------------------
-            # Stream from LiteLLM
+            # Stream from LiteLLM (with gap warnings)
             # ---------------------------------------------------------------------
             # All tiers (local, lakeshore, cloud) route through LiteLLM gateway
             # For Lakeshore: LiteLLM → Lakeshore Proxy → Globus Compute OR SSH
             # For Local: LiteLLM → Ollama
             # For Cloud: LiteLLM → Anthropic/OpenAI APIs
             #
-            # forward_to_litellm is an async generator that yields SSE lines
-            # we use 'async for' here because we want to process each line as it arrives
-            async for line in forward_to_litellm(
+            # stream_with_gap_warnings wraps the generator to detect long pauses
+            # and warn the user in real-time (after 5s of no data)
+            raw_stream = forward_to_litellm(
                 model=current_model,
                 messages=messages,
                 temperature=temperature,
                 correlation_id=correlation_id,
-            ):
+            )
+            async for line in stream_with_gap_warnings(raw_stream, current_tier, correlation_id):
                 # Record TTFT on first chunk
                 if first_chunk:
                     tracker.record_first_token()
                     first_chunk = False
+
+                # ---------------------------------------------------------------------
+                # TIMEOUT WARNING: Check if response is taking too long
+                # ---------------------------------------------------------------------
+                # Send a warning event (once) if elapsed time exceeds tier threshold
+                if not timeout_warning_sent:
+                    elapsed_seconds = time.perf_counter() - stream_start_time
+                    timeout_threshold = TIER_TIMEOUT_WARNING.get(current_tier, 30)
+
+                    if elapsed_seconds >= timeout_threshold:
+                        timeout_warning_sent = True
+                        warning_event = {
+                            "stream_metadata": {
+                                "warning": "timeout",
+                                "tier": current_tier,
+                                "elapsed_seconds": round(elapsed_seconds, 1),
+                                "message": f"{current_tier.title()} is taking longer than usual ({int(elapsed_seconds)}s)",
+                            }
+                        }
+                        yield f"data: {json.dumps(warning_event)}\n\n"
+                        logger.warning(
+                            f"[{correlation_id}] Timeout warning: {current_tier} took {elapsed_seconds:.1f}s",
+                            extra={
+                                "correlation_id": correlation_id,
+                                "tier": current_tier,
+                                "elapsed_seconds": elapsed_seconds,
+                            },
+                        )
 
                 # ---------------------------------------------------------------------
                 # IMPORTANT: Intercept [DONE] marker - don't forward it yet!
@@ -263,26 +412,43 @@ async def create_streaming_response(
                 )
 
             # Calculate cost only once (now using centralized cost_reader!)
-            cost = calculate_query_cost(current_model, input_tokens, output_tokens)
+            inference_cost = calculate_query_cost(current_model, input_tokens, output_tokens)
+            total_cost = inference_cost + judge_cost  # Include judge cost in total
             tracker.record_tokens(input_tokens, output_tokens)
-            tracker.record_completion(cost)
+            tracker.record_completion(total_cost)
 
             # Send final cost summary if we have token counts
             if input_tokens > 0 or output_tokens > 0:
+                # Determine if ANY fallback occurred:
+                # - Runtime fallback: len(tiers_tried) > 1 (tier failed during API call)
+                # - Pre-routing fallback: routing_fallback_info is not None (tier was unavailable before trying)
+                runtime_fallback = len(tiers_tried) > 1
+                prerouting_fallback = routing_fallback_info is not None
+                any_fallback = runtime_fallback or prerouting_fallback
+
                 cost_event = {
                     "stream_metadata": {
                         "tier": current_tier,
                         "model": current_model,
                         "complexity": complexity,  # Actual query complexity
-                        "fallback_used": len(tiers_tried) > 1,  # Did we use fallback?
+                        "fallback_used": any_fallback,
                         "tiers_tried": tiers_tried,  # Which tiers did we try?
                         "cost": {
-                            "total": cost,
+                            "total": total_cost,  # Total includes inference + judge
+                            "inference_cost": inference_cost,  # LLM response cost
+                            "judge_cost": judge_cost,  # Complexity judge cost (Haiku, etc.)
                             "input_tokens": input_tokens,
                             "output_tokens": output_tokens,
                         },
                     }
                 }
+
+                # Include original_tier in final event for pre-routing fallback
+                # This ensures the frontend can display the fallback warning after streaming
+                if prerouting_fallback:
+                    cost_event["stream_metadata"]["original_tier"] = routing_fallback_info[
+                        "original_tier"
+                    ]
 
                 yield f"data: {json.dumps(cost_event)}\n\n"
 
@@ -299,13 +465,16 @@ async def create_streaming_response(
                     },
                 )
 
+            judge_cost_str = f" (incl. ${judge_cost:.6f} judge)" if judge_cost > 0 else ""
             logger.info(
                 f"[{correlation_id}] Stream completed successfully: "
-                f"cost=${cost:.6f}, tokens={input_tokens + output_tokens}",
+                f"cost=${total_cost:.6f}{judge_cost_str}, tokens={input_tokens + output_tokens}",
                 extra={
                     "correlation_id": correlation_id,
                     "tier": current_tier,
-                    "cost": cost,
+                    "total_cost": total_cost,
+                    "inference_cost": inference_cost,
+                    "judge_cost": judge_cost,
                     "total_tokens": input_tokens + output_tokens,
                     "input_tokens": input_tokens,
                     "output_tokens": output_tokens,
@@ -367,6 +536,10 @@ async def create_streaming_response(
                     current_tier = fallback_tier
                     current_model = get_model_for_tier(fallback_tier)
                     tiers_tried.append(fallback_tier)
+
+                    # Reset timeout tracking for new tier
+                    stream_start_time = time.perf_counter()
+                    timeout_warning_sent = False
 
                     # Notify client of fallback
                     # This shows in the UI: "Local unavailable, trying cloud..."

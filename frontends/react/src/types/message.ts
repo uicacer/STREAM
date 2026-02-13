@@ -65,6 +65,18 @@ export interface Message {
    * Example: "2024-01-15T10:30:00.000Z"
    */
   createdAt: string
+
+  /**
+   * Whether this message has been summarized (not sent to API)
+   * Messages marked as summarized are shown in UI but excluded from API calls
+   */
+  summarized?: boolean
+
+  /**
+   * Whether this message is a summary marker (contains the conversation summary)
+   * Used to identify the summary point in the conversation
+   */
+  isSummaryMarker?: boolean
 }
 
 /**
@@ -74,6 +86,7 @@ export interface Message {
  * - Which tier handled their request (local, cloud, etc.)
  * - How long it took
  * - How much it cost
+ * - Whether a fallback occurred
  */
 export interface MessageMetadata {
   /**
@@ -104,6 +117,30 @@ export interface MessageMetadata {
    * Example: 0.0015 (meaning $0.0015 or 0.15 cents)
    */
   cost?: number
+
+  /**
+   * Whether the cost is an estimate (true when streaming was interrupted).
+   * Estimated at ~4 characters per token using pricing from litellm_config.yaml.
+   */
+  cost_estimated?: boolean
+
+  /**
+   * Optional: Whether a fallback was used (tier was unavailable)
+   * True if the original tier failed and we switched to another
+   */
+  fallback_used?: boolean
+
+  /**
+   * Optional: The original tier that was requested but failed
+   * Example: "lakeshore" if Lakeshore was unavailable
+   */
+  original_tier?: string
+
+  /**
+   * Optional: List of tiers that were tried before succeeding
+   * Example: ["lakeshore", "cloud"] if Lakeshore failed, Cloud succeeded
+   */
+  tiers_tried?: string[]
 }
 
 /**
@@ -122,6 +159,11 @@ export interface StreamMetadata {
   complexity?: string
   cost?: number
   /**
+   * Whether the cost is an estimate (true when streaming was interrupted).
+   * Estimated at ~4 characters per token using pricing from litellm_config.yaml.
+   */
+  cost_estimated?: boolean
+  /**
    * How long the response took in seconds
    * Sent by backend at end of stream
    */
@@ -132,4 +174,37 @@ export interface StreamMetadata {
    * If true, we show "Thinking..." instead of "Generating..."
    */
   isReasoning?: boolean
+
+  /**
+   * Whether a fallback is occurring RIGHT NOW (during streaming)
+   * Sent when a tier fails and we're switching to another
+   */
+  fallback?: boolean
+
+  /**
+   * The original tier that was requested but failed
+   * Sent with fallback=true event
+   */
+  original_tier?: string
+
+  /**
+   * Reason for the fallback (e.g., "Connection refused", "Timeout")
+   */
+  reason?: string
+
+  /**
+   * Whether a fallback was used (final metadata at end of stream)
+   */
+  fallback_used?: boolean
+
+  /**
+   * List of tiers that were tried before succeeding
+   */
+  tiers_tried?: string[]
+
+  /**
+   * List of tiers that were unavailable (used for fallback message)
+   * Example: ["cloud", "lakeshore"] means both were tried and unavailable
+   */
+  unavailable_tiers?: string[]
 }

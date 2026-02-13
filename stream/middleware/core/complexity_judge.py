@@ -27,6 +27,7 @@ from stream.middleware.config import (
     LITELLM_BASE_URL,
     LLM_JUDGE_ENABLED,
 )
+from stream.middleware.utils.cost_calculator import calculate_query_cost
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,8 @@ class JudgmentResult:
     method: str  # "llm", "keyword_fallback", "default_fallback"
     strategy_used: str | None = None  # e.g., "ollama-3b", "haiku"
     fallback_reason: str | None = None  # Why fallback was used
+    judge_cost: float = 0.0  # Cost of the judge call (for paid models like Haiku)
+    judge_tokens: dict | None = None  # {"input": N, "output": N}
 
 
 def _get_cache_key(query: str) -> str:
@@ -68,7 +71,9 @@ def _cache_judgment(query: str, judgment: str):
     _judge_cache[key] = (judgment, time.time())
 
 
-def judge_complexity_with_llm(query: str, strategy: str = None) -> tuple[str | None, str | None]:
+def judge_complexity_with_llm(
+    query: str, strategy: str = None
+) -> tuple[str | None, str | None, float, dict | None]:
     """
     Use an LLM to judge query complexity.
 
@@ -77,7 +82,11 @@ def judge_complexity_with_llm(query: str, strategy: str = None) -> tuple[str | N
         strategy: Judge strategy to use ("ollama-1b", "ollama-3b", "haiku")
 
     Returns:
-        Tuple of (complexity, error_reason) where complexity is "low", "medium", "high", or None if failed
+        Tuple of (complexity, error_reason, cost, tokens) where:
+        - complexity: "low", "medium", "high", or None if failed
+        - error_reason: Error message if failed, None otherwise
+        - cost: Cost of the judge call in USD (0.0 for free models)
+        - tokens: {"input": N, "output": N} or None if failed
     """
     strategy = strategy or DEFAULT_JUDGE_STRATEGY
 
@@ -94,7 +103,7 @@ def judge_complexity_with_llm(query: str, strategy: str = None) -> tuple[str | N
     cached = get_cached_judgment(query)
     if cached:
         logger.debug("🔍 Using cached complexity result")
-        return cached, None
+        return cached, None, 0.0, None  # Cached = no cost
 
     # Build judge prompt
     prompt = JUDGE_PROMPT.format(query=query)
@@ -119,11 +128,20 @@ def judge_complexity_with_llm(query: str, strategy: str = None) -> tuple[str | N
         if response.status_code != 200:
             error_msg = f"HTTP {response.status_code}"
             print(f"⚠️ JUDGE [{strategy}]: Failed with status {response.status_code}")
-            return None, error_msg
+            return None, error_msg, 0.0, None
 
         # Parse response
         data = response.json()
         judgment_text = data["choices"][0]["message"]["content"].strip().upper()
+
+        # Extract token usage for cost calculation
+        usage = data.get("usage", {})
+        input_tokens = usage.get("prompt_tokens", 0)
+        output_tokens = usage.get("completion_tokens", 0)
+        tokens = {"input": input_tokens, "output": output_tokens}
+
+        # Calculate judge cost
+        judge_cost = calculate_query_cost(model, input_tokens, output_tokens)
 
         # Extract LOW/MEDIUM/HIGH from response
         if "LOW" in judgment_text:
@@ -135,23 +153,24 @@ def judge_complexity_with_llm(query: str, strategy: str = None) -> tuple[str | N
         else:
             error_msg = f"Unexpected response: {judgment_text}"
             print(f"⚠️ JUDGE [{strategy}]: {error_msg}")
-            return None, error_msg
+            return None, error_msg, judge_cost, tokens
 
         # Cache the judgment
         _cache_judgment(query, judgment)
 
-        print(f"🔍 JUDGE [{strategy}]: LLM classified as → {judgment.upper()}")
-        return judgment, None
+        cost_str = f" (${judge_cost:.6f})" if judge_cost > 0 else ""
+        print(f"🔍 JUDGE [{strategy}]: LLM classified as → {judgment.upper()}{cost_str}")
+        return judgment, None, judge_cost, tokens
 
     except httpx.TimeoutException:
         error_msg = f"Timeout after {timeout}s"
         print(f"⚠️ JUDGE [{strategy}]: {error_msg}")
-        return None, error_msg
+        return None, error_msg, 0.0, None
 
     except Exception as e:
         error_msg = str(e)
         print(f"⚠️ JUDGE [{strategy}]: Error: {error_msg}")
-        return None, error_msg
+        return None, error_msg, 0.0, None
 
 
 def judge_complexity_with_keywords(query: str) -> tuple[str, str | None]:
@@ -199,21 +218,23 @@ def judge_complexity(query: str, strategy: str = None) -> JudgmentResult:
         strategy: Judge strategy ("ollama-1b", "ollama-3b", "haiku"). Default: ollama-3b
 
     Returns:
-        JudgmentResult with complexity, method used, and fallback info if applicable
+        JudgmentResult with complexity, method used, cost, and fallback info if applicable
     """
     strategy = strategy or DEFAULT_JUDGE_STRATEGY
 
     if LLM_JUDGE_ENABLED:
-        complexity, error = judge_complexity_with_llm(query, strategy)
+        complexity, error, judge_cost, judge_tokens = judge_complexity_with_llm(query, strategy)
         if complexity:
             return JudgmentResult(
                 complexity=complexity,
                 method="llm",
                 strategy_used=strategy,
                 fallback_reason=None,
+                judge_cost=judge_cost,
+                judge_tokens=judge_tokens,
             )
 
-        # LLM failed - try keyword fallback
+        # LLM failed - try keyword fallback (still include partial cost if any)
         logger.warning(f"LLM judge ({strategy}) failed: {error}. Falling back to keywords.")
         keyword_complexity, matched_keyword = judge_complexity_with_keywords(query)
 
@@ -223,6 +244,8 @@ def judge_complexity(query: str, strategy: str = None) -> JudgmentResult:
                 method="keyword_fallback",
                 strategy_used=strategy,
                 fallback_reason=f"LLM judge failed ({error}), used keyword matching",
+                judge_cost=judge_cost,  # Include cost even if judge failed after making call
+                judge_tokens=judge_tokens,
             )
         else:
             # No keywords matched - defaulted to MEDIUM
@@ -231,9 +254,11 @@ def judge_complexity(query: str, strategy: str = None) -> JudgmentResult:
                 method="default_fallback",
                 strategy_used=strategy,
                 fallback_reason=f"LLM judge failed ({error}) and no keywords matched",
+                judge_cost=judge_cost,
+                judge_tokens=judge_tokens,
             )
 
-    # LLM judge disabled - use keywords
+    # LLM judge disabled - use keywords (no cost)
     keyword_complexity, matched_keyword = judge_complexity_with_keywords(query)
     if matched_keyword:
         return JudgmentResult(
@@ -241,6 +266,8 @@ def judge_complexity(query: str, strategy: str = None) -> JudgmentResult:
             method="keyword_fallback",
             strategy_used=None,
             fallback_reason="LLM judge disabled",
+            judge_cost=0.0,
+            judge_tokens=None,
         )
     else:
         return JudgmentResult(
@@ -248,6 +275,8 @@ def judge_complexity(query: str, strategy: str = None) -> JudgmentResult:
             method="default_fallback",
             strategy_used=None,
             fallback_reason="LLM judge disabled and no keywords matched",
+            judge_cost=0.0,
+            judge_tokens=None,
         )
 
 

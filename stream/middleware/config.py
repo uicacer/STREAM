@@ -81,7 +81,24 @@ VLLM_SERVER_URL = os.getenv(
 # HEALTH CHECKS
 # =============================================================================
 
-HEALTH_CHECK_TTL = 360  # 6 minutes - slightly longer than background monitor interval (5 min)
+# TTL = "Time To Live" - how long cached data is considered fresh/valid.
+# After TTL expires, the next request triggers a fresh health check.
+#
+# We use two different TTLs because internal routing and frontend display
+# have different freshness requirements:
+#
+# HEALTH_CHECK_TTL (6 min): Used internally when routing requests to tiers.
+#   - Longer TTL reduces server load from many concurrent API requests
+#   - Background monitor refreshes status every 5 minutes anyway
+#   - Stale data is acceptable here since routing has fallback logic
+#
+# QUICK_CHECK_TTL (30 sec): Used by frontend polling to show tier status dots.
+#   - Matches the frontend poll interval (30 seconds)
+#   - Users expect to see tier changes reflected quickly in the UI
+#   - Quick checks are lightweight (single attempt, short timeout)
+#
+HEALTH_CHECK_TTL = 360  # 6 minutes - for internal routing decisions
+QUICK_CHECK_TTL = 30  # 30 seconds - for frontend status display
 HEALTH_CHECK_TIMEOUT = 5.0
 
 # =============================================================================
@@ -132,7 +149,46 @@ TIERS = {
     "cloud": {"name": "Cloud APIs", "description": "Claude, GPT, etc."},
 }
 
-DEFAULT_MODELS = {"local": "local-llama", "lakeshore": "lakeshore-qwen", "cloud": "cloud-claude"}
+# =============================================================================
+# CLOUD PROVIDERS
+# =============================================================================
+# Available cloud providers that users can choose from.
+# Each provider maps to a model_name in litellm_config.yaml
+#
+# Users can switch providers in settings if:
+# - Their current provider's subscription expired
+# - They prefer a different model
+# - One provider is having issues
+#
+CLOUD_PROVIDERS = {
+    "cloud-claude": {
+        "name": "Claude Sonnet 4",
+        "provider": "Anthropic",
+        "description": "Best for complex reasoning and coding",
+        "env_key": "ANTHROPIC_API_KEY",  # Required env var
+    },
+    "cloud-gpt": {
+        "name": "GPT-4 Turbo",
+        "provider": "OpenAI",
+        "description": "Strong general-purpose model",
+        "env_key": "OPENAI_API_KEY",
+    },
+    "cloud-gpt-cheap": {
+        "name": "GPT-3.5 Turbo",
+        "provider": "OpenAI",
+        "description": "Fast and affordable",
+        "env_key": "OPENAI_API_KEY",
+    },
+}
+
+# Default cloud provider (can be overridden by user in settings)
+DEFAULT_CLOUD_PROVIDER = os.getenv("DEFAULT_CLOUD_PROVIDER", "cloud-claude")
+
+DEFAULT_MODELS = {
+    "local": "local-llama",
+    "lakeshore": "lakeshore-qwen",
+    "cloud": DEFAULT_CLOUD_PROVIDER,  # Now configurable!
+}
 
 
 # =============================================================================
@@ -147,17 +203,73 @@ OLLAMA_MODELS = {
 # =============================================================================
 # CONTEXT LIMITS
 # =============================================================================
-
+#
+# How context windows work:
+# -------------------------
+# LLMs have a fixed "context window" - the total number of tokens they can
+# process in a single request. This window is SHARED between:
+#
+#   INPUT (what you send)     +    OUTPUT (what the model generates)
+#   ─────────────────────          ───────────────────────────────────
+#   • System prompt                • The model's response
+#   • Conversation history         • Can be cut off mid-sentence if
+#   • User's current message         no room left!
+#
+# Example with 4096-token model:
+#   ┌─────────────────────────────────────────────────────────────┐
+#   │                    4096 token context window                │
+#   ├───────────────────────────────────┬─────────────────────────┤
+#   │  INPUT: 3584 tokens (max)         │  OUTPUT: 512 reserved   │
+#   │  (conversation + query)           │  (model's response)     │
+#   └───────────────────────────────────┴─────────────────────────┘
+#
+# Why reserve_output is needed:
+# -----------------------------
+# If we send 4000 tokens to a 4096-token model, it only has 96 tokens
+# left to respond - that's about 2 sentences! The response would be
+# truncated mid-thought.
+#
+# By reserving tokens for output, we ensure:
+#   max_input_tokens = total - reserve_output
+#
+# This is calculated in context_window.py:get_max_input_tokens()
+#
+# reserve_output guidelines:
+# --------------------------
+# • 512 tokens  ≈ 1-2 paragraphs (good for simple Q&A)
+# • 1000 tokens ≈ half a page
+# • 2048 tokens ≈ 1 page (good for explanations)
+# • 4000 tokens ≈ 2 pages (good for detailed responses)
+#
 MODEL_CONTEXT_LIMITS = {
-    # Llama 3.2 models support up to 128K context, but we limit to 8K for performance
-    # Higher context = more memory usage and slower inference on local machines
-    "local-llama-tiny": {"total": 8192, "reserve_output": 1024},
-    "local-llama": {"total": 8192, "reserve_output": 1024},
-    "local-llama-quality": {"total": 8192, "reserve_output": 1024},
-    "lakeshore-qwen": {"total": 8192, "reserve_output": 500},
+    # Local: 4K limit for faster CPU inference
+    # max_input = 4096 - 512 = 3584 tokens (~14KB of text)
+    "local-llama-tiny": {"total": 4096, "reserve_output": 512},
+    # "local-llama": {"total": 4096, "reserve_output": 512},
+    "local-llama": {
+        "total": 500,
+        "reserve_output": 100,
+    },  # TEST: Low limit for testing context dialog
+    "local-llama-quality": {"total": 4096, "reserve_output": 512},
+    # Lakeshore: 32K (runs on campus GPU, Qwen supports 32K natively)
+    # max_input = 32768 - 2048 = 30720 tokens (~120KB of text)
+    "lakeshore-qwen": {"total": 32768, "reserve_output": 2048},
+    # Cloud: Full native context limits
+    # max_input = 200000 - 4000 = 196000 tokens (~780KB of text)
     "cloud-claude": {"total": 200000, "reserve_output": 4000},
     "cloud-gpt": {"total": 128000, "reserve_output": 4000},
     "cloud-gpt-cheap": {"total": 16385, "reserve_output": 1000},
+}
+
+# =============================================================================
+# TIMEOUT WARNINGS
+# =============================================================================
+# Warn users when response takes too long (in seconds)
+# These thresholds trigger a warning message in the UI
+TIER_TIMEOUT_WARNING = {
+    "local": 30,  # Warn after 30s (CPU inference is slow)
+    "lakeshore": 60,  # Warn after 60s (HPC queue/network delays)
+    "cloud": 15,  # Warn after 15s (should be fast)
 }
 
 # =============================================================================
@@ -165,41 +277,46 @@ MODEL_CONTEXT_LIMITS = {
 # =============================================================================
 
 JUDGE_PROMPT = """
-
-You are a query complexity classifier. Analyze the following user query and classify its complexity level.
+You are a query complexity classifier for an AI routing system used by students and researchers across ALL fields (science, engineering, humanities, business, healthcare, etc.).
 
 Classification Guidelines:
 
-LOW complexity (route to local model):
-- Simple greetings (hi, hello, thanks)
-- Basic factual questions (what is X?, who is Y?)
-- Simple definitions: "What is Python?", "Define recursion"
-- One-word or very short answers
-- No reasoning required
+LOW complexity (simple, factual - route to local):
+- Greetings and thanks (hi, hello, thank you)
+- Simple definitions: "What is photosynthesis?", "Define GDP", "What is Python?"
+- Single factual lookups: "Who invented the telephone?", "What year did X happen?"
+- Yes/no questions with obvious answers
+- One-word or very short answers expected
+- No reasoning or explanation needed
 
-MEDIUM complexity (route to campus GPU):
-- Explanations that require understanding
-- Basic coding tasks (write a function, create a script)
-- Step-by-step tutorials
-- Comparisons of 2-3 items
-- Calculations or problem-solving
-- Moderate technical questions
+MEDIUM complexity (explanations, moderate analysis - route to campus GPU):
+- "Explain how X works" (single concept)
+- Compare 2-3 things: "Compare Python and JavaScript"
+- Step-by-step instructions or tutorials
+- Basic calculations or problem-solving
+- Summarize a concept or article
+- Write a single function or short code snippet
+- Moderate technical questions with straightforward answers
 
-HIGH complexity (route to cloud):
-- Deep analysis or critique
-- Complex comparisons (multiple factors)
-- Advanced coding (optimization, debugging, architecture)
-- Research-level questions
-- Multi-step reasoning
-- Creative writing (essays, stories)
-- Production/enterprise considerations
+HIGH complexity (deep analysis, design, research - route to cloud):
+- System design or architecture (any domain: software, business, scientific)
+- Multi-factor analysis or trade-off evaluation
+- Research-level questions requiring domain expertise
+- Design patterns, frameworks, methodologies
+- Security, scalability, optimization, or performance considerations
+- Multi-step reasoning across multiple concepts or domains
+- Policy analysis, strategic planning, decision frameworks
+- Scientific experiment design or research methodology
+- Complex debugging, troubleshooting, or root cause analysis
+- Creative works requiring extensive planning (essays, stories, reports)
+- Anything requiring synthesis of multiple concepts or domains
+- Questions with "design", "architect", "analyze trade-offs", "evaluate", "comprehensive"
 
 Respond with ONLY ONE WORD: LOW, MEDIUM, or HIGH
 
 User Query: {query}
 
 Complexity:
-
 """
 
 # =============================================================================
@@ -208,27 +325,45 @@ Complexity:
 
 COMPLEXITY_KEYWORDS = {
     "high": [
+        # Analysis & evaluation
         "analyze",
-        "compare",
         "evaluate",
         "critique",
         "assess",
         "synthesize",
-        "justify",
-        "argue",
-        "prove",
-        "derive",
-        "detailed",
+        "trade-off",
+        "trade off",
+        # Design & architecture
+        "design",
+        "architect",
+        "architecture",
+        "framework",
+        "methodology",
+        "strategy",
+        "scalability",
+        "microservices",
+        "distributed",
+        # Research & depth
+        "research",
+        "investigate",
         "comprehensive",
         "in-depth",
         "thorough",
-        "research",
-        "investigate",
+        "detailed analysis",
+        # Technical complexity
         "optimize",
+        "performance",
+        "security",
         "debug",
-        "architecture",
-        "design pattern",
-        "best practices",
+        "troubleshoot",
+        "root cause",
+        # Multi-domain
+        "policy analysis",
+        "strategic planning",
+        "experiment design",
+        "real-time",
+        "conflict resolution",
+        "version control",
     ],
     "medium": [
         "explain",
@@ -244,8 +379,12 @@ COMPLEXITY_KEYWORDS = {
         "calculate",
         "solve",
         "determine",
+        "compare",
+        "summarize",
+        "tutorial",
+        "step by step",
     ],
-    "low": ["what is", "who is", "define", "list", "hello", "hi", "hey", "thanks"],
+    "low": ["what is", "who is", "define", "list", "hello", "hi", "hey", "thanks", "thank you"],
 }
 
 

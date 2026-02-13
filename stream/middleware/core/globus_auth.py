@@ -30,6 +30,7 @@ Date: February 2026
 """
 
 import logging
+from pathlib import Path
 
 from globus_compute_sdk.sdk.auth.globus_app import get_globus_app
 from globus_compute_sdk.sdk.client import Client
@@ -133,19 +134,25 @@ def is_authenticated() -> bool:
     """
     Quick check if already authenticated with Globus Compute.
 
-    This checks if we have valid tokens for ALL required Globus Compute scopes,
-    not just the basic auth.globus.org scope.
+    First checks if credential files exist on disk (fast), then verifies
+    tokens are valid using the SDK. This two-step approach:
+    - Detects deleted credentials immediately (file check is cheap)
+    - Validates token expiry/scopes when files exist (SDK check)
 
     Returns:
-        True if authenticated, False otherwise
+        True if authenticated with valid tokens, False otherwise
     """
-    try:
-        # Try to create a Client without triggering authentication
-        # If tokens are valid and have all required scopes, this succeeds
-        app = get_globus_app()
+    # Step 1: Quick file existence check (catches deleted credentials)
+    # Globus Compute stores credentials in ~/.globus_compute/storage.db
+    storage_file = Path.home() / ".globus_compute" / "storage.db"
 
-        # Check if the app needs to login for Globus Compute scopes
-        # This checks all required resource servers, not just auth.globus.org
+    if not storage_file.exists():
+        return False
+
+    # Step 2: File exists - verify tokens are valid using SDK
+    # This checks token expiry and required scopes
+    try:
+        app = get_globus_app()
         return not app.login_required()
     except Exception:
         return False
