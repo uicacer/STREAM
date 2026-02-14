@@ -4,16 +4,19 @@
  *
  * Shows different phases based on the request state:
  *
- * FOR AUTO MODE (3 phases):
+ * FOR AUTO MODE (3 phases with staged transitions):
  * 1. Analyzing - LLM judge determining complexity (purple/gradient)
- * 2. Routing - Shows complexity result, transitioning to tier (tier colors)
+ * 2. Routing - Shows complexity result, selecting tier (tier colors)
  * 3. Generating - Full tier colors, generating response
+ *
+ * Each phase has a minimum display time so users can see the pipeline.
+ * First message has longer pauses to help users understand how STREAM works.
  *
  * FOR EXPLICIT TIER (1 phase):
  * - Generating - Direct to tier colors
  */
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { Home, Building2, Cloud, Bot, Sparkles, AlertTriangle, Brain, Router, Zap } from 'lucide-react'
 
 // Tier icon mapping
@@ -71,8 +74,8 @@ const tierNames: Record<string, string> = {
   auto: 'Auto',
 }
 
-// Phase types (routing is instant, not a visible phase)
-type Phase = 'analyzing' | 'generating'
+// Display phases - routing is now a visible phase with its own highlight duration
+type Phase = 'analyzing' | 'routing' | 'generating'
 
 interface TypingIndicatorProps {
   /** The actual tier being used (from metadata) */
@@ -89,6 +92,8 @@ interface TypingIndicatorProps {
   originalTier?: string
   /** All tiers that were unavailable (for fallback message) */
   unavailableTiers?: string[]
+  /** Number of user messages sent so far (controls pause duration - longer at start, faster over time) */
+  userMessageCount?: number
 }
 
 export function TypingIndicator({
@@ -99,8 +104,32 @@ export function TypingIndicator({
   fallback = false,
   originalTier,
   unavailableTiers = [],
+  userMessageCount = 1,
 }: TypingIndicatorProps) {
   const [elapsedMs, setElapsedMs] = useState(0)
+  const isAutoMode = userSelectedTier === 'auto'
+
+  // === STAGED PHASE DISPLAY ===
+  // displayPhase transitions with delays so each stage is visible to the user
+  const [displayPhase, setDisplayPhase] = useState<Phase>(
+    isAutoMode ? 'analyzing' : 'generating'
+  )
+  const [analyzeComplete, setAnalyzeComplete] = useState(!isAutoMode)
+  const [routeComplete, setRouteComplete] = useState(!isAutoMode)
+  const mountTimeRef = useRef(Date.now())
+  const transitionsStartedRef = useRef(false)
+
+  // Gradually decreasing timing - first messages are educational, later ones are fast
+  // Each entry: [analyzeMinDisplay, routeDisplayTime, generateDisplayTime]
+  const STAGE_TIMING: Record<number, [number, number, number]> = {
+    1: [2200, 1600, 1200],  // First message: user learns the full pipeline
+    2: [1800, 1200, 800],   // Second: reinforcement
+    3: [1400, 900, 600],    // Third: getting familiar
+  }
+  const DEFAULT_TIMING: [number, number, number] = [600, 350, 0]  // Message 4+: quick flash
+
+  const [ANALYZE_MIN_DISPLAY, ROUTE_DISPLAY_TIME, GENERATE_DISPLAY_TIME] =
+    STAGE_TIMING[userMessageCount] ?? DEFAULT_TIMING
 
   // Update timer every 100ms
   useEffect(() => {
@@ -111,49 +140,71 @@ export function TypingIndicator({
     return () => clearInterval(interval)
   }, [])
 
-  // Determine the current phase based on ACTUAL DATA received from backend
-  // The backend sends metadata (tier + complexity) together after LLM judge completes
-  // - Phase 1 (analyzing): No metadata yet - backend is running LLM judge
-  // - Phase 2 (generating): Have metadata - routing complete, waiting for tokens
-  // Note: "routing" is not a separate phase - it completes instantly with analysis
-  const phase: Phase = useMemo(() => {
-    // If user explicitly selected a tier (not auto), skip to generating
-    // The backend won't run the LLM judge in this case
-    if (userSelectedTier !== 'auto') {
-      return 'generating'
+  // Detect when backend analysis + routing is complete (metadata arrived)
+  const metadataArrived = !!(tier && tier !== 'auto' && complexity)
+
+  // Run staged transitions when metadata arrives
+  useEffect(() => {
+    if (!metadataArrived || !isAutoMode || transitionsStartedRef.current) return
+    transitionsStartedRef.current = true
+
+    const timeSinceMount = Date.now() - mountTimeRef.current
+    const analyzeDelay = Math.max(0, ANALYZE_MIN_DISPLAY - timeSinceMount)
+
+    let cancelled = false
+
+    const runTransitions = async () => {
+      // Hold Analyze phase for minimum display time
+      await new Promise(r => setTimeout(r, analyzeDelay))
+      if (cancelled) return
+
+      // Complete Analyze → transition to Route
+      setAnalyzeComplete(true)
+      setDisplayPhase('routing')
+
+      // Hold Route phase for its display time
+      await new Promise(r => setTimeout(r, ROUTE_DISPLAY_TIME))
+      if (cancelled) return
+
+      // Complete Route
+      setRouteComplete(true)
+
+      // Brief pause for route checkmark to be visible
+      await new Promise(r => setTimeout(r, 300))
+      if (cancelled) return
+
+      // Transition to Generate (holds for GENERATE_DISPLAY_TIME on first few messages)
+      setDisplayPhase('generating')
+
+      // On first few messages, keep Generate highlighted so user sees the full pipeline
+      if (GENERATE_DISPLAY_TIME > 0) {
+        await new Promise(r => setTimeout(r, GENERATE_DISPLAY_TIME))
+      }
     }
 
-    // Auto mode: determine phase based on ACTUAL metadata received
-    // No tier info yet = backend is still analyzing with LLM judge
-    if (!tier || tier === 'auto') {
-      return 'analyzing'
-    }
-
-    // Have metadata = analysis AND routing are complete, now generating
-    return 'generating'
-  }, [userSelectedTier, tier])
-
-  // Track if routing decision has been made (for badge display)
-  const routingComplete = !!(tier && tier !== 'auto' && complexity)
+    runTransitions()
+    return () => { cancelled = true }
+  }, [metadataArrived, isAutoMode, ANALYZE_MIN_DISPLAY, ROUTE_DISPLAY_TIME])
 
   // Get the display tier (use actual tier if available, otherwise user selection)
   const displayTier = tier && tier !== 'auto' ? tier : userSelectedTier
 
-  // Get colors based on phase
+  // Get colors based on display phase
   const colors = useMemo(() => {
-    if (phase === 'analyzing') {
+    if (displayPhase === 'analyzing') {
       return tierConfig.auto
     }
     return tierConfig[displayTier as keyof typeof tierConfig] || tierConfig.auto
-  }, [phase, displayTier])
+  }, [displayPhase, displayTier])
 
-  // Get the appropriate icon
+  // Get the appropriate icon based on display phase
   const Icon = useMemo(() => {
-    if (phase === 'analyzing') return Brain
+    if (displayPhase === 'analyzing') return Brain
+    if (displayPhase === 'routing') return Router
     return tierIcons[displayTier as keyof typeof tierIcons] || Bot
-  }, [phase, displayTier])
+  }, [displayPhase, displayTier])
 
-  // Get complexity label for display (capitalized)
+  // Get complexity label for display
   const complexityLabel = useMemo(() => {
     if (!complexity) return null
     const labels: Record<string, string> = {
@@ -164,12 +215,21 @@ export function TypingIndicator({
     return labels[complexity] || complexity
   }, [complexity])
 
-  // Get status text and message
+  // Get status text and message based on display phase
   const { statusText, statusMessage } = useMemo(() => {
-    if (phase === 'analyzing') {
+    if (displayPhase === 'analyzing') {
       return {
         statusText: 'Analyzing...',
         statusMessage: 'Evaluating query complexity',
+      }
+    }
+
+    if (displayPhase === 'routing') {
+      return {
+        statusText: 'Routing...',
+        statusMessage: complexityLabel
+          ? `${complexityLabel} complexity → selecting optimal tier`
+          : 'Selecting optimal tier',
       }
     }
 
@@ -188,7 +248,7 @@ export function TypingIndicator({
       statusText: isThinking ? 'Thinking...' : 'Generating...',
       statusMessage: message,
     }
-  }, [phase, displayTier, isThinking])
+  }, [displayPhase, displayTier, isThinking, complexityLabel])
 
   // Calculate progress
   const expectedMs = displayTier === 'lakeshore' ? 8000 : displayTier === 'local' ? 3000 : 4000
@@ -204,7 +264,6 @@ export function TypingIndicator({
         <div className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-yellow-500/10 border border-yellow-500/30 text-yellow-600 dark:text-yellow-400">
           <AlertTriangle className="w-4 h-4 flex-shrink-0" />
           <span className="text-sm font-medium">
-            {/* Show all unavailable tiers if available, otherwise just original_tier */}
             {unavailableTiers.length > 0
               ? `${unavailableTiers.map(t => tierNames[t] || t).join(' and ')} unavailable — using ${tierNames[displayTier] || displayTier} instead`
               : `${tierNames[originalTier] || originalTier} unavailable — using ${tierNames[displayTier] || displayTier} instead`
@@ -214,45 +273,55 @@ export function TypingIndicator({
       )}
 
       {/* Phase indicator badges (for auto mode) */}
-      {userSelectedTier === 'auto' && (
+      {isAutoMode && (
         <div className="flex items-center gap-2 ml-[60px]">
           {/* Phase 1: Analyzing */}
           <div
             className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-all duration-300
-              ${phase === 'analyzing'
+              ${displayPhase === 'analyzing'
                 ? 'bg-purple-500/20 text-purple-600 dark:text-purple-400 ring-2 ring-purple-500/30'
                 : 'bg-purple-500/10 text-purple-500/60'
-              }`}
+              }
+              ${analyzeComplete ? 'animate-stage-complete' : ''}
+            `}
           >
             <Brain className="w-3 h-3" />
             <span>Analyze</span>
-            {routingComplete && <span className="text-green-500">✓</span>}
+            {analyzeComplete && <span className="text-green-500">✓</span>}
           </div>
 
-          {/* Arrow */}
-          <Zap className="w-3 h-3 text-muted-foreground" />
+          {/* Arrow - lights up when analyze completes */}
+          <Zap className={`w-3 h-3 transition-colors duration-300 ${
+            analyzeComplete ? colors.text : 'text-muted-foreground'
+          }`} />
 
-          {/* Phase 2: Routing (completes instantly with analysis) */}
+          {/* Phase 2: Routing */}
           <div
             className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-all duration-300
-              ${routingComplete
-                ? `${colors.bg} ${colors.text}/60`
-                : 'bg-muted text-muted-foreground'
-              }`}
+              ${displayPhase === 'routing'
+                ? `${colors.bg} ${colors.text} ring-2 ${colors.border}`
+                : routeComplete
+                  ? `${colors.bg} ${colors.text} opacity-60`
+                  : 'bg-muted text-muted-foreground'
+              }
+              ${routeComplete ? 'animate-stage-complete' : ''}
+            `}
           >
             <Router className="w-3 h-3" />
             <span>Route</span>
-            {routingComplete && <span className="text-green-500">✓</span>}
+            {routeComplete && <span className="text-green-500">✓</span>}
           </div>
 
-          {/* Arrow */}
-          <Zap className="w-3 h-3 text-muted-foreground" />
+          {/* Arrow - lights up when route completes */}
+          <Zap className={`w-3 h-3 transition-colors duration-300 ${
+            routeComplete ? colors.text : 'text-muted-foreground'
+          }`} />
 
           {/* Phase 3: Generating */}
           <div
             className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-all duration-300
-              ${phase === 'generating' && routingComplete
-                ? `${colors.bg} ${colors.text} ring-2 ${colors.border}`
+              ${displayPhase === 'generating'
+                ? `${colors.bg} ${colors.text} ring-2 ${colors.border} animate-stage-complete`
                 : 'bg-muted text-muted-foreground'
               }`}
           >
@@ -261,9 +330,9 @@ export function TypingIndicator({
           </div>
 
           {/* Complexity badge (shown after routing complete) */}
-          {routingComplete && complexityLabel && (
+          {routeComplete && complexityLabel && (
             <div
-              className={`ml-2 px-2.5 py-1 rounded-full text-xs font-semibold flex items-center gap-1.5
+              className={`ml-2 px-2.5 py-1 rounded-full text-xs font-semibold flex items-center gap-1.5 animate-stage-complete
                 ${complexityConfig[complexity as keyof typeof complexityConfig]?.bg || 'bg-muted'}
                 ${complexityConfig[complexity as keyof typeof complexityConfig]?.text || 'text-muted-foreground'}
               `}

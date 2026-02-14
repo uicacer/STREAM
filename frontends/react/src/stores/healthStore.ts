@@ -32,16 +32,21 @@ interface HealthState {
   // Meta
   lastUpdate: string | null
   isLoading: boolean
+  isProviderChanging: boolean // true ONLY when user switches cloud provider
   error: string | null
 
   // Actions
   fetchHealth: () => Promise<void>
+  fetchHealthForProviderChange: () => Promise<void>
   forceRefresh: () => Promise<void>
   startPolling: () => void
   stopPolling: () => void
 }
 
 let pollInterval: ReturnType<typeof setInterval> | null = null
+
+// Request counter: newer requests override older ones instead of being skipped
+let currentRequestId = 0
 
 export const useHealthStore = create<HealthState>((set, get) => ({
   // Initial state
@@ -50,51 +55,97 @@ export const useHealthStore = create<HealthState>((set, get) => ({
   cloud: null,
   lastUpdate: null,
   isLoading: false,
+  isProviderChanging: false,
   error: null,
 
-  // Fetch current health status
+  // Fetch current health status (background poll - no spinner)
   fetchHealth: async () => {
-    // Prevent concurrent fetches - if already loading, skip this call
-    // This avoids race conditions where multiple fetches complete out of order
-    if (get().isLoading) {
-      console.log('[healthStore] fetchHealth skipped - already loading')
-      return
-    }
+    const requestId = ++currentRequestId
 
     try {
       set({ isLoading: true, error: null })
-      console.log('[healthStore] fetchHealth started, isLoading=true')
 
-      // Get user's selected cloud provider to check the RIGHT provider's health
-      // This ensures the Cloud indicator shows green if GPT works, even if Claude has billing issues
       const cloudProvider = useSettingsStore.getState().cloudProvider
-      console.log('[healthStore] Fetching health for cloudProvider:', cloudProvider)
-
-      // Fetch health from backend (Docker) and auth from local auth server in parallel
       const [healthData, authData] = await Promise.all([
         fetchTierHealth(cloudProvider),
-        checkAuthStatus().catch(() => ({ authenticated: false })), // Don't fail if auth server is down
+        checkAuthStatus().catch(() => ({ authenticated: false })),
       ])
 
-      // Merge auth status into Lakeshore data
-      // The backend (Docker) can't check Globus auth, but local auth_server.py can
+      if (requestId !== currentRequestId) return
+
       const lakeshoreWithAuth: TierStatus = {
         ...healthData.tiers.lakeshore,
-        authenticated: authData.authenticated, // Use auth from local server, not Docker
+        authenticated: authData.authenticated,
       }
 
-      console.log('[healthStore] fetchHealth completed, cloud available:', healthData.tiers.cloud.available)
+      if (requestId !== currentRequestId) return
+
       set({
         local: healthData.tiers.local,
         lakeshore: lakeshoreWithAuth,
         cloud: healthData.tiers.cloud,
         lastUpdate: healthData.timestamp,
         isLoading: false,
+        isProviderChanging: false,
       })
     } catch (err) {
+      if (requestId !== currentRequestId) return
       const message = err instanceof Error ? err.message : 'Failed to fetch health'
-      console.log('[healthStore] fetchHealth error:', message)
-      set({ error: message, isLoading: false })
+      set({ error: message, isLoading: false, isProviderChanging: false })
+    }
+  },
+
+  // Fetch health after user switches cloud provider (shows spinner)
+  fetchHealthForProviderChange: async () => {
+    const requestId = ++currentRequestId
+    const startTime = Date.now()
+    const MIN_LOADING_TIME = 600
+
+    try {
+      set({ isLoading: true, isProviderChanging: true, error: null })
+
+      const cloudProvider = useSettingsStore.getState().cloudProvider
+      console.log(`[healthStore] Provider change: fetching for ${cloudProvider}`)
+
+      const [healthData, authData] = await Promise.all([
+        fetchTierHealth(cloudProvider),
+        checkAuthStatus().catch(() => ({ authenticated: false })),
+      ])
+
+      if (requestId !== currentRequestId) return
+
+      const lakeshoreWithAuth: TierStatus = {
+        ...healthData.tiers.lakeshore,
+        authenticated: authData.authenticated,
+      }
+
+      // Ensure minimum loading time so spinner is visible
+      const elapsed = Date.now() - startTime
+      if (elapsed < MIN_LOADING_TIME) {
+        await new Promise(resolve => setTimeout(resolve, MIN_LOADING_TIME - elapsed))
+      }
+
+      if (requestId !== currentRequestId) return
+
+      set({
+        local: healthData.tiers.local,
+        lakeshore: lakeshoreWithAuth,
+        cloud: healthData.tiers.cloud,
+        lastUpdate: healthData.timestamp,
+        isLoading: false,
+        isProviderChanging: false,
+      })
+    } catch (err) {
+      if (requestId !== currentRequestId) return
+      const message = err instanceof Error ? err.message : 'Failed to fetch health'
+
+      const elapsed = Date.now() - startTime
+      if (elapsed < MIN_LOADING_TIME) {
+        await new Promise(resolve => setTimeout(resolve, MIN_LOADING_TIME - elapsed))
+      }
+
+      if (requestId !== currentRequestId) return
+      set({ error: message, isLoading: false, isProviderChanging: false })
     }
   },
 

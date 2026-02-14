@@ -66,6 +66,12 @@ export function ChatContainer() {
   // NOTE: Auth error dialog only shows when a request actually fails,
   // not proactively on startup based on health checks.
 
+  // Pipeline animation: keeps TypingIndicator visible during phase transitions
+  // even after the first token arrives (otherwise transitions get cancelled)
+  const [forceShowIndicator, setForceShowIndicator] = useState(false)
+  const forceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const metadataArrivedRef = useRef(false)
+
   // Scroll state
   const [isNearBottom, setIsNearBottom] = useState(true)
   const [showScrollButton, setShowScrollButton] = useState(false)
@@ -135,6 +141,49 @@ export function ChatContainer() {
       userScrolledAwayRef.current = false
     }
   }, [isStreaming])
+
+  // === PIPELINE ANIMATION FORCE INDICATOR ===
+  // Count user messages to gradually decrease pipeline animation pauses
+  // Message 1: long pauses (educational), Message 4+: quick flash (user knows the drill)
+  const userMessageCount = messages.filter(m => m.role === 'user').length
+
+  // Transition duration matches TypingIndicator's staged delays
+  // Must stay in sync with STAGE_TIMING in TypingIndicator.tsx
+  // Formula: analyzeMin + routeDisplay + 300 (checkmark pause) + generateDisplay + 200 (buffer)
+  const getTransitionDuration = (count: number) => {
+    if (count <= 1) return 2200 + 1600 + 300 + 1200 + 200  // 5500ms - first message
+    if (count === 2) return 1800 + 1200 + 300 + 800 + 200   // 4300ms
+    if (count === 3) return 1400 + 900 + 300 + 600 + 200     // 3400ms
+    return 600 + 350 + 300 + 0 + 200                          // 1450ms - experienced user
+  }
+
+  // Detect when metadata arrives (analysis + routing complete on backend)
+  const metadataHasTier = !!(streamMetadata?.tier && streamMetadata.tier !== 'auto' && streamMetadata?.complexity)
+
+  // Start force timer when metadata arrives so transitions play out fully
+  useEffect(() => {
+    if (!isStreaming) {
+      metadataArrivedRef.current = false
+      setForceShowIndicator(false)
+      if (forceTimerRef.current) clearTimeout(forceTimerRef.current)
+      return
+    }
+
+    // When metadata arrives during auto mode, keep indicator visible for transition duration
+    if (metadataHasTier && userSelectedTier === 'auto' && !metadataArrivedRef.current) {
+      metadataArrivedRef.current = true
+      setForceShowIndicator(true)
+
+      const duration = getTransitionDuration(userMessageCount)
+      forceTimerRef.current = setTimeout(() => {
+        setForceShowIndicator(false)
+      }, duration)
+    }
+
+    return () => {
+      if (forceTimerRef.current) clearTimeout(forceTimerRef.current)
+    }
+  }, [isStreaming, metadataHasTier, userSelectedTier, userMessageCount])
 
   // Handle pending queries
   useEffect(() => {
@@ -375,9 +424,11 @@ export function ChatContainer() {
           )}
 
           {/* Streaming response */}
+          {/* forceShowIndicator keeps TypingIndicator mounted during phase transitions */}
+          {/* even after first token arrives, so Analyze→Route→Generate animations play out */}
           {isStreaming && (
             <>
-              {!currentResponse && (
+              {(!currentResponse || forceShowIndicator) && (
                 <TypingIndicator
                   tier={streamMetadata?.tier}
                   userSelectedTier={userSelectedTier}
@@ -386,10 +437,11 @@ export function ChatContainer() {
                   fallback={streamMetadata?.fallback}
                   originalTier={streamMetadata?.original_tier}
                   unavailableTiers={streamMetadata?.unavailable_tiers}
+                  userMessageCount={userMessageCount}
                 />
               )}
 
-              {currentResponse && (
+              {currentResponse && !forceShowIndicator && (
                 <>
                   {/* Fallback warning while streaming */}
                   {streamMetadata?.fallback && streamMetadata?.original_tier && (

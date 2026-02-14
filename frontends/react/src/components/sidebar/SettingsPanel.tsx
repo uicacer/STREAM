@@ -13,7 +13,7 @@
  * DESIGN: Matches the Streamlit sidebar functionality
  */
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import {
   Bot,
   Cpu,
@@ -149,21 +149,23 @@ export function SettingsPanel({ onExampleQuery }: SettingsPanelProps) {
   const localHealth = useHealthStore((state) => state.local)
   const lakeshoreHealth = useHealthStore((state) => state.lakeshore)
   const cloudHealth = useHealthStore((state) => state.cloud)
-  const fetchHealth = useHealthStore((state) => state.fetchHealth)
+  const isProviderChanging = useHealthStore((state) => state.isProviderChanging)
+  const fetchHealthForProviderChange = useHealthStore((state) => state.fetchHealthForProviderChange)
 
   /**
    * Handle cloud provider change - updates setting AND triggers health check
-   * This gives immediate feedback on whether the new provider is available
+   * Debounced to prevent rapid clicks from firing multiple health checks
    */
+  const providerChangeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const handleCloudProviderChange = (provider: CloudProvider) => {
     console.log('[SettingsPanel] Cloud provider changing to:', provider)
     setCloudProvider(provider)
-    // Trigger health check after a brief delay to allow state to update
-    // This ensures the health check uses the new provider
-    setTimeout(() => {
-      console.log('[SettingsPanel] Triggering fetchHealth()')
-      fetchHealth()
-    }, 50)
+    if (providerChangeTimer.current) {
+      clearTimeout(providerChangeTimer.current)
+    }
+    providerChangeTimer.current = setTimeout(() => {
+      fetchHealthForProviderChange()
+    }, 100)
   }
 
   /**
@@ -292,7 +294,9 @@ export function SettingsPanel({ onExampleQuery }: SettingsPanelProps) {
                   <div className="min-w-0 flex-1">
                     <div className="font-medium truncate flex items-center gap-1.5">
                       {config.label}
-                      {statusDot && (
+                      {tierKey === 'cloud' && isProviderChanging ? (
+                        <Loader2 className="w-3 h-3 animate-spin text-white flex-shrink-0" />
+                      ) : statusDot && (
                         <span className={`w-2 h-2 rounded-full ${statusDot} flex-shrink-0`} />
                       )}
                       {isLakeshoreUnavailable && (

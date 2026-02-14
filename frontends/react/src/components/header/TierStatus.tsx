@@ -17,6 +17,7 @@
  */
 
 import { useEffect } from 'react'
+import { Loader2 } from 'lucide-react'
 import { useHealthStore, getTierDisplayInfo } from '../../stores/healthStore'
 
 // Tier configuration
@@ -33,7 +34,7 @@ export function TierStatus() {
   const lakeshore = useHealthStore(state => state.lakeshore)
   const cloud = useHealthStore(state => state.cloud)
   const error = useHealthStore(state => state.error)
-  const isLoading = useHealthStore(state => state.isLoading)
+  const isProviderChanging = useHealthStore(state => state.isProviderChanging)
   const startPolling = useHealthStore(state => state.startPolling)
   const stopPolling = useHealthStore(state => state.stopPolling)
 
@@ -55,17 +56,17 @@ export function TierStatus() {
     return getTierDisplayInfo(tierKey, tierData)
   }
 
-  // Debug: log when isLoading changes
+  // Debug: log when isProviderChanging changes
   useEffect(() => {
-    console.log('[TierStatus] isLoading changed to:', isLoading)
-  }, [isLoading])
+    console.log('[TierStatus] isProviderChanging changed to:', isProviderChanging)
+  }, [isProviderChanging])
 
   return (
     <div className="flex items-center gap-3">
       {tiers.map(({ key, label }) => {
         const { color, tooltip } = getStatus(key)
         // Show pulsing animation on Cloud indicator while checking health
-        const showPulse = isLoading && key === 'cloud'
+        const showPulse = isProviderChanging && key === 'cloud'
 
         return (
           <div
@@ -73,10 +74,14 @@ export function TierStatus() {
             className="relative group"
           >
             {/* Tier label with status dot */}
-            <div className="flex items-center gap-1.5 px-2 py-1 rounded-md hover:bg-muted/50 transition-colors cursor-default">
-              <span
-                className={`w-2 h-2 rounded-full ${showPulse ? 'bg-blue-500 animate-pulse' : color} transition-colors`}
-              />
+            <div className={`flex items-center gap-1.5 px-2 py-1 rounded-md transition-colors cursor-default ${
+              showPulse ? 'bg-blue-500/10' : 'hover:bg-muted/50'
+            }`}>
+              {showPulse ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
+              ) : (
+                <span className={`w-2 h-2 rounded-full ${color}`} />
+              )}
               <span className="text-sm text-muted-foreground">{label}</span>
             </div>
 
