@@ -8,7 +8,9 @@ from datetime import UTC, datetime, timedelta
 from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
+from stream.middleware.config import STREAM_MODE
 from stream.middleware.core.database import get_database_pool, is_database_available
+from stream.middleware.core.database_sqlite import get_cost_summary as get_cost_summary_sqlite
 from stream.middleware.utils.cost_reader import load_model_pricing
 
 logger = logging.getLogger(__name__)
@@ -68,10 +70,26 @@ async def get_cost_summary(
             detail={
                 "error": "database_unavailable",
                 "message": "Cost tracking database is not available",
-                "suggestion": "Check POSTGRES_* environment variables",
+                "suggestion": "Check POSTGRES_* environment variables"
+                if STREAM_MODE == "server"
+                else "SQLite database failed to initialize",
             },
         )
 
+    # -------------------------------------------------------------------------
+    # DESKTOP MODE: Query from SQLite
+    # -------------------------------------------------------------------------
+    # In desktop mode, costs are stored in a local SQLite file (~/.stream/data/costs.db).
+    # We use a dedicated query function that handles SQLite's different SQL syntax:
+    #   - Parameter placeholders: ? instead of %s
+    #   - Table name: spend_logs instead of "LiteLLM_SpendLogs"
+    #   - No connection pool (SQLite uses a single shared connection)
+    if STREAM_MODE == "desktop":
+        return get_cost_summary_sqlite(days)
+
+    # -------------------------------------------------------------------------
+    # SERVER MODE: Query from PostgreSQL (existing behavior below)
+    # -------------------------------------------------------------------------
     # Get pool from core.database
     db_pool = get_database_pool()
 

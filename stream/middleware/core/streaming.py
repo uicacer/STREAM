@@ -23,7 +23,8 @@ from collections.abc import AsyncGenerator
 
 from fastapi import HTTPException
 
-from stream.middleware.config import TIER_TIMEOUT_WARNING
+from stream.middleware.config import STREAM_MODE, TIER_TIMEOUT_WARNING
+from stream.middleware.core.database_sqlite import log_cost
 from stream.middleware.core.litellm_client import forward_to_litellm
 from stream.middleware.core.metrics import MetricsTracker
 from stream.middleware.core.query_router import get_model_for_tier
@@ -416,6 +417,18 @@ async def create_streaming_response(
             total_cost = inference_cost + judge_cost  # Include judge cost in total
             tracker.record_tokens(input_tokens, output_tokens)
             tracker.record_completion(total_cost)
+
+            # Desktop mode: log cost to SQLite.
+            # In server mode, the LiteLLM server logs costs to PostgreSQL automatically.
+            # In desktop mode, there's no LiteLLM server, so we record it ourselves.
+            # log_cost() is a no-op if SQLite isn't initialized (safe to always call).
+            if STREAM_MODE == "desktop":
+                log_cost(
+                    model=current_model,
+                    spend=total_cost,
+                    prompt_tokens=input_tokens,
+                    completion_tokens=output_tokens,
+                )
 
             # Send final cost summary if we have token counts
             if input_tokens > 0 or output_tokens > 0:

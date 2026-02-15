@@ -26,7 +26,9 @@ from stream.middleware.config import (
     LITELLM_API_KEY,
     LITELLM_BASE_URL,
     LLM_JUDGE_ENABLED,
+    STREAM_MODE,
 )
+from stream.middleware.core.litellm_direct import judge_direct
 from stream.middleware.utils.cost_calculator import calculate_query_cost
 
 logger = logging.getLogger(__name__)
@@ -109,29 +111,47 @@ def judge_complexity_with_llm(
     prompt = JUDGE_PROMPT.format(query=query)
 
     try:
-        # Call LiteLLM with the selected judge model
-        with httpx.Client(timeout=timeout) as client:
-            response = client.post(
-                f"{LITELLM_BASE_URL}/v1/chat/completions",
-                json={
-                    "model": model,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 10,  # Just need one word
-                    "temperature": 0.0,  # Deterministic
-                },
-                headers={
-                    "Authorization": f"Bearer {LITELLM_API_KEY}",
-                    "Content-Type": "application/json",
-                },
-            )
+        # -----------------------------------------------------------------
+        # GET JUDGE RESPONSE: Desktop vs Server mode
+        # -----------------------------------------------------------------
+        # Both paths produce the same `data` dict (OpenAI response format).
+        # The only difference is HOW we get it:
+        #   Desktop: litellm.completion() — direct Python function call
+        #   Server:  HTTP POST → LiteLLM server (:4000) — network request
+        #
+        # After this if/else, `data` is a dict like:
+        #   {"choices": [{"message": {"content": "LOW"}}], "usage": {...}}
+        #
+        if STREAM_MODE == "desktop":
+            # Desktop: call litellm Python library directly (no HTTP server)
+            data = judge_direct(model, prompt, timeout)
+        else:
+            # Server: send HTTP request to LiteLLM server on port 4000
+            with httpx.Client(timeout=timeout) as client:
+                response = client.post(
+                    f"{LITELLM_BASE_URL}/v1/chat/completions",
+                    json={
+                        "model": model,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "max_tokens": 10,  # Just need one word
+                        "temperature": 0.0,  # Deterministic
+                    },
+                    headers={
+                        "Authorization": f"Bearer {LITELLM_API_KEY}",
+                        "Content-Type": "application/json",
+                    },
+                )
 
-        if response.status_code != 200:
-            error_msg = f"HTTP {response.status_code}"
-            print(f"⚠️ JUDGE [{strategy}]: Failed with status {response.status_code}")
-            return None, error_msg, 0.0, None
+            if response.status_code != 200:
+                error_msg = f"HTTP {response.status_code}"
+                print(f"⚠️ JUDGE [{strategy}]: Failed with status {response.status_code}")
+                return None, error_msg, 0.0, None
 
-        # Parse response
-        data = response.json()
+            data = response.json()
+
+        # -----------------------------------------------------------------
+        # PARSE RESPONSE (same for both modes — both produce OpenAI format)
+        # -----------------------------------------------------------------
         judgment_text = data["choices"][0]["message"]["content"].strip().upper()
 
         # Extract token usage for cost calculation

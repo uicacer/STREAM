@@ -1,40 +1,78 @@
 """
 Database connection management.
 
-This module provides centralized database connection pooling for STREAM.
-All database access should go through this module to ensure:
+This module provides centralized database access for STREAM.
+All database operations should go through this module to ensure:
 - Efficient connection reuse
 - Proper connection lifecycle management
 - Consistent error handling
+
+MODE SWITCHING:
+--------------
+This module routes to the right database backend based on STREAM_MODE:
+
+    Server/Docker mode (STREAM_MODE="server"):
+        Uses PostgreSQL — a full database server running in a Docker container.
+        The LiteLLM server writes cost data to PostgreSQL automatically.
+        We read from it for the /costs/summary endpoint.
+
+    Desktop mode (STREAM_MODE="desktop"):
+        Uses SQLite — a file-based database at ~/.stream/data/costs.db.
+        No server process needed. We write cost data ourselves (from streaming.py)
+        since there's no LiteLLM server to do it.
+
+The rest of the app calls the same functions (initialize_database_pool,
+is_database_available, etc.) regardless of which backend is active.
 """
 
 import logging
 import os
 
-from psycopg2 import pool
+from stream.middleware.config import STREAM_MODE
+from stream.middleware.core.database_sqlite import (
+    close_sqlite,
+    initialize_sqlite,
+    is_sqlite_available,
+)
 
 logger = logging.getLogger(__name__)
 
-# Global connection pool (initialized at startup)
+# Global connection pool (PostgreSQL only — SQLite manages its own connection)
 _db_pool = None
 
 
 def initialize_database_pool():
     """
-    Initialize the PostgreSQL connection pool.
+    Initialize the database.
 
-    This should be called ONCE at application startup.
-    Creates a connection pool that can be shared across all modules.
+    Called ONCE at application startup (from lifecycle.py).
+    Routes to SQLite or PostgreSQL based on STREAM_MODE.
 
     Returns:
         bool: True if successful, False if failed
+    """
+    # Desktop mode: use SQLite (file-based, no server needed)
+    if STREAM_MODE == "desktop":
+        return initialize_sqlite()
 
-    Raises:
-        ValueError: If required environment variables are missing
+    # Server mode: use PostgreSQL (Docker container)
+    return _initialize_postgres()
+
+
+def _initialize_postgres():
+    """
+    Initialize the PostgreSQL connection pool (server/Docker mode only).
+
+    PostgreSQL runs as a separate Docker container. We connect to it using
+    credentials from environment variables (set in .env / docker-compose).
     """
     global _db_pool
 
     try:
+        # Import psycopg2 only in server mode — it's not needed for desktop
+        # and may not be installed if the user only has SQLite dependencies.
+        from psycopg2 import pool
+
         # Load database credentials from environment variables
         required_vars = {
             "POSTGRES_HOST": os.getenv("POSTGRES_HOST"),
@@ -49,7 +87,9 @@ def initialize_database_pool():
         if missing:
             raise ValueError(f"Missing environment variables: {', '.join(missing)}")
 
-        # Create connection pool
+        # Create connection pool.
+        # A pool reuses database connections instead of opening a new one per request.
+        # This is much faster and uses fewer resources.
         _db_pool = pool.SimpleConnectionPool(
             minconn=1,  # 5 in production
             maxconn=5,  # 20 in production
@@ -87,28 +127,26 @@ def initialize_database_pool():
 
 def get_database_pool():
     """
-    Get the database connection pool.
+    Get the database connection pool (PostgreSQL only).
+
+    In desktop mode, this returns None — use database_sqlite functions instead.
+    costs.py checks STREAM_MODE to decide which path to take.
 
     Returns:
-        SimpleConnectionPool or None: The pool if available, None if not initialized
-
-    Example:
-        >>> pool = get_database_pool()
-        >>> if pool:
-        ...     conn = pool.getconn()
-        ...     # Use connection
-        ...     pool.putconn(conn)
+        SimpleConnectionPool or None
     """
     return _db_pool
 
 
 def is_database_available() -> bool:
     """
-    Check if database is available.
+    Check if the database is available (works for both modes).
 
     Returns:
-        bool: True if pool is initialized, False otherwise
+        bool: True if the database is ready to use
     """
+    if STREAM_MODE == "desktop":
+        return is_sqlite_available()
     return _db_pool is not None
 
 
@@ -116,10 +154,14 @@ def close_database_pool():
     """
     Close all database connections.
 
-    This should be called ONCE at application shutdown.
-    Closes all connections in the pool gracefully.
+    Called ONCE at application shutdown (from lifecycle.py).
+    Routes to the right backend based on STREAM_MODE.
     """
     global _db_pool
+
+    if STREAM_MODE == "desktop":
+        close_sqlite()
+        return
 
     if _db_pool:
         _db_pool.closeall()

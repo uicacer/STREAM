@@ -16,6 +16,13 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # =============================================================================
+# MODE DETECTION
+# =============================================================================
+# "server" = Docker/cloud deployment (default, backwards-compatible)
+# "desktop" = Native desktop app (PyWebView, SQLite, direct litellm calls)
+STREAM_MODE = os.getenv("STREAM_MODE", "server")
+
+# =============================================================================
 # SERVICE METADATA
 # =============================================================================
 
@@ -27,8 +34,8 @@ SERVICE_DESCRIPTION = "Smart Tiered Routing Engine for AI Models"
 # SERVICE CONFIGURATION
 # =============================================================================
 
-MIDDLEWARE_HOST = os.getenv("MIDDLEWARE_HOST")
-MIDDLEWARE_PORT = int(os.getenv("MIDDLEWARE_PORT"))
+MIDDLEWARE_HOST = os.getenv("MIDDLEWARE_HOST", "127.0.0.1")
+MIDDLEWARE_PORT = int(os.getenv("MIDDLEWARE_PORT", "5000"))
 DEBUG = os.getenv("DEBUG", "false").lower() == "true"
 RELOAD = os.getenv("RELOAD", "false").lower() == "true"
 
@@ -43,7 +50,7 @@ LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 # CORS
 # =============================================================================
 
-CORS_ORIGINS = os.getenv("CORS_ORIGINS").split(",")
+CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://127.0.0.1:5000").split(",")
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_METHODS = ["*"]
 CORS_ALLOW_HEADERS = ["*"]
@@ -52,9 +59,16 @@ CORS_ALLOW_HEADERS = ["*"]
 # EXTERNAL SERVICES
 # =============================================================================
 
+# In Docker, OLLAMA_HOST="ollama" (Docker DNS name for the Ollama container).
+# Outside Docker (desktop mode), Ollama runs natively on localhost.
+# Default "localhost" works for desktop; .env overrides it to "ollama" for Docker.
+OLLAMA_HOST = os.getenv("OLLAMA_HOST", "localhost")
 OLLAMA_PORT = int(os.getenv("OLLAMA_PORT", "11434"))
-LITELLM_BASE_URL = os.getenv("LITELLM_BASE_URL")
-LITELLM_API_KEY = os.getenv("LITELLM_MASTER_KEY")
+# Centralized URL so we don't hardcode "http://ollama:11434" in multiple files.
+# tier_health.py and warm_ping.py use this instead of building their own URLs.
+OLLAMA_BASE_URL = f"http://{OLLAMA_HOST}:{OLLAMA_PORT}"
+LITELLM_BASE_URL = os.getenv("LITELLM_BASE_URL", "http://127.0.0.1:4000")
+LITELLM_API_KEY = os.getenv("LITELLM_MASTER_KEY", "")
 
 # Lakeshore connection configuration
 # Two modes: SSH port forwarding (legacy) or Globus Compute (preferred)
@@ -63,9 +77,18 @@ LAKESHORE_VLLM_ENDPOINT = os.getenv(
 )  # SSH port forward URL (e.g., http://host.docker.internal:8000)
 
 # Lakeshore proxy service configuration (configurable host and port)
-LAKESHORE_PROXY_HOST = os.getenv("LAKESHORE_PROXY_HOST", "lakeshore-proxy")
+# In Docker mode, the proxy runs as a separate container on port 8001.
+# In desktop mode, the proxy routes are mounted at /lakeshore on the main app,
+# so the URL includes a path prefix instead of a different port.
+_default_proxy_host = "127.0.0.1" if STREAM_MODE == "desktop" else "lakeshore-proxy"
+LAKESHORE_PROXY_HOST = os.getenv("LAKESHORE_PROXY_HOST", _default_proxy_host)
 LAKESHORE_PROXY_PORT = int(os.getenv("LAKESHORE_PROXY_PORT", "8001"))
-LAKESHORE_PROXY_URL = f"http://{LAKESHORE_PROXY_HOST}:{LAKESHORE_PROXY_PORT}"
+# Allow full URL override via env var. Desktop mode sets this to
+# "http://127.0.0.1:5000/lakeshore" so requests go to the embedded router.
+LAKESHORE_PROXY_URL = os.getenv(
+    "LAKESHORE_PROXY_URL",
+    f"http://{LAKESHORE_PROXY_HOST}:{LAKESHORE_PROXY_PORT}",
+)
 
 USE_GLOBUS_COMPUTE = (
     os.getenv("USE_GLOBUS_COMPUTE", "true").lower() == "true"

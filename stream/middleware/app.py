@@ -18,10 +18,14 @@ from datetime import UTC, datetime
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from rich.console import Console
 from rich.panel import Panel
 
+# find_react_dist locates the pre-built React UI (frontends/react/dist/).
+# Returns None if no build exists — safe to call in server mode too.
+# mount_static_files mounts the React dist/ folder onto FastAPI (desktop mode).
+from stream.desktop.static_files import find_react_dist, mount_static_files
 from stream.middleware.config import (
     CORS_ALLOW_CREDENTIALS,
     CORS_ALLOW_HEADERS,
@@ -44,6 +48,9 @@ from stream.middleware.routes.config import router as config_router
 from stream.middleware.routes.costs import router as costs_router
 from stream.middleware.routes.health import router as health_router
 from stream.middleware.utils.logging_config import configure_logging
+from stream.proxy.app import (
+    router as lakeshore_router,  # Lakeshore proxy routes (mounted at /lakeshore in desktop mode)
+)
 
 spinner.stop()
 
@@ -328,13 +335,74 @@ app.include_router(costs_router, prefix="/v1", tags=["Costs"])
 
 
 # =============================================================================
+# LAKESHORE PROXY ROUTES (Desktop Mode Only)
+# =============================================================================
+# In Docker, the Lakeshore proxy runs as a separate container on port 8001.
+# In desktop mode, there's no Docker — so we embed the proxy routes directly
+# into this FastAPI app at the /lakeshore prefix.
+#
+# This means requests like:
+#   GET  /lakeshore/health              → proxy health check
+#   POST /lakeshore/reload-auth         → reload Globus credentials
+#   POST /lakeshore/v1/chat/completions → forward to Lakeshore HPC
+#
+# The LAKESHORE_PROXY_URL config is set to http://127.0.0.1:5000/lakeshore
+# in desktop mode, so all existing code (tier_health, auth, litellm_direct)
+# routes to these embedded endpoints automatically.
+if os.environ.get("STREAM_MODE") == "desktop":
+    app.include_router(lakeshore_router, prefix="/lakeshore", tags=["Lakeshore"])
+
+
+# =============================================================================
+# STATIC FILE SERVING (Desktop Mode Only)
+# =============================================================================
+# In desktop mode, there's no separate Vite dev server to serve the React UI.
+# So we mount the pre-built React files (frontends/react/dist/) directly onto
+# FastAPI. This lets one server handle BOTH the API and the UI.
+#
+# IMPORTANT: This MUST come AFTER all API routers are registered above.
+# The static file mounter adds a "catch-all" route that returns index.html
+# for any URL that doesn't match an existing route. If we mounted it BEFORE
+# the API routes, it would intercept /v1/chat/completions, /health, etc.
+# By registering it last, API routes get matched first, and only truly
+# unrecognized URLs (like /settings, /about) fall through to the React UI.
+# We check os.environ directly instead of the imported STREAM_MODE variable.
+# This is more reliable because os.environ always reflects the actual current
+# state, whereas the imported variable depends on module import ordering.
+if os.environ.get("STREAM_MODE") == "desktop":
+    mount_static_files(app)
+
+
+# =============================================================================
 # ROOT
 # =============================================================================
 
 
 @app.get("/")
 async def root():
-    """Root endpoint."""
+    """
+    Root endpoint — serves different content based on the mode.
+
+    We check os.environ at REQUEST TIME (not import time) because the
+    environment variable is always correct, regardless of module import order.
+    Module-level checks like `if STREAM_MODE == "desktop":` can fail if
+    config.py gets imported before apply_desktop_defaults() runs.
+    Checking os.environ directly at request time avoids that problem entirely.
+
+    Desktop mode: returns the React UI (index.html)
+    Server mode:  returns JSON service info (useful for health checks)
+    """
+    # Check the actual environment variable right now, not a cached import
+    if os.environ.get("STREAM_MODE") == "desktop":
+        # Serve the React frontend's index.html
+        dist_path = find_react_dist()
+        if dist_path:
+            index_html = dist_path / "index.html"
+            response = HTMLResponse(index_html.read_text())
+            response.headers["Cache-Control"] = "no-store"
+            return response
+
+    # Server mode (or desktop mode with no React build): return JSON status
     return {
         "service": SERVICE_NAME,
         "version": SERVICE_VERSION,

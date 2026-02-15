@@ -1,5 +1,30 @@
 """
-Lakeshore vLLM Proxy Service - Routes requests via Globus Compute or SSH
+Lakeshore vLLM Proxy Service — Routes requests via Globus Compute or SSH.
+
+DUAL-USE DESIGN:
+----------------
+This module serves two roles:
+
+1. STANDALONE SERVICE (Docker mode):
+   Runs as its own container on port 8001. The middleware forwards Lakeshore
+   requests to this separate service via HTTP.
+   → Start with: python -m stream.proxy.app
+
+2. EMBEDDED ROUTER (Desktop mode):
+   The middleware imports `router` from this module and mounts it at /lakeshore
+   on the main FastAPI app. No separate process needed — everything runs in
+   one server on port 5000.
+
+WHY AN APIRouter:
+-----------------
+FastAPI's APIRouter lets you define routes that can be included in ANY app.
+Think of it as a "plug-in" — define routes once, then plug them into either
+a standalone app (Docker) or the middleware app (desktop). Same routes,
+same code, different hosting.
+
+The standalone `app` at the bottom is just a thin wrapper:
+  app = FastAPI()
+  app.include_router(router)  ← same router used by desktop mode
 """
 
 import asyncio
@@ -8,13 +33,17 @@ import logging
 import os
 
 import httpx
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from globus_sdk import GlobusAPIError
 
 from stream.middleware.core.globus_compute_client import GlobusComputeClient
 
-# Configuration
+# =========================================================================
+# Configuration — read from environment variables
+# =========================================================================
+# These settings control how the proxy connects to the Lakeshore HPC cluster.
+# In Docker, they come from docker-compose.yml. In desktop, from config.py.
 PROXY_HOST = os.getenv("PROXY_HOST", "0.0.0.0")
 PROXY_PORT = int(os.getenv("PROXY_PORT", "8001"))
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
@@ -27,32 +56,30 @@ LAKESHORE_VLLM_ENDPOINT = os.getenv("LAKESHORE_VLLM_ENDPOINT", "http://host.dock
 logging.basicConfig(level=LOG_LEVEL, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Lakeshore vLLM Proxy")
-
-# Initialize Globus client
+# =========================================================================
+# Initialize Globus Compute client (module-level, runs once at import time)
+# =========================================================================
+# This client handles authentication and job submission to UIC's HPC cluster.
+# It's initialized at module level so both standalone and embedded modes share it.
 globus_client = None
 if USE_GLOBUS_COMPUTE and GLOBUS_COMPUTE_ENDPOINT_ID:
     try:
         globus_client = GlobusComputeClient()  # Reads from env vars
-        logger.info("✓ Globus Compute client loaded")
+        logger.info("Globus Compute client loaded")
     except Exception as e:
         logger.error(f"Failed to initialize Globus Compute client: {e}")
 
 
-@app.on_event("startup")
-async def startup_event():
-    logger.info("=" * 60)
-    logger.info("🚀 Lakeshore vLLM Proxy Starting")
-    logger.info("=" * 60)
-    logger.info(f"Mode: {'Globus Compute' if USE_GLOBUS_COMPUTE else 'SSH Port Forward'}")
-    if USE_GLOBUS_COMPUTE and globus_client:
-        logger.info(f"Globus Endpoint: {GLOBUS_COMPUTE_ENDPOINT_ID}")
-        logger.info(f"vLLM Server URL: {VLLM_SERVER_URL}")
-    logger.info(f"Listening on: {PROXY_HOST}:{PROXY_PORT}")
-    logger.info("=" * 60)
+# =========================================================================
+# APIRouter — the actual route definitions
+# =========================================================================
+# These routes can be included in any FastAPI app:
+#   - Standalone proxy: app.include_router(router)
+#   - Desktop middleware: app.include_router(router, prefix="/lakeshore")
+router = APIRouter()
 
 
-@app.get("/health")
+@router.get("/health")
 async def health_check():
     return {
         "status": "healthy",
@@ -64,7 +91,7 @@ async def health_check():
     }
 
 
-@app.post("/reload-auth")
+@router.post("/reload-auth")
 async def reload_authentication():
     """
     Reload Globus credentials from disk.
@@ -86,7 +113,7 @@ async def reload_authentication():
         return {"success": False, "message": f"Failed to reload: {str(e)}"}
 
 
-@app.post("/v1/chat/completions")
+@router.post("/v1/chat/completions")
 async def proxy_chat_completions(request: Request):
     try:
         body = await request.json()
@@ -346,6 +373,30 @@ def _convert_json_to_sse_stream(json_response: dict):
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(sse_generator(), media_type="text/event-stream")
+
+
+# =========================================================================
+# Standalone FastAPI app (used in Docker mode only)
+# =========================================================================
+# This wraps the router in a full FastAPI app. In Docker, this module is
+# the entry point: uvicorn stream.proxy.app:app
+# In desktop mode, only `router` is imported — this `app` object is ignored.
+app = FastAPI(title="Lakeshore vLLM Proxy")
+app.include_router(router)
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Log startup info when running as a standalone service (Docker mode)."""
+    logger.info("=" * 60)
+    logger.info("Lakeshore vLLM Proxy Starting")
+    logger.info("=" * 60)
+    logger.info(f"Mode: {'Globus Compute' if USE_GLOBUS_COMPUTE else 'SSH Port Forward'}")
+    if USE_GLOBUS_COMPUTE and globus_client:
+        logger.info(f"Globus Endpoint: {GLOBUS_COMPUTE_ENDPOINT_ID}")
+        logger.info(f"vLLM Server URL: {VLLM_SERVER_URL}")
+    logger.info(f"Listening on: {PROXY_HOST}:{PROXY_PORT}")
+    logger.info("=" * 60)
 
 
 def main():

@@ -30,8 +30,8 @@ from stream.middleware.config import (
     DEFAULT_MODELS,
     LITELLM_API_KEY,
     LITELLM_BASE_URL,
+    OLLAMA_BASE_URL,
     OLLAMA_MODELS,
-    OLLAMA_PORT,
 )
 from stream.middleware.core.tier_health import _tier_health
 
@@ -63,8 +63,11 @@ async def warm_ping_local() -> tuple[bool, float, str | None]:
 
     try:
         async with httpx.AsyncClient(timeout=WARM_PING_TIMEOUT) as client:
+            # OLD: f"http://ollama:{OLLAMA_PORT}/api/generate"
+            # "ollama" was a Docker-only hostname. Now we use OLLAMA_BASE_URL
+            # from config, which points to localhost outside Docker.
             response = await client.post(
-                f"http://ollama:{OLLAMA_PORT}/api/generate",
+                f"{OLLAMA_BASE_URL}/api/generate",
                 json={
                     "model": ollama_model,
                     "prompt": WARM_PING_PROMPT,

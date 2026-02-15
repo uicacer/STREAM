@@ -37,6 +37,19 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Desktop mode: needed to run STREAM as a standalone desktop app (no Docker).
+# Install with: uv pip install -e ".[desktop]"
+#
+# pywebview opens a native OS window (like a real app) instead of a browser tab.
+# It uses the OS's built-in web engine (WebKit on macOS, Edge on Windows).
+# Without it, the app falls back to opening in your default browser.
+#
+# pyinstaller bundles the entire Python app + dependencies into a standalone
+# .app (macOS), .exe (Windows), or binary (Linux) that runs without Python installed.
+desktop = [
+    "pywebview>=5.0",
+    "pyinstaller>=6.0",
+]
 dev = [
     "pytest>=8.3.4",
     "pytest-asyncio>=0.24.0",
@@ -54,10 +67,13 @@ dev = [
 [tool.hatch.build.targets.wheel]
 packages = ["stream"]
 
-# Entry points - commands available after installation
-# Useful for local development
+# Entry points — commands available after installation.
+# After "uv pip install -e .", you can run these from anywhere in your terminal:
+#   stream-middleware  → starts the FastAPI server (server/Docker mode)
+#   stream-desktop     → launches the desktop app with a native window
 [project.scripts]
 stream-middleware = "stream.middleware.app:main"
+stream-desktop = "stream.desktop.main:main"
 
 [project.urls]
 # Homepage = ""
@@ -71,13 +87,17 @@ line-length = 100
 # Target Python 3.11 (matches your requires-python)
 target-version = "py311"
 
-# Exclude common directories
+# Exclude directories and files that aren't regular Python code.
+# .spec files are PyInstaller build configs — they use built-in names
+# (Analysis, PYZ, EXE, etc.) that PyInstaller injects at runtime.
+# Ruff doesn't know about these, so we skip .spec files entirely.
 exclude = [
     ".git",
     ".venv",
     "venv",
     "__pycache__",
     "*.egg-info",
+    "*.spec",
     "dist",
     "build",
     ".pytest_cache",
@@ -105,10 +125,25 @@ ignore = [
     "N802",  # function name should be lowercase (allows mixed case)
 ]
 
-# Allow unused variables when they start with underscore
+# Per-file rule exceptions.
+#
+# Ruff linter rules each have a code (like E402, F401). Sometimes a rule
+# is correct in general but wrong for specific files. We put these exceptions
+# here in pyproject.toml because it's the central config file for all Python
+# tools (Ruff, pytest, etc.) — one file instead of many scattered config files.
+#
+# These exceptions say: "Don't enforce this rule in this particular file."
 [tool.ruff.lint.per-file-ignores]
-"__init__.py" = ["F401"]  # Allow unused imports in __init__.py
-"stream/middleware/app.py" = ["E402"]  # Allow imports after code (spinner UX)
+# F401 = "imported but unused". In __init__.py files, unused imports are
+# intentional — they re-export symbols so other modules can import from
+# the package (e.g., "from stream.desktop import X").
+"__init__.py" = ["F401"]
+# E402 = "import not at top of file". Python convention says all imports
+# go at the very top. But these files MUST run code before importing:
+#   app.py  → starts a loading spinner before slow imports begin
+#   main.py → sets STREAM_MODE=desktop before config.py reads os.environ
+"stream/middleware/app.py" = ["E402"]
+"stream/desktop/main.py" = ["E402"]
 
 [tool.ruff.format]
 # Use double quotes for strings

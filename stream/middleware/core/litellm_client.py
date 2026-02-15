@@ -20,7 +20,8 @@ from collections.abc import AsyncGenerator
 import httpx
 from fastapi import HTTPException
 
-from stream.middleware.config import LITELLM_API_KEY, LITELLM_BASE_URL
+from stream.middleware.config import LITELLM_API_KEY, LITELLM_BASE_URL, STREAM_MODE
+from stream.middleware.core.litellm_direct import forward_direct
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +109,26 @@ async def forward_to_litellm(
         This is an async generator - it yields lines as they arrive from LiteLLM,
         rather than buffering the entire response in memory.
     """
+    # -------------------------------------------------------------------------
+    # DESKTOP MODE: Call litellm library directly (skip HTTP server)
+    # -------------------------------------------------------------------------
+    # In server/Docker mode, we send an HTTP request to the LiteLLM server
+    # running on port 4000. In desktop mode, there's no server — we call
+    # the litellm Python library directly. Same library, different usage:
+    #   Server:  HTTP POST → LiteLLM server (:4000) → Cloud API
+    #   Desktop: litellm.acompletion() → Cloud API (no HTTP hop)
+    #
+    # The output format (SSE lines) is identical, so streaming.py doesn't
+    # know or care which path was used.
+    if STREAM_MODE == "desktop":
+        async for line in forward_direct(model, messages, temperature, correlation_id):
+            yield line
+        return
+
+    # -------------------------------------------------------------------------
+    # SERVER MODE: Forward via HTTP to LiteLLM server (existing behavior below)
+    # -------------------------------------------------------------------------
+
     # Construct the request payload
     # This matches OpenAI's API format, which LiteLLM expects
     payload = {

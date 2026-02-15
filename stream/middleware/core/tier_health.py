@@ -19,8 +19,8 @@ from stream.middleware.config import (
     LAKESHORE_PROXY_URL,
     LITELLM_API_KEY,
     LITELLM_BASE_URL,
+    OLLAMA_BASE_URL,
     OLLAMA_MODELS,
-    OLLAMA_PORT,
 )
 
 logger = logging.getLogger(__name__)
@@ -44,7 +44,12 @@ def check_tier_health(tier: str) -> tuple[bool, str | None]:
         # LOCAL: Check Ollama directly
         if tier == "local":
             with httpx.Client(timeout=10.0) as client:
-                response = client.get(f"http://ollama:{OLLAMA_PORT}/api/tags")
+                # OLD: f"http://ollama:{OLLAMA_PORT}/api/tags"
+                # "ollama" is a Docker DNS name — only works inside Docker's network.
+                # Now we use OLLAMA_BASE_URL from config, which resolves to:
+                #   Docker mode:  http://ollama:11434  (from .env)
+                #   Desktop mode: http://localhost:11434  (default)
+                response = client.get(f"{OLLAMA_BASE_URL}/api/tags")
                 if response.status_code != 200:
                     return False, f"Ollama not responding (HTTP {response.status_code})"
 
@@ -268,7 +273,8 @@ def _quick_health_check(
         # LOCAL: Check Ollama directly
         if tier == "local":
             with httpx.Client(timeout=5.0) as client:
-                response = client.get(f"http://ollama:{OLLAMA_PORT}/api/tags")
+                # Use centralized OLLAMA_BASE_URL (see comment in check_tier_health above)
+                response = client.get(f"{OLLAMA_BASE_URL}/api/tags")
                 if response.status_code != 200:
                     return False, f"Ollama not responding (HTTP {response.status_code})"
 
