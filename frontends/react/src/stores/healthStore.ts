@@ -11,9 +11,10 @@
  * - Scales better than persistent connections for many users
  *
  * ARCHITECTURE NOTE:
- * The backend runs in Docker and cannot check Globus auth status (tokens are on host).
- * So we also fetch auth status from the local auth_server.py (port 8765) and merge it
- * with the health data for Lakeshore. This gives us accurate auth + availability info.
+ * In Docker mode, the backend cannot check Globus auth status (tokens are on host),
+ * so we fetch auth status from auth_server.py (port 8765) running on the host.
+ * In desktop mode, the backend checks auth directly (same machine), so we use the
+ * backend's authenticated field when the auth helper is not running.
  */
 
 import { create } from 'zustand'
@@ -68,14 +69,26 @@ export const useHealthStore = create<HealthState>((set, get) => ({
       const cloudProvider = useSettingsStore.getState().cloudProvider
       const [healthData, authData] = await Promise.all([
         fetchTierHealth(cloudProvider),
-        checkAuthStatus().catch(() => ({ authenticated: false })),
+        checkAuthStatus().catch(() => null),
       ])
 
       if (requestId !== currentRequestId) return
 
+      // Determine auth status: prefer auth helper (Docker mode), fall back to
+      // backend's value (desktop mode where auth helper doesn't run).
+      let authenticated = false
+      if (authData !== null) {
+        // Auth helper is running (Docker mode) — use its result
+        authenticated = authData.authenticated
+      } else {
+        // Auth helper not running (desktop mode) — use the backend's check,
+        // which calls globus_is_authenticated() on ~/.globus_compute/storage.db
+        authenticated = healthData.tiers.lakeshore.authenticated === true
+      }
+
       const lakeshoreWithAuth: TierStatus = {
         ...healthData.tiers.lakeshore,
-        authenticated: authData.authenticated,
+        authenticated: authenticated,
       }
 
       if (requestId !== currentRequestId) return
@@ -109,14 +122,22 @@ export const useHealthStore = create<HealthState>((set, get) => ({
 
       const [healthData, authData] = await Promise.all([
         fetchTierHealth(cloudProvider),
-        checkAuthStatus().catch(() => ({ authenticated: false })),
+        checkAuthStatus().catch(() => null),
       ])
 
       if (requestId !== currentRequestId) return
 
+      // Same auth logic as fetchHealth — prefer auth helper, fall back to backend
+      let authenticated = false
+      if (authData !== null) {
+        authenticated = authData.authenticated
+      } else {
+        authenticated = healthData.tiers.lakeshore.authenticated === true
+      }
+
       const lakeshoreWithAuth: TierStatus = {
         ...healthData.tiers.lakeshore,
-        authenticated: authData.authenticated,
+        authenticated: authenticated,
       }
 
       // Ensure minimum loading time so spinner is visible

@@ -16,6 +16,7 @@ managed networking infrastructure.
 import asyncio
 import logging
 import os
+import time
 from typing import Any
 
 from globus_compute_sdk import Executor
@@ -23,6 +24,8 @@ from globus_compute_sdk.errors.error_types import DeserializationError, TaskExec
 from globus_compute_sdk.serialize import AllCodeStrategies, ComputeSerializer
 from globus_sdk import GlobusAPIError
 from globus_sdk.login_flows.command_line_login_flow_manager import CommandLineLoginFlowEOFError
+
+from stream.middleware.config import MODEL_CONTEXT_LIMITS
 
 logger = logging.getLogger(__name__)
 
@@ -176,6 +179,118 @@ class GlobusComputeClient:
         """
         return self.endpoint_id is not None and self.endpoint_id.strip() != ""
 
+    # =========================================================================
+    # PERSISTENT EXECUTOR
+    # =========================================================================
+    #
+    # WHAT IS THE EXECUTOR?
+    # ---------------------
+    # The Globus Compute Executor is the main way to run functions on remote
+    # HPC clusters. It works like Python's concurrent.futures.Executor but
+    # for remote machines:
+    #
+    #   Local (concurrent.futures):   executor.submit(fn, args) → runs fn on a thread/process
+    #   Remote (Globus Compute):      executor.submit(fn, args) → runs fn on Lakeshore HPC
+    #
+    # Under the hood, the Executor:
+    #   1. Serializes your function + arguments into bytes (using dill/pickle)
+    #   2. Sends the bytes to Globus cloud via AMQP (a messaging protocol)
+    #   3. Globus cloud routes the task to the Lakeshore endpoint
+    #   4. The endpoint deserializes and runs the function on a GPU node
+    #   5. The result comes back through the same AMQP connection
+    #   6. executor.submit() returns a Future — a "ticket" you can check later
+    #
+    # WHY DO WE NEED IT?
+    # ------------------
+    # We can't call vLLM on Lakeshore directly — it's behind the university
+    # firewall. Globus Compute provides secure, managed access to HPC resources
+    # without needing SSH tunnels or VPN. The Executor is the SDK's interface
+    # for submitting work to those resources.
+    #
+    # WHY KEEP IT PERSISTENT?
+    # -----------------------
+    # Creating a new Executor per request is expensive (~1-2 seconds) because
+    # it must:
+    #   1. Open a TCP connection to Globus cloud
+    #   2. Perform the AMQP handshake (authentication, channel setup)
+    #   3. Register as a task submitter
+    #
+    # By keeping one Executor alive across requests, the AMQP connection stays
+    # open. Subsequent requests skip steps 1-3 and go straight to submitting
+    # the task (~100ms instead of ~1500ms).
+    #
+    # WHAT IF THE CONNECTION DROPS?
+    # -----------------------------
+    # AMQP connections can die from network glitches, Globus service restarts,
+    # or token expiry. When that happens, we:
+    #   1. Detect the error during submit or result retrieval
+    #   2. Close the broken Executor (_reset_executor)
+    #   3. Create a fresh one (_get_executor)
+    #   4. Retry the request once
+    # If the retry also fails, we return the error to the user.
+
+    def _get_executor(self) -> Executor:
+        """
+        Get or create a persistent Globus Compute Executor.
+
+        On the first call, creates a new Executor and establishes the AMQP
+        connection to Globus cloud. On subsequent calls, returns the same
+        Executor — reusing the existing connection.
+
+        The serializer is configured once with AllCodeStrategies, which tries
+        multiple serialization methods to handle Python version mismatches
+        between the local machine and the Lakeshore endpoint.
+
+        Returns:
+            A ready-to-use Executor instance
+        """
+        if self._executor is None:
+            logger.info("Creating persistent Globus Compute Executor...")
+            self._executor = Executor(endpoint_id=self.endpoint_id)
+            # AllCodeStrategies tries multiple serialization methods to find one
+            # that works. This is more robust than the default CombinedCode
+            # strategy when there's a Python version mismatch between the local
+            # machine and the endpoint (e.g., local 3.12.12 vs endpoint 3.12.3).
+            self._executor.serializer = ComputeSerializer(strategy_code=AllCodeStrategies())
+            logger.info("Persistent Executor created (AMQP connection established)")
+        return self._executor
+
+    def _reset_executor(self):
+        """
+        Close the current Executor and clear it so the next call to
+        _get_executor() creates a fresh one.
+
+        Called when:
+        - The AMQP connection drops (network issue, Globus restart)
+        - Authentication tokens expire mid-session
+        - Any unexpected error during task submission
+
+        shutdown(wait=False) tells the Executor to close immediately without
+        waiting for pending tasks to finish. cancel_futures=True cancels any
+        tasks that haven't completed yet.
+        """
+        if self._executor is not None:
+            try:
+                self._executor.shutdown(wait=False, cancel_futures=True)
+            except Exception as e:
+                # Best effort — the connection might already be dead
+                logger.debug(f"Error during Executor shutdown (expected if connection died): {e}")
+            self._executor = None
+            logger.info("Executor reset — will reconnect on next request")
+
+    def shutdown(self):
+        """
+        Clean up the persistent Executor when the app is shutting down.
+
+        This should be called during app exit (e.g., FastAPI shutdown event)
+        to properly close the AMQP connection and release resources.
+        Without this, the connection would be abandoned and the OS would
+        eventually clean it up, but it's better to close it properly.
+        """
+        logger.info("Shutting down Globus Compute client...")
+        self._reset_executor()
+        logger.info("Globus Compute client shut down")
+
     def _get_globus_app(self, force_refresh: bool = False):
         """
         Get the Globus app instance for authentication.
@@ -305,7 +420,7 @@ class GlobusComputeClient:
         self,
         messages: list[dict],
         temperature: float = 0.7,
-        max_tokens: int = 512,
+        max_tokens: int | None = None,
         model: str = "Qwen/Qwen2.5-1.5B-Instruct",
         _retry: bool = False,  # Internal flag to prevent infinite retry loops
     ) -> dict[str, Any]:
@@ -321,7 +436,10 @@ class GlobusComputeClient:
         Args:
             messages: Chat messages in OpenAI format
             temperature: Sampling temperature (0.0-2.0)
-            max_tokens: Maximum tokens to generate
+            max_tokens: Maximum tokens to generate. If None, reads from
+                        MODEL_CONTEXT_LIMITS["lakeshore-qwen"]["reserve_output"]
+                        in config.py (single source of truth for all context
+                        window settings).
             model: Model identifier on vLLM server
 
         Returns:
@@ -332,6 +450,14 @@ class GlobusComputeClient:
         Raises:
             Exception: If Globus Compute is not available or submission fails
         """
+        # If max_tokens was not passed by the caller, read the default from
+        # MODEL_CONTEXT_LIMITS in config.py. The "reserve_output" field is how
+        # many tokens are reserved for the model's response — the same value
+        # used by context_window.py and litellm_direct.py.
+        if max_tokens is None:
+            lakeshore_limits = MODEL_CONTEXT_LIMITS.get("lakeshore-qwen", {})
+            max_tokens = lakeshore_limits.get("reserve_output", 2048)
+
         if not self.is_available():
             raise RuntimeError(
                 "Globus Compute not configured. Set GLOBUS_COMPUTE_ENDPOINT_ID in .env"
@@ -353,65 +479,87 @@ class GlobusComputeClient:
 
         logger.info(f"Submitting inference task to Globus endpoint {self.endpoint_id}")
 
+        # Track timing for each step so we can see where latency comes from.
+        # These logs help identify the bottleneck:
+        #   - get_executor: AMQP connection setup (should be ~0 if reusing)
+        #   - submit: serialization + AMQP send
+        #   - wait: Globus routing + remote execution + result return
+        t_start = time.perf_counter()
+
         try:
-            # Create executor and submit task
-            # Using context manager ensures proper cleanup
-            with Executor(endpoint_id=self.endpoint_id) as gce:
-                # AllCodeStrategies tries multiple serialization methods to find one
-                # that works. This is more robust than CombinedCode when there's a
-                # Python version mismatch between the local machine and the endpoint
-                # (e.g., local Python 3.12.12 vs endpoint Python 3.12.3).
-                gce.serializer = ComputeSerializer(strategy_code=AllCodeStrategies())
+            # Get the persistent Executor (creates one if first call, reuses
+            # the existing AMQP connection on subsequent calls).
+            gce = self._get_executor()
 
-                # Submit the function to execute remotely
-                future = gce.submit(
-                    remote_vllm_inference,
-                    self.vllm_url,
-                    model,
-                    messages,
-                    temperature,
-                    max_tokens,
-                    False,  # stream=False (streaming not yet implemented)
-                )
+            t_executor = time.perf_counter()
 
-                logger.debug("Waiting for Globus Compute task to complete...")
+            # Submit the function to execute remotely on Lakeshore.
+            # gce.submit() serializes remote_vllm_inference + its arguments,
+            # sends them to Globus cloud via AMQP, which routes them to the
+            # Lakeshore HPC endpoint. The function runs on a GPU node there.
+            future = gce.submit(
+                remote_vllm_inference,
+                self.vllm_url,
+                model,
+                messages,
+                temperature,
+                max_tokens,
+                False,  # stream=False (streaming not yet implemented)
+            )
 
-                # HOW LAKESHORE INFERENCE WORKS (both server and desktop mode):
-                # ============================================================
-                #
-                # 1. gce.submit() sends the inference function to UIC's Lakeshore
-                #    HPC cluster via Globus Compute (a remote execution service).
-                #    The function runs on a GPU node at Lakeshore, calls vLLM,
-                #    and returns the result.
-                #
-                # 2. gce.submit() returns a concurrent.futures.Future — a "ticket"
-                #    for the result. The result isn't ready yet (the GPU is working).
-                #
-                # 3. future.result() blocks until the GPU finishes and sends back
-                #    the result. This can take 5-30+ seconds depending on the query.
-                #
-                # WHY asyncio.to_thread():
-                # ------------------------
-                # future.result() is a BLOCKING call — it freezes the calling thread.
-                # In an async server, that freezes the event loop, which prevents the
-                # server from handling ANY other requests (health polls, the litellm
-                # self-connection in desktop mode, etc.).
-                #
-                # asyncio.to_thread() moves the blocking wait to a background thread,
-                # keeping the event loop free. This is safe for both modes:
-                #   - Server mode:  proxy container stays responsive during Globus wait
-                #   - Desktop mode: main server handles the litellm self-connection
-                #                   while Globus processes on Lakeshore
-                #
-                result = await asyncio.to_thread(future.result, timeout=GLOBUS_TASK_TIMEOUT)
+            t_submit = time.perf_counter()
 
-                # Check if the remote function returned an error
-                if isinstance(result, dict) and "error" in result:
-                    logger.error(f"vLLM inference failed on Lakeshore: {result['error']}")
-                    return result
+            logger.debug("Waiting for Globus Compute task to complete...")
 
-                logger.info("Globus Compute task completed successfully")
+            # HOW LAKESHORE INFERENCE WORKS (both server and desktop mode):
+            # ============================================================
+            #
+            # 1. gce.submit() sends the inference function to UIC's Lakeshore
+            #    HPC cluster via Globus Compute (a remote execution service).
+            #    The function runs on a GPU node at Lakeshore, calls vLLM,
+            #    and returns the result.
+            #
+            # 2. gce.submit() returns a concurrent.futures.Future — a "ticket"
+            #    for the result. The result isn't ready yet (the GPU is working).
+            #
+            # 3. future.result() blocks until the GPU finishes and sends back
+            #    the result. This can take 5-30+ seconds depending on the query.
+            #
+            # WHY asyncio.to_thread():
+            # ------------------------
+            # future.result() is a BLOCKING call — it freezes the calling thread.
+            # In an async server, that freezes the event loop, which prevents the
+            # server from handling ANY other requests (health polls, the litellm
+            # self-connection in desktop mode, etc.).
+            #
+            # asyncio.to_thread() moves the blocking wait to a background thread,
+            # keeping the event loop free. This is safe for both modes:
+            #   - Server mode:  proxy container stays responsive during Globus wait
+            #   - Desktop mode: main server handles the litellm self-connection
+            #                   while Globus processes on Lakeshore
+            #
+            result = await asyncio.to_thread(future.result, timeout=GLOBUS_TASK_TIMEOUT)
+
+            t_result = time.perf_counter()
+
+            # Log timing breakdown so we can see exactly where time is spent.
+            # Example output:
+            #   "Lakeshore timing: executor=0.01s, submit=0.45s, wait=3.21s, total=3.67s"
+            logger.info(
+                f"Lakeshore timing: "
+                f"executor={t_executor - t_start:.2f}s, "
+                f"submit={t_submit - t_executor:.2f}s, "
+                f"wait={t_result - t_submit:.2f}s, "
+                f"total={t_result - t_start:.2f}s"
+            )
+
+            # Check if the remote function returned an error
+            if isinstance(result, dict) and "error" in result:
+                logger.error(f"vLLM inference failed on Lakeshore: {result['error']}")
                 return result
+
+            logger.info("Globus Compute task completed successfully")
+            return result
 
         except TimeoutError:
             logger.error(f"Globus Compute task timeout after {GLOBUS_TASK_TIMEOUT}s")
@@ -424,8 +572,9 @@ class GlobusComputeClient:
             # Check if this is an authentication error
             if e.http_status in (401, 403):
                 logger.warning(f"Authentication error detected (HTTP {e.http_status})")
-                # Running in Docker - can't re-authenticate automatically
-                # Return error with auth_required flag for frontend to handle
+                # Auth tokens expired — reset executor so next request gets
+                # a fresh AMQP connection with refreshed tokens.
+                self._reset_executor()
                 auth_message = (
                     "Your Globus Compute session has expired. "
                     "Please authenticate by running this command on your host machine:\n\n"
@@ -450,6 +599,7 @@ class GlobusComputeClient:
             # This happens when the Globus SDK tries to re-authenticate in a non-interactive
             # environment (Docker container). It means tokens are invalid or expired.
             logger.warning("Globus SDK tried to re-authenticate in non-interactive mode")
+            self._reset_executor()
             return {
                 "error": "Globus Compute authentication required. Please authenticate.",
                 "error_type": "AuthenticationError",
@@ -461,6 +611,8 @@ class GlobusComputeClient:
             # decode the result from the endpoint. Most common cause: Python
             # version mismatch (e.g., local 3.12.12 vs endpoint 3.12.3).
             # Switching to AllCodeStrategies usually fixes this.
+            # Don't reset the executor — the connection is fine, just the
+            # serialization format is wrong.
             logger.error(
                 f"Globus result deserialization failed: {e}",
                 exc_info=True,
@@ -490,11 +642,39 @@ class GlobusComputeClient:
                 and "authorization" in error_str
             ):
                 logger.warning("Authentication required - triggering auth flow")
+                self._reset_executor()
                 return {
                     "error": "Globus Compute authentication required. Please authenticate.",
                     "error_type": "AuthenticationError",
                     "auth_required": True,
                 }
+
+            # -----------------------------------------------------------------
+            # STALE CONNECTION RETRY
+            # -----------------------------------------------------------------
+            # If the AMQP connection died (network glitch, Globus service
+            # restart, idle timeout), the Executor may throw various errors
+            # (ConnectionError, OSError, AMQP errors, etc.). We can't
+            # enumerate them all, so on ANY unexpected error that's not auth
+            # or deserialization, we:
+            #   1. Reset the Executor (close dead connection)
+            #   2. Retry once with a fresh Executor
+            #   3. If the retry fails too, return the error
+            #
+            # The _retry flag prevents infinite retry loops — if this IS
+            # already a retry, we just return the error.
+            if not _retry:
+                logger.warning(
+                    f"Unexpected error ({type(e).__name__}), resetting Executor and retrying..."
+                )
+                self._reset_executor()
+                return await self.submit_inference(
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    model=model,
+                    _retry=True,
+                )
 
             return {
                 "error": str(e),

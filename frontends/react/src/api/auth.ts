@@ -17,16 +17,24 @@
  *
  * ARCHITECTURE NOTE:
  * ------------------
- * The middleware runs in Docker, which CANNOT open browsers for OAuth.
- * To solve this, we use a separate "auth helper" server that runs on
- * the HOST machine (not Docker). This server CAN open browsers.
+ * Two modes are supported:
  *
- * AUTH HELPER SERVER:
+ * DESKTOP MODE:
+ * - The backend runs on the same machine as the user's browser
+ * - We call /v1/auth/status and /v1/auth/globus on the backend directly
+ * - The backend can open the browser for OAuth (same machine)
+ *
+ * DOCKER (SERVER) MODE:
+ * - The middleware runs in Docker, which CANNOT open browsers for OAuth
+ * - We use a separate "auth helper" server that runs on the HOST machine
+ * - This server CAN open browsers since it runs outside Docker
+ *
+ * AUTH HELPER SERVER (Docker mode only):
  * - Runs on localhost:8765 (start with: python frontends/react/auth_server.py)
  * - GET  /status - Check if authenticated
  * - POST /auth   - Trigger browser-based authentication
  *
- * AUTHENTICATION FLOW:
+ * AUTHENTICATION FLOW (Docker mode):
  * 1. React calls auth helper (localhost:8765/status)
  * 2. If not authenticated, user clicks "Authenticate"
  * 3. React calls auth helper (localhost:8765/auth)
@@ -34,6 +42,14 @@
  * 5. After login, credentials saved to ~/.globus_compute
  * 6. Auth helper tells Docker middleware to reload credentials
  * 7. Lakeshore tier becomes available!
+ *
+ * AUTHENTICATION FLOW (Desktop mode):
+ * 1. React calls backend (/v1/auth/status)
+ * 2. If not authenticated, user clicks "Authenticate"
+ * 3. React calls backend (/v1/auth/globus)
+ * 4. Backend opens browser for Globus login (same machine)
+ * 5. After login, credentials saved to ~/.globus_compute
+ * 6. Lakeshore tier becomes available!
  */
 
 /**
@@ -63,16 +79,26 @@ export interface AuthResult {
 /**
  * Check if authenticated with Globus Compute
  *
- * This calls the auth helper server running on the HOST machine.
- * The auth helper checks if Globus credentials exist in ~/.globus_compute.
+ * Tries the backend endpoint first (/v1/auth/status), which works in both
+ * desktop and Docker mode. The backend checks ~/.globus_compute/storage.db
+ * directly via globus_is_authenticated().
  *
- * WHY AUTH HELPER?
- * The Docker middleware can't check host credentials directly.
- * The auth helper runs on the host and has access to the credential files.
+ * Falls back to the auth helper server (localhost:8765) for Docker mode,
+ * where the auth helper runs on the HOST and has access to credential files.
  */
 export async function checkAuthStatus(): Promise<AuthStatus> {
+  // Try backend endpoint first (works in desktop mode and Docker mode)
   try {
-    // Call the auth helper server (runs on host, not Docker)
+    const response = await fetch('/v1/auth/status')
+    if (response.ok) {
+      return response.json()
+    }
+  } catch {
+    // Backend endpoint not available, try auth helper below
+  }
+
+  // Fall back to auth helper (Docker mode — runs on host)
+  try {
     const response = await fetch(`${AUTH_HELPER_URL}/status`)
     if (!response.ok) {
       return {
@@ -81,11 +107,10 @@ export async function checkAuthStatus(): Promise<AuthStatus> {
       }
     }
     return response.json()
-  } catch (error) {
-    // Auth helper not running - should start automatically with npm run dev
+  } catch {
     return {
       authenticated: false,
-      message: `Auth helper not responding. Try restarting with: npm run dev`,
+      message: 'Could not check authentication status',
     }
   }
 }
@@ -93,10 +118,20 @@ export async function checkAuthStatus(): Promise<AuthStatus> {
 /**
  * Trigger Globus Compute authentication
  *
- * This calls the auth helper server which runs on the HOST machine.
- * The auth helper CAN open a browser (Docker cannot).
+ * Tries the backend endpoint first (/v1/auth/globus), which works in desktop
+ * mode since the backend runs on the same machine and can open the browser.
  *
- * FLOW:
+ * Falls back to the auth helper server (localhost:8765) for Docker mode,
+ * where the backend is inside a container and CANNOT open browsers.
+ *
+ * DESKTOP MODE FLOW:
+ * 1. React calls POST /v1/auth/globus
+ * 2. Backend calls authenticate_with_browser_callback()
+ * 3. Browser opens with Globus login page
+ * 4. User logs in, credentials saved to ~/.globus_compute
+ * 5. Success returned to React
+ *
+ * DOCKER MODE FLOW:
  * 1. React calls POST http://localhost:8765/auth
  * 2. Auth helper imports globus_auth module
  * 3. Auth helper calls authenticate_with_browser_callback()
@@ -105,11 +140,21 @@ export async function checkAuthStatus(): Promise<AuthStatus> {
  * 6. Auth helper tells Docker middleware to reload credentials
  * 7. Success returned to React
  *
- * PREREQUISITE: Start auth helper with: python frontends/react/auth_server.py
+ * PREREQUISITE (Docker only): Start auth helper with: python frontends/react/auth_server.py
  */
 export async function authenticateGlobus(): Promise<AuthResult> {
+  // Try backend endpoint first (desktop mode — backend can open browser)
   try {
-    // Call the auth helper server (runs on host, can open browser)
+    const response = await fetch('/v1/auth/globus', { method: 'POST' })
+    if (response.ok) {
+      return response.json()
+    }
+  } catch {
+    // Backend endpoint not available, try auth helper below
+  }
+
+  // Fall back to auth helper (Docker mode — runs on host, can open browser)
+  try {
     const response = await fetch(`${AUTH_HELPER_URL}/auth`, {
       method: 'POST',
     })
@@ -120,11 +165,10 @@ export async function authenticateGlobus(): Promise<AuthResult> {
       }
     }
     return response.json()
-  } catch (error) {
-    // Auth helper not running - should start automatically with npm run dev
+  } catch {
     return {
       success: false,
-      message: `Auth helper not responding. Try restarting with: npm run dev`,
+      message: 'Could not reach authentication service',
     }
   }
 }

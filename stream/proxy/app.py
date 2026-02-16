@@ -37,6 +37,7 @@ from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from globus_sdk import GlobusAPIError
 
+from stream.middleware.config import MODEL_CONTEXT_LIMITS
 from stream.middleware.core.globus_compute_client import GlobusComputeClient
 
 # =========================================================================
@@ -134,7 +135,8 @@ async def proxy_chat_completions(request: Request):
     #
     # CONTEXT WINDOW BASICS:
     # LLMs have a fixed "context window" - the total tokens they can process.
-    # For Qwen2.5-1.5B on Lakeshore, the context window is 8192 tokens.
+    # For Qwen2.5-1.5B on Lakeshore, the context window is configured via
+    # --max-model-len in the vLLM SLURM script.
     #
     # The constraint: input_tokens + output_tokens <= context_window
     #   - input_tokens = your messages (system prompt + conversation history)
@@ -143,27 +145,35 @@ async def proxy_chat_completions(request: Request):
     # TOKEN TO WORD CONVERSION (rough estimate):
     #   - 1 token ≈ 0.75 words (or ~4 characters)
     #   - 1000 tokens ≈ 750 words
-    #   - 8192 tokens ≈ 6,100 words total context
+    #   - 32768 tokens ≈ 24,500 words total context
     #
-    # WHY 1024 TOKENS (15%) IS A GOOD DEFAULT FOR OUTPUT:
+    # SINGLE SOURCE OF TRUTH — MODEL_CONTEXT_LIMITS in config.py:
     # =========================================================================
-    # In a chat application, conversation history grows over time, but individual
-    # responses are typically short (100-500 tokens for most answers).
+    # The default max_tokens comes from the "reserve_output" field in
+    # MODEL_CONTEXT_LIMITS (defined in config.py). This is the SAME config
+    # used by context_window.py (input validation) and litellm_direct.py
+    # (desktop mode). Having one definition prevents mismatches where
+    # different files use different defaults (e.g., 512 vs 1024 vs 2048).
     #
-    # With 8192 context and max_tokens=1024:
-    #   - ~7000 tokens for conversation history (85%) ≈ 5,250 words of chat
-    #   - ~1000 tokens for model response (15%) ≈ 750 words per response
+    #   config.py:  "lakeshore-qwen": {"total": 32768, "reserve_output": 2048}
+    #                                                    ↑ used as max_tokens
+    #
+    # With 32768 context and reserve_output=2048:
+    #   - ~30720 tokens for conversation history ≈ 23,000 words of chat
+    #   - ~2048 tokens for model response ≈ 1,500 words per response
     #
     # This allows:
     #   - Long conversations with many back-and-forth messages
-    #   - Sufficient response length for detailed answers (750 words is plenty)
+    #   - Sufficient response length for detailed answers
     #   - Maximizes available space for conversation context
     #   - Avoids "max_tokens too large" errors as history grows
     #
     # If a user explicitly requests a larger max_tokens, we use their value.
     # vLLM will return an error if input + max_tokens > context_window.
     # =========================================================================
-    max_tokens = body.get("max_tokens", 1024)
+    lakeshore_limits = MODEL_CONTEXT_LIMITS.get("lakeshore-qwen", {})
+    default_max_tokens = lakeshore_limits.get("reserve_output", 2048)
+    max_tokens = body.get("max_tokens", default_max_tokens)
 
     logger.info(
         f"Proxy request: model={model}, messages={len(messages)}, stream={stream}, mode={'globus' if USE_GLOBUS_COMPUTE else 'ssh'}"

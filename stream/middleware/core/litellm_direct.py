@@ -40,7 +40,7 @@ import yaml
 from fastapi import HTTPException
 
 import stream.proxy.app as _proxy_app
-from stream.middleware.config import LAKESHORE_PROXY_URL, OLLAMA_BASE_URL
+from stream.middleware.config import LAKESHORE_PROXY_URL, MODEL_CONTEXT_LIMITS, OLLAMA_BASE_URL
 
 logger = logging.getLogger(__name__)
 
@@ -239,10 +239,32 @@ async def _forward_lakeshore(
     # submit_inference sends the request to UIC's Lakeshore HPC cluster
     # and waits for the vLLM response (using asyncio.to_thread internally
     # so it doesn't block the event loop).
+    #
+    # max_tokens = how many tokens the model is allowed to generate.
+    # We read this from MODEL_CONTEXT_LIMITS (defined in config.py) where
+    # each model has a "reserve_output" field — that's the number of tokens
+    # reserved for the model's response. Without passing this, submit_inference
+    # defaults to 512, which truncates most responses mid-sentence.
+    #
+    # Example from config.py:
+    #   "lakeshore-qwen": {"total": 32768, "reserve_output": 2048}
+    #   → max_tokens = 2048 (enough for ~1 page of text)
+    #
+    model_limits = MODEL_CONTEXT_LIMITS.get(model, {})
+    max_tokens = model_limits.get("reserve_output", 2048)
+
     result = await gc.submit_inference(
         messages=messages,
         temperature=temperature,
         model=vllm_model,
+        max_tokens=max_tokens,
+    )
+
+    # Log the raw result for debugging (truncated to avoid flooding logs)
+    result_preview = str(result)[:500] if result else "None"
+    logger.info(
+        f"[{correlation_id}] Lakeshore raw result: {result_preview}",
+        extra={"correlation_id": correlation_id},
     )
 
     # Check for errors from Globus/vLLM
@@ -260,13 +282,22 @@ async def _forward_lakeshore(
     # We split the content into word-by-word SSE events — the same format
     # that litellm streaming would produce. This way streaming.py handles
     # it identically to any other tier.
-    choices = result.get("choices", [])
+    choices = result.get("choices", []) if isinstance(result, dict) else []
     if not choices:
+        logger.warning(
+            f"[{correlation_id}] Lakeshore returned no choices. Result type: {type(result).__name__}",
+            extra={"correlation_id": correlation_id},
+        )
         yield "data: [DONE]"
         return
 
     content = choices[0].get("message", {}).get("content", "")
     usage = result.get("usage", {})
+
+    logger.info(
+        f"[{correlation_id}] Lakeshore content length: {len(content)}, usage: {usage}",
+        extra={"correlation_id": correlation_id},
+    )
 
     # Yield content word by word as SSE delta chunks
     if content:

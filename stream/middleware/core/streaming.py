@@ -43,6 +43,48 @@ MAX_FALLBACK_ATTEMPTS = 3
 CHUNK_GAP_WARNING_SECONDS = 5.0
 
 
+# =============================================================================
+# SENTINEL VALUE
+# =============================================================================
+# A sentinel is a special unique object used as a signal. Here it means
+# "the generator has no more items to give." We use this instead of raising
+# an exception because asyncio Tasks don't handle StopAsyncIteration well.
+_EXHAUSTED = object()
+
+
+async def _safe_anext(async_gen):
+    """
+    Safely get the next item from an async generator.
+
+    WHAT IS __anext__()?
+    --------------------
+    In Python, generators produce items one at a time. For async generators
+    (used with "async for"), __anext__() is the method that fetches the next
+    item. Think of it like pressing "next" on a music playlist:
+
+        __anext__() → returns the next chunk of data
+        __anext__() → returns the next chunk of data
+        __anext__() → raises StopAsyncIteration (playlist is over!)
+
+    WHY THIS WRAPPER?
+    -----------------
+    When the generator runs out of items, __anext__() raises StopAsyncIteration.
+    But asyncio Tasks (background jobs) can't handle this exception properly —
+    they convert it to a RuntimeError. So instead of letting it raise, we catch
+    it and return the _EXHAUSTED sentinel, which is easier to check:
+
+        result = await _safe_anext(gen)
+        if result is _EXHAUSTED:
+            # Generator is done, no more data
+        else:
+            # result is the actual chunk of data
+    """
+    try:
+        return await async_gen.__anext__()
+    except StopAsyncIteration:
+        return _EXHAUSTED
+
+
 async def stream_with_gap_warnings(
     generator: AsyncGenerator[str, None],
     tier: str,
@@ -57,16 +99,51 @@ async def stream_with_gap_warnings(
     users see the UI freeze with no feedback. This feels broken.
 
     With gap warnings, after 5 seconds of no data, we send:
-    ⚠️ "Cloud is taking longer than usual, please wait..."
+    "Cloud is taking longer than usual, please wait..."
 
     This tells the user "we know it's slow, we're working on it" - building trust.
 
     How it works:
     -------------
-    1. Wait for next chunk with a 5-second timeout
-    2. If chunk arrives → yield it, reset timer
-    3. If timeout → send warning event, then continue waiting
-    4. The underlying httpx 10s read timeout is the hard limit
+    1. Create a Task for the next chunk (a background job that keeps running)
+    2. Wait up to 5 seconds for the task to finish
+    3. If chunk arrives → yield it, create a new task for the next chunk
+    4. If 5 seconds pass with no chunk → send a warning to the user,
+       but keep the SAME task alive (don't cancel the request!)
+
+    THE BUG WE FIXED (asyncio.wait_for vs asyncio.wait):
+    ----------------------------------------------------
+    The old code used asyncio.wait_for(), which has a critical side effect:
+    when the timeout fires, it CANCELS the underlying operation. For cloud
+    and local tiers this was fine (chunks arrive in <1 second). But for
+    Lakeshore, the first chunk takes ~15 seconds because Globus Compute
+    needs to:
+      1. Serialize the function → send to HPC cluster → run on GPU → return
+      2. This whole round-trip takes 10-20 seconds
+
+    With asyncio.wait_for(timeout=5), after 5 seconds it would CANCEL the
+    Globus Compute call, killing the request → empty response, 0 tokens.
+
+    The fix uses asyncio.wait() instead. The key difference:
+      - asyncio.wait_for(task, timeout=5):  CANCELS the task after 5 seconds
+      - asyncio.wait({task}, timeout=5):    Returns empty set, task KEEPS RUNNING
+
+    With asyncio.wait(), after 5 seconds we just check "is it done yet?"
+    If not, we send a warning and check again in another 5 seconds. The
+    Globus Compute call continues running undisturbed in the background.
+
+    WHAT IS A TASK?
+    ---------------
+    asyncio.ensure_future() wraps a coroutine (async function call) into a
+    Task — a background job managed by Python's event loop. The Task runs
+    independently and can be checked later:
+
+        task = asyncio.ensure_future(some_async_function())
+        # ... do other things ...
+        result = task.result()  # Get the result when ready
+
+    Think of it like placing a food order: you get a ticket (Task), do
+    other things, and check back later when it's ready.
 
     Args:
         generator: The original streaming generator (from forward_to_litellm)
@@ -79,20 +156,42 @@ async def stream_with_gap_warnings(
     warning_sent = False
     async_gen = generator.__aiter__()
 
+    # Create a Task (background job) for fetching the next chunk.
+    # This task will keep running even if we timeout waiting for it.
+    next_task = asyncio.ensure_future(_safe_anext(async_gen))
+
     while True:
-        try:
-            # Wait for next chunk, but timeout after 5 seconds
-            chunk = await asyncio.wait_for(
-                async_gen.__anext__(),
-                timeout=CHUNK_GAP_WARNING_SECONDS,
-            )
+        # Wait for the chunk task, but only for 5 seconds.
+        # asyncio.wait() returns two sets: (done_tasks, still_running_tasks)
+        # If the task finishes within 5 seconds → it's in `done`
+        # If 5 seconds pass and it's still running → `done` is empty
+        # IMPORTANT: Unlike wait_for, this does NOT cancel the task!
+        done, _ = await asyncio.wait(
+            {next_task},
+            timeout=CHUNK_GAP_WARNING_SECONDS,
+        )
+
+        if done:
+            # Task completed — the chunk (or exhaustion signal) is ready
+            chunk = next_task.result()
+
+            # Check if the generator has no more items
+            if chunk is _EXHAUSTED:
+                break
+
             # Reset warning flag when we get data (gap ended)
             if warning_sent:
                 warning_sent = False
             yield chunk
 
-        except TimeoutError:
-            # No chunk for 5 seconds - send warning (once per gap)
+            # Create a new task for the NEXT chunk
+            next_task = asyncio.ensure_future(_safe_anext(async_gen))
+
+        else:
+            # Timeout — no chunk arrived within 5 seconds.
+            # The task is still running (NOT cancelled!). For Lakeshore,
+            # this is normal — Globus Compute takes 10-20 seconds.
+            # We send a warning to the user and keep waiting.
             if not warning_sent:
                 warning_sent = True
                 warning_event = {
@@ -108,11 +207,7 @@ async def stream_with_gap_warnings(
                     f"[{correlation_id}] Chunk gap warning: no data for {CHUNK_GAP_WARNING_SECONDS}s on {tier}",
                     extra={"correlation_id": correlation_id, "tier": tier},
                 )
-            # Continue waiting - the httpx 10s timeout will eventually catch true hangs
-
-        except StopAsyncIteration:
-            # Generator exhausted - we're done
-            break
+            # next_task is still running — loop back and check again in 5 seconds
 
 
 async def create_streaming_response(

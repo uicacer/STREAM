@@ -83,10 +83,22 @@ async def shutdown():
 
     This function runs once when the server stops.
     It performs cleanup tasks:
-    1. Close database connections
-    2. Log shutdown message
+    1. Close Globus Compute Executor (AMQP connection)
+    2. Stop background health monitor
+    3. Close database connections
     """
     logger.info(f"👋 {SERVICE_NAME} shutting down...")
+
+    # Close the persistent Globus Compute Executor.
+    # This properly closes the AMQP connection to Globus cloud instead of
+    # letting it die when the process exits.
+    try:
+        import stream.proxy.app as _proxy_app
+
+        if _proxy_app.globus_client is not None:
+            _proxy_app.globus_client.shutdown()
+    except Exception as e:
+        logger.debug(f"Globus client shutdown (best effort): {e}")
 
     # Stop background health monitor
     health_monitor.stop()
