@@ -144,7 +144,7 @@ def judge_complexity_with_llm(
 
             if response.status_code != 200:
                 error_msg = f"HTTP {response.status_code}"
-                print(f"⚠️ JUDGE [{strategy}]: Failed with status {response.status_code}")
+                logger.warning(f"JUDGE [{strategy}]: Failed with status {response.status_code}")
                 return None, error_msg, 0.0, None
 
             data = response.json()
@@ -172,24 +172,24 @@ def judge_complexity_with_llm(
             judgment = "high"
         else:
             error_msg = f"Unexpected response: {judgment_text}"
-            print(f"⚠️ JUDGE [{strategy}]: {error_msg}")
+            logger.warning(f"JUDGE [{strategy}]: {error_msg}")
             return None, error_msg, judge_cost, tokens
 
         # Cache the judgment
         _cache_judgment(query, judgment)
 
         cost_str = f" (${judge_cost:.6f})" if judge_cost > 0 else ""
-        print(f"🔍 JUDGE [{strategy}]: LLM classified as → {judgment.upper()}{cost_str}")
+        logger.info(f"JUDGE [{strategy}]: LLM classified as → {judgment.upper()}{cost_str}")
         return judgment, None, judge_cost, tokens
 
     except httpx.TimeoutException:
         error_msg = f"Timeout after {timeout}s"
-        print(f"⚠️ JUDGE [{strategy}]: {error_msg}")
+        logger.warning(f"JUDGE [{strategy}]: {error_msg}")
         return None, error_msg, 0.0, None
 
     except Exception as e:
         error_msg = str(e)
-        print(f"⚠️ JUDGE [{strategy}]: Error: {error_msg}")
+        logger.warning(f"JUDGE [{strategy}]: Error: {error_msg}")
         return None, error_msg, 0.0, None
 
 
@@ -206,26 +206,26 @@ def judge_complexity_with_keywords(query: str) -> tuple[str, str | None]:
     for kw in COMPLEXITY_KEYWORDS["low"]:
         if kw in query_lower:
             logger.debug(f"Matched LOW keyword: '{kw}'")
-            print(f"🔍 JUDGE [keywords]: Matched '{kw}' → LOW")
+            logger.info(f"JUDGE [keywords]: Matched '{kw}' → LOW")
             return "low", kw
 
     # Then check MEDIUM
     for kw in COMPLEXITY_KEYWORDS["medium"]:
         if kw in query_lower:
             logger.debug(f"Matched MEDIUM keyword: '{kw}'")
-            print(f"🔍 JUDGE [keywords]: Matched '{kw}' → MEDIUM")
+            logger.info(f"JUDGE [keywords]: Matched '{kw}' → MEDIUM")
             return "medium", kw
 
     # Then check HIGH
     for kw in COMPLEXITY_KEYWORDS["high"]:
         if kw in query_lower:
             logger.debug(f"Matched HIGH keyword: '{kw}'")
-            print(f"🔍 JUDGE [keywords]: Matched '{kw}' → HIGH")
+            logger.info(f"JUDGE [keywords]: Matched '{kw}' → HIGH")
             return "high", kw
 
     # Default: medium (safer to overestimate)
     logger.debug("No keywords matched, defaulting to MEDIUM")
-    print("🔍 JUDGE [default]: No keywords matched → MEDIUM")
+    logger.info("JUDGE [default]: No keywords matched → MEDIUM")
     return "medium", None
 
 

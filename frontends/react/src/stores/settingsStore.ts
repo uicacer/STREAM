@@ -86,7 +86,7 @@ export const useSettingsStore = create<SettingsState>()(
       tier: 'auto',
       judgeStrategy: 'ollama-3b',  // Safe fallback (matches backend default)
       temperature: 0.7,
-      theme: 'system',
+      theme: 'dark',
       cloudProvider: 'cloud-claude',  // Default cloud provider
       _initialized: false,
 
@@ -158,10 +158,10 @@ export const useSettingsStore = create<SettingsState>()(
       /**
        * Version for migrations - increment when storage format changes
        */
-      version: 2,
+      version: 3,
       /**
-       * Migration: Clean up old tier values from localStorage
-       * This runs automatically when version changes
+       * Migration: Runs automatically when storage version changes.
+       * Each version upgrade fixes a specific issue with persisted state.
        */
       migrate: (persistedState: unknown, version: number) => {
         const state = persistedState as Record<string, unknown>
@@ -174,6 +174,18 @@ export const useSettingsStore = create<SettingsState>()(
           return {
             ...rest,
             _initialized: false, // Re-fetch backend defaults
+          }
+        }
+
+        if (version < 3) {
+          // v2 → v3: Switch from system theme to dark theme.
+          // The app now defaults to dark mode for a comfortable reading
+          // experience. This overrides any previously saved 'system' or
+          // 'light' preference so existing users get the new default.
+          console.log('[Settings] Migration v3: switching to dark theme')
+          return {
+            ...state,
+            theme: 'dark',
           }
         }
 

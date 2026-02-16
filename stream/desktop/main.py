@@ -39,7 +39,10 @@ Or after PyInstaller packaging (Phase 8):
 """
 
 import logging
+import os
+import signal
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -115,6 +118,105 @@ def is_port_in_use(host: str, port: int) -> bool:
             return False  # Bind succeeded → port is free
         except OSError:
             return True  # Bind failed → port is already taken
+
+
+def _free_stale_port(host: str, port: int) -> bool:
+    """
+    Auto-recover from a stale process blocking our port.
+
+    WHY THIS EXISTS:
+    ----------------
+    When the desktop app crashes or is force-quit, the old FastAPI/uvicorn
+    process can linger as an orphan. On next launch, port 5000 is still
+    occupied and the app refuses to start. Making the user manually run
+    `lsof` and `kill` is a terrible UX for a desktop app — it should just
+    clean up after itself.
+
+    SAFETY:
+    -------
+    We only kill Python processes (likely our own stale server). If something
+    unexpected is on the port (e.g., Docker, a different app), we leave it
+    alone and let the caller show the manual error message.
+
+    Returns:
+        True if the port was successfully freed, False otherwise.
+    """
+    try:
+        # lsof -ti :5000 → returns just PID(s) listening on the port.
+        # -t = terse (PIDs only, no headers), -i = filter by internet address.
+        result = subprocess.run(
+            ["lsof", "-ti", f":{port}"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+
+        pids = result.stdout.strip()
+        if not pids:
+            # Port is in TIME_WAIT state (OS hasn't fully released it yet).
+            # Brief wait usually resolves this.
+            time.sleep(2)
+            return not is_port_in_use(host, port)
+
+        killed_any = False
+        for pid_str in pids.splitlines():
+            pid = int(pid_str.strip())
+
+            if pid == os.getpid():
+                continue
+
+            # Only kill processes that look like our own stale STREAM server.
+            # If something else is on this port (e.g., another app), leave it alone.
+            try:
+                ps_result = subprocess.run(
+                    ["ps", "-p", str(pid), "-o", "command="],
+                    capture_output=True,
+                    text=True,
+                    timeout=3,
+                )
+                cmd = ps_result.stdout.strip().lower()
+                is_ours = "stream" in cmd or "uvicorn" in cmd or "python" in cmd
+            except Exception:
+                is_ours = False
+
+            if not is_ours:
+                print(f"  PID {pid} is not a STREAM process — skipping")
+                continue
+
+            os.kill(pid, signal.SIGTERM)
+            print(f"  Sent SIGTERM to stale process (PID {pid})")
+            killed_any = True
+
+        if not killed_any:
+            return False
+
+        # Give the process time to shut down gracefully.
+        time.sleep(2.0)
+
+        if not is_port_in_use(host, port):
+            return True
+
+        # SIGTERM wasn't enough (e.g., stuck process). Escalate to SIGKILL.
+        for pid_str in pids.splitlines():
+            pid = int(pid_str.strip())
+            if pid == os.getpid():
+                continue
+            try:
+                os.kill(pid, signal.SIGKILL)
+                print(f"  Force-killed stale process (PID {pid})")
+            except ProcessLookupError:
+                pass  # Already dead from SIGTERM
+
+        time.sleep(1.0)
+        return not is_port_in_use(host, port)
+
+    except (subprocess.TimeoutExpired, ValueError, ProcessLookupError, PermissionError) as e:
+        # TimeoutExpired: lsof hung (unlikely)
+        # ValueError: PID wasn't a number (malformed lsof output)
+        # ProcessLookupError: process already died between lsof and kill
+        # PermissionError: process belongs to another user (not ours)
+        logger.warning(f"Could not free port {port}: {e}")
+        return False
 
 
 def start_fastapi_server():
@@ -221,25 +323,27 @@ def main():
         print("The app will still work with cloud models (requires API keys)")
 
     # -------------------------------------------------------------------------
-    # STEP 5: Check for port conflicts BEFORE starting the server
+    # STEP 5: Check for port conflicts and auto-recover if possible
     # -------------------------------------------------------------------------
-    # If another process (like Docker's middleware container or a stale Python
-    # process from a previous run) is already listening on our port, uvicorn
-    # would silently fail. We'd then connect to the OLD server and see wrong
-    # content (e.g., JSON instead of the React UI). Catching this early gives
-    # the user a clear error message instead of confusing behavior.
+    # If a stale process from a previous session is hogging our port, kill it
+    # automatically. Desktop apps should clean up after themselves — making the
+    # user manually run lsof/kill is bad UX. If auto-recovery fails (e.g.,
+    # Docker is running), show the manual instructions as a fallback.
     if is_port_in_use(MIDDLEWARE_HOST, MIDDLEWARE_PORT):
-        print(f"ERROR: Port {MIDDLEWARE_PORT} is already in use on {MIDDLEWARE_HOST}")
-        print()
-        print("Common causes:")
-        print("  1. Docker's stream-middleware container is running")
-        print("     Fix: docker compose down")
-        print("  2. A previous STREAM desktop session didn't shut down cleanly")
-        print(f"     Fix: lsof -i :{MIDDLEWARE_PORT}  (find the PID, then kill it)")
-        print()
-        print("Stop the other process and try again.")
-        stop_ollama()
-        sys.exit(1)
+        print(f"Port {MIDDLEWARE_PORT} is in use — cleaning up stale process...")
+        if _free_stale_port(MIDDLEWARE_HOST, MIDDLEWARE_PORT):
+            print(f"Port {MIDDLEWARE_PORT} freed successfully")
+        else:
+            print(f"ERROR: Could not free port {MIDDLEWARE_PORT}")
+            print()
+            print("Common causes:")
+            print("  1. Docker's stream-middleware container is running")
+            print("     Fix: docker compose down")
+            print("  2. A process you don't want killed is using this port")
+            print(f"     Fix: lsof -i :{MIDDLEWARE_PORT}  (find it, then kill manually)")
+            print()
+            stop_ollama()
+            sys.exit(1)
 
     # -------------------------------------------------------------------------
     # STEP 6: Start FastAPI in a background thread

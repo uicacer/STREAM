@@ -164,28 +164,40 @@ export const useHealthStore = create<HealthState>((set, get) => ({
 
   // Start polling
   startPolling: () => {
-    // Fetch immediately
-    get().fetchHealth()
+    const beginPolling = () => {
+      // Fetch immediately
+      get().fetchHealth()
 
-    // Stop any existing interval
-    if (pollInterval) {
-      clearInterval(pollInterval)
+      // Stop any existing interval
+      if (pollInterval) {
+        clearInterval(pollInterval)
+      }
+
+      // Start new interval
+      pollInterval = setInterval(() => {
+        get().fetchHealth()
+      }, POLL_INTERVAL)
+
+      // Also refresh on window focus
+      const handleFocus = () => {
+        get().fetchHealth()
+      }
+      window.addEventListener('focus', handleFocus)
+
+      // Store cleanup function
+      ;(window as unknown as { _healthCleanup?: () => void })._healthCleanup = () => {
+        window.removeEventListener('focus', handleFocus)
+      }
     }
 
-    // Start new interval
-    pollInterval = setInterval(() => {
-      get().fetchHealth()
-    }, POLL_INTERVAL)
-
-    // Also refresh on window focus
-    const handleFocus = () => {
-      get().fetchHealth()
-    }
-    window.addEventListener('focus', handleFocus)
-
-    // Store cleanup function
-    ;(window as unknown as { _healthCleanup?: () => void })._healthCleanup = () => {
-      window.removeEventListener('focus', handleFocus)
+    // Wait for settingsStore to hydrate from localStorage before the first poll.
+    // Without this, the first poll uses the default cloudProvider ('cloud-claude')
+    // instead of the user's saved selection (e.g., 'cloud-gpt'), causing the
+    // backend to test the wrong provider and report a false auth error.
+    if (useSettingsStore.persist.hasHydrated()) {
+      beginPolling()
+    } else {
+      useSettingsStore.persist.onFinishHydration(beginPolling)
     }
   },
 

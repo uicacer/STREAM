@@ -23,6 +23,7 @@ The warm ping also detects real availability issues:
 import asyncio
 import logging
 import time
+from datetime import datetime
 
 import httpx
 
@@ -32,8 +33,9 @@ from stream.middleware.config import (
     LITELLM_BASE_URL,
     OLLAMA_BASE_URL,
     OLLAMA_MODELS,
+    STREAM_MODE,
 )
-from stream.middleware.core.tier_health import _tier_health
+from stream.middleware.core.tier_health import _determine_error_type, _tier_health
 
 logger = logging.getLogger(__name__)
 
@@ -197,28 +199,33 @@ async def warm_up_all_tiers():
     Warm up all tiers in parallel.
 
     Sends a small test request to each tier to:
-    - Pre-load models
-    - Test real availability
-    - Establish connections
+    - Pre-load models (especially Ollama — first inference loads model into GPU)
+    - Test real availability (proxy "healthy" ≠ inference working)
+    - Establish connections early
 
-    Updates _tier_health with actual inference test results.
+    NOTE: Cloud is skipped in desktop mode because there's no LiteLLM HTTP
+    gateway — cloud calls go through litellm as a library. The warm ping would
+    always fail and overwrite the real health status from check_all_tiers().
     """
     print("\n🔥 Warming up inference tiers...")
     print("=" * 60)
 
-    # Run all warm pings in parallel
-    results = await asyncio.gather(
-        warm_ping_local(),
-        warm_ping_lakeshore(),
-        warm_ping_cloud(),
-        return_exceptions=True,
-    )
+    # In desktop mode, only warm up LOCAL (Ollama). Lakeshore and Cloud warm pings
+    # both route through LITELLM_BASE_URL (port 4000) which doesn't exist in desktop
+    # mode — the app uses litellm as a library instead. Their health was already
+    # checked by check_all_tiers() which uses the correct desktop-mode paths.
+    if STREAM_MODE == "desktop":
+        warm_pings = [warm_ping_local()]
+        tier_names = ["local"]
+        print("⏭️  LAKESHORE, CLOUD: Skipped (desktop mode — no HTTP gateway)")
+    else:
+        warm_pings = [warm_ping_local(), warm_ping_lakeshore(), warm_ping_cloud()]
+        tier_names = ["local", "lakeshore", "cloud"]
 
-    tier_names = ["local", "lakeshore", "cloud"]
+    results = await asyncio.gather(*warm_pings, return_exceptions=True)
 
     for tier, result in zip(tier_names, results, strict=False):
         if isinstance(result, Exception):
-            # Unexpected exception
             print(f"❌ {tier.upper()}: Exception - {result}")
             _update_tier_health(tier, False, str(result))
         else:
@@ -236,10 +243,9 @@ async def warm_up_all_tiers():
 
 def _update_tier_health(tier: str, available: bool, error: str | None):
     """Update tier health status after warm ping."""
-    from datetime import datetime
-
     _tier_health[tier] = {
         "available": available,
         "last_check": datetime.now(),
         "error": error,
+        "error_type": _determine_error_type(error),
     }

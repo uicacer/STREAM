@@ -506,15 +506,35 @@ async def create_streaming_response(
             error_str = str(e.detail).lower()
             is_auth_error = any(
                 keyword in error_str
-                for keyword in ["authentication", "401", "auth required", "globus"]
+                for keyword in [
+                    "authentication failed",
+                    "authentication required",
+                    "auth_subscription",
+                    "auth required",
+                    "auth_required",
+                    "invalid api key",
+                    "api key",
+                ]
             )
+            # NOTE: We don't match bare "globus" — the word appears in file
+            # paths of ANY Globus Compute error (e.g., deserialization errors),
+            # not just auth errors. Only match specific auth phrases.
 
             # Check if this is a tier availability issue (vs. user error)
             # NOTE: Auth errors are NOT tier failures - they need user action
             # so we don't fallback, we prompt the user to authenticate
             is_tier_failure = any(
                 keyword in error_str
-                for keyword in ["connection", "unavailable", "timeout", "500", "503", "504"]
+                for keyword in [
+                    "connection",
+                    "unavailable",
+                    "timeout",
+                    "inference failed",
+                    "deserialization",
+                    "500",
+                    "503",
+                    "504",
+                ]
             )
 
             # Should we attempt fallback?

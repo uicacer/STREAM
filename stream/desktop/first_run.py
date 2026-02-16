@@ -184,6 +184,35 @@ def run_first_run_setup() -> None:
         print()
 
     # -------------------------------------------------------------------------
+    # Step 2.5: Copy .env to user config directory
+    # -------------------------------------------------------------------------
+    # The project root .env file has API keys and other settings. In the
+    # bundled STREAM.app, the project root isn't accessible — the app can
+    # only read from ~/.stream/. So we copy .env there on first run.
+    #
+    # This only happens once (first run). After that, the user edits
+    # ~/.stream/.env directly to add or update their API keys.
+    user_env = STREAM_HOME / ".env"
+    project_env = Path(__file__).resolve().parent.parent.parent / ".env"
+
+    if not user_env.exists() and project_env.exists():
+        shutil.copy2(project_env, user_env)
+        print(f"  Copied API keys to: {user_env}")
+    elif not user_env.exists():
+        # No project .env found (fresh install from bundled app).
+        # Create a template so the user knows where to put their keys.
+        user_env.write_text(
+            "# STREAM API Keys\n"
+            "# Add your cloud provider API keys here.\n"
+            "# The app will load these automatically on startup.\n"
+            "#\n"
+            "# ANTHROPIC_API_KEY=sk-ant-...\n"
+            "# OPENAI_API_KEY=sk-...\n"
+        )
+        print(f"  Created API key template: {user_env}")
+        print("  Edit this file to add your cloud API keys.")
+
+    # -------------------------------------------------------------------------
     # Step 3: Check for API keys
     # -------------------------------------------------------------------------
     print()

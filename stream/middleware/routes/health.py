@@ -19,6 +19,7 @@ from stream.middleware.core.tier_health import (
     check_all_tiers,
     get_available_tiers,
     is_tier_available,
+    set_active_cloud_provider,
 )
 
 logger = logging.getLogger(__name__)
@@ -56,7 +57,11 @@ async def get_tier_health(cloud_provider: str | None = None):
     NOTE: This calls is_tier_available() which does a FRESH check if the
     cached status is stale. This ensures the frontend gets up-to-date info.
     """
-    print(f"🔍 HEALTH ENDPOINT: called with cloud_provider={cloud_provider}")
+    # Remember the user's cloud provider selection so the background monitor
+    # and get_available_tiers() test the RIGHT provider (not the default).
+    if cloud_provider:
+        set_active_cloud_provider(cloud_provider)
+
     tiers = {}
     for tier_name in ["local", "lakeshore", "cloud"]:
         try:
@@ -96,7 +101,6 @@ async def get_tier_health(cloud_provider: str | None = None):
                 ),  # "auth", "connection", "timeout", or "unknown"
                 "last_check": last_check,
             }
-            print(f"✅ HEALTH: {tier_name} -> available={is_available}")
         except Exception as e:
             # Log the error and provide a safe fallback
             logger.error(f"Error checking health for {tier_name}: {e}", exc_info=True)

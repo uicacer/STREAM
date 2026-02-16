@@ -13,12 +13,14 @@ This avoids the need for SSH port forwarding by using Globus Compute's
 managed networking infrastructure.
 """
 
+import asyncio
 import logging
 import os
 from typing import Any
 
 from globus_compute_sdk import Executor
-from globus_compute_sdk.serialize import CombinedCode, ComputeSerializer
+from globus_compute_sdk.errors.error_types import DeserializationError, TaskExecutionFailed
+from globus_compute_sdk.serialize import AllCodeStrategies, ComputeSerializer
 from globus_sdk import GlobusAPIError
 from globus_sdk.login_flows.command_line_login_flow_manager import CommandLineLoginFlowEOFError
 
@@ -44,97 +46,81 @@ GLOBUS_TASK_TIMEOUT = int(os.getenv("GLOBUS_TASK_TIMEOUT", "120"))
 # =============================================================================
 # REMOTE FUNCTION (Executes on Lakeshore)
 # =============================================================================
+#
+# This function is serialized and sent to the Lakeshore HPC endpoint via Globus
+# Compute. It must be completely self-contained because it executes in an isolated
+# Python environment on the remote machine. All imports (like `requests`) MUST be
+# inside the function body — module-level imports don't exist on the endpoint.
+#
+# WHY exec() FROM A SOURCE STRING:
+# PyInstaller bundles .pyc bytecode, not .py source files. That bytecode contains
+# references to PyInstaller's internal import system (pyimod02_importers). When
+# Globus Compute serializes a function for the remote endpoint, it captures the
+# bytecode. The endpoint doesn't have PyInstaller, so deserialization fails.
+#
+# By defining the function from a source string via exec() at runtime, Python's
+# standard compiler produces clean bytecode with no PyInstaller references.
+#
+# Previous attempts that failed:
+# 1. CombinedCode strategy → inspect.getsource() fails (no .py files in bundle)
+# 2. AllCodeStrategies with normal def → dill by-reference → "No module named 'stream'"
+# 3. __module__ = '__main__' → dill by-value → "No module named 'pyimod02_importers'"
+# 4. exec() from source string → clean bytecode, works everywhere ✓
 
-
-def remote_vllm_inference(
-    vllm_url: str,
-    model: str,
-    messages: list[dict],
-    temperature: float,
-    max_tokens: int,
-    stream: bool = False,
-) -> dict[str, Any]:
-    """
-    Remote function that executes on Lakeshore via Globus Compute.
-
-    This function is serialized and sent to the Globus endpoint, where it:
-    1. Makes an HTTP request to the local vLLM server on Lakeshore
-    2. Returns the inference result back to the middleware
-
-    IMPORTANT: This function must be self-contained - it cannot reference
-    external variables or imports from outside the function body.
-
-    Args:
-        vllm_url: URL of vLLM server (e.g., "http://ga-001:8000")
-        model: Model identifier (e.g., "Qwen/Qwen2.5-1.5B-Instruct")
-        messages: Chat messages in OpenAI format
-        temperature: Sampling temperature
-        max_tokens: Maximum tokens to generate
-        stream: Whether to stream the response (currently only non-streaming supported)
-
-    Returns:
-        Dictionary containing the vLLM response in OpenAI format
-
-    Raises:
-        Exception: If vLLM request fails
-    """
-    # Import inside the function so it's available when executed remotely
-    import requests
-
-    # Construct the full endpoint URL
-    endpoint = f"{vllm_url}/v1/chat/completions"
-
-    # Prepare the request payload
-    payload = {
-        "model": model,
-        "messages": messages,
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-        "stream": stream,  # Currently only supporting non-streaming
-    }
-
-    # Make the HTTP request to vLLM
+_REMOTE_FN_SOURCE = """\
+def remote_vllm_inference(vllm_url, model, messages, temperature, max_tokens, stream=False):
     try:
-        response = requests.post(
-            endpoint,
-            json=payload,
-            timeout=60,  # Timeout for the HTTP request itself
-        )
-
-        # Check for errors and capture response body for debugging
-        if response.status_code >= 400:
-            try:
-                error_body = response.json()
-            except Exception:
-                error_body = response.text
-
-            return {
-                "error": f"{response.status_code} Error: {error_body}",
-                "error_type": "HTTPError",
-                "status_code": response.status_code,
-                "response_body": error_body,
-                "request_payload": payload,  # Include for debugging
-            }
-
-        return response.json()
-
-    except requests.exceptions.RequestException as e:
-        # Return error information that can be handled by middleware
-        error_response = None
-        if hasattr(e, "response") and e.response is not None:
-            try:
-                error_response = e.response.json()
-            except Exception:
-                error_response = e.response.text if hasattr(e.response, "text") else str(e.response)
-
-        return {
-            "error": str(e),
-            "error_type": type(e).__name__,
-            "status_code": getattr(e.response, "status_code", None)
-            if hasattr(e, "response")
-            else None,
-            "response_body": error_response,
+        import requests
+        endpoint = f"{vllm_url}/v1/chat/completions"
+        payload = {
+            "model": model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "stream": stream,
         }
+        try:
+            response = requests.post(endpoint, json=payload, timeout=60)
+            if response.status_code >= 400:
+                try:
+                    error_body = response.json()
+                except Exception:
+                    error_body = response.text
+                return {
+                    "error": f"{response.status_code} Error: {error_body}",
+                    "error_type": "HTTPError",
+                    "status_code": response.status_code,
+                    "response_body": error_body,
+                    "request_payload": payload,
+                }
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            error_response = None
+            if hasattr(e, "response") and e.response is not None:
+                try:
+                    error_response = e.response.json()
+                except Exception:
+                    error_response = e.response.text if hasattr(e.response, "text") else str(e.response)
+            return {
+                "error": str(e),
+                "error_type": type(e).__name__,
+                "status_code": getattr(e.response, "status_code", None)
+                if hasattr(e, "response")
+                else None,
+                "response_body": error_response,
+            }
+    except Exception as e:
+        return {
+            "error": f"{type(e).__name__}: {e}",
+            "error_type": type(e).__name__,
+        }
+"""
+
+# Compile and execute the source string to produce a function with clean bytecode.
+# The filename "<remote_vllm_inference>" appears in tracebacks for debugging.
+_ns = {}
+exec(compile(_REMOTE_FN_SOURCE, "<remote_vllm_inference>", "exec"), _ns)
+remote_vllm_inference = _ns["remote_vllm_inference"]
 
 
 # =============================================================================
@@ -371,9 +357,11 @@ class GlobusComputeClient:
             # Create executor and submit task
             # Using context manager ensures proper cleanup
             with Executor(endpoint_id=self.endpoint_id) as gce:
-                # Use CombinedCode serialization to avoid module import issues
-                # This serializes the function code directly instead of pickling
-                gce.serializer = ComputeSerializer(strategy_code=CombinedCode())
+                # AllCodeStrategies tries multiple serialization methods to find one
+                # that works. This is more robust than CombinedCode when there's a
+                # Python version mismatch between the local machine and the endpoint
+                # (e.g., local Python 3.12.12 vs endpoint Python 3.12.3).
+                gce.serializer = ComputeSerializer(strategy_code=AllCodeStrategies())
 
                 # Submit the function to execute remotely
                 future = gce.submit(
@@ -388,8 +376,34 @@ class GlobusComputeClient:
 
                 logger.debug("Waiting for Globus Compute task to complete...")
 
-                # Wait for result with timeout
-                result = future.result(timeout=GLOBUS_TASK_TIMEOUT)
+                # HOW LAKESHORE INFERENCE WORKS (both server and desktop mode):
+                # ============================================================
+                #
+                # 1. gce.submit() sends the inference function to UIC's Lakeshore
+                #    HPC cluster via Globus Compute (a remote execution service).
+                #    The function runs on a GPU node at Lakeshore, calls vLLM,
+                #    and returns the result.
+                #
+                # 2. gce.submit() returns a concurrent.futures.Future — a "ticket"
+                #    for the result. The result isn't ready yet (the GPU is working).
+                #
+                # 3. future.result() blocks until the GPU finishes and sends back
+                #    the result. This can take 5-30+ seconds depending on the query.
+                #
+                # WHY asyncio.to_thread():
+                # ------------------------
+                # future.result() is a BLOCKING call — it freezes the calling thread.
+                # In an async server, that freezes the event loop, which prevents the
+                # server from handling ANY other requests (health polls, the litellm
+                # self-connection in desktop mode, etc.).
+                #
+                # asyncio.to_thread() moves the blocking wait to a background thread,
+                # keeping the event loop free. This is safe for both modes:
+                #   - Server mode:  proxy container stays responsive during Globus wait
+                #   - Desktop mode: main server handles the litellm self-connection
+                #                   while Globus processes on Lakeshore
+                #
+                result = await asyncio.to_thread(future.result, timeout=GLOBUS_TASK_TIMEOUT)
 
                 # Check if the remote function returned an error
                 if isinstance(result, dict) and "error" in result:
@@ -440,6 +454,25 @@ class GlobusComputeClient:
                 "error": "Globus Compute authentication required. Please authenticate.",
                 "error_type": "AuthenticationError",
                 "auth_required": True,
+            }
+
+        except (DeserializationError, TaskExecutionFailed) as e:
+            # TaskExecutionFailed wraps DeserializationError when the SDK can't
+            # decode the result from the endpoint. Most common cause: Python
+            # version mismatch (e.g., local 3.12.12 vs endpoint 3.12.3).
+            # Switching to AllCodeStrategies usually fixes this.
+            logger.error(
+                f"Globus result deserialization failed: {e}",
+                exc_info=True,
+            )
+            return {
+                "error": (
+                    "Lakeshore processed the request but the result couldn't be decoded. "
+                    "This usually means the Python version or globus_compute_sdk version "
+                    "on your machine doesn't match the Lakeshore endpoint. "
+                    "Try: uv pip install --upgrade globus-compute-sdk"
+                ),
+                "error_type": "DeserializationError",
             }
 
         except Exception as e:

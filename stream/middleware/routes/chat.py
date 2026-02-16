@@ -31,6 +31,7 @@ from stream.middleware.config import DEFAULT_JUDGE_STRATEGY, JUDGE_STRATEGIES
 from stream.middleware.core.complexity_judge import judge_complexity
 from stream.middleware.core.query_router import AuthError, get_model_for_tier, get_tier_for_query
 from stream.middleware.core.streaming import create_streaming_response
+from stream.middleware.core.tier_health import set_active_cloud_provider
 from stream.middleware.utils.context_window import check_context_limit
 from stream.middleware.utils.token_estimator import estimate_tokens
 
@@ -294,20 +295,9 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
     # - Query complexity
     # - Tier availability
     try:
-        # Pass cloud_provider to routing so health checks use the ACTUAL provider
-        # the user selected, not the default one.
-        #
-        # Why this matters:
-        # - Health check tests if Cloud tier is available
-        # - Without cloud_provider, it tests with DEFAULT model (e.g., Claude)
-        # - If Claude has auth error but user selected GPT, health check fails
-        # - User gets stuck unable to use Cloud even though GPT works fine
-        #
-        # By passing cloud_provider, the health check tests the RIGHT model,
-        # so switching providers actually works.
-        print(
-            f"🔍 CHAT: Received request - tier={request_body.model}, cloud_provider={request_body.cloud_provider}"
-        )
+        # Remember the user's cloud provider so background monitor tests it too
+        set_active_cloud_provider(request_body.cloud_provider)
+
         routing_result = get_tier_for_query(
             user_query,
             request_body.model,

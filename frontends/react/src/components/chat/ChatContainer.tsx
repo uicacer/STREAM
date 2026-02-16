@@ -219,6 +219,7 @@ export function ChatContainer() {
     ]
 
     setError(null)
+    setAuthError(null) // Clear stale auth error from previous query
 
     try {
       await streamChat(allMessages, settings, {

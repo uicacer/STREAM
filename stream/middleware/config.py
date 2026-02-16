@@ -268,11 +268,12 @@ MODEL_CONTEXT_LIMITS = {
     # Local: 4K limit for faster CPU inference
     # max_input = 4096 - 512 = 3584 tokens (~14KB of text)
     "local-llama-tiny": {"total": 4096, "reserve_output": 512},
-    # "local-llama": {"total": 4096, "reserve_output": 512},
-    "local-llama": {
-        "total": 500,
-        "reserve_output": 100,
-    },  # TEST: Low limit for testing context dialog
+    # Llama 3.2:3b supports 128K context natively. 32K is a practical limit
+    # for desktop — large enough for extended conversations, small enough for
+    # fast Apple Silicon GPU inference. (~2GB model leaves plenty of VRAM.)
+    "local-llama": {"total": 32768, "reserve_output": 2048},
+    # Uncomment below to test context-limit-exceeded error dialog:
+    # "local-llama": {"total": 500, "reserve_output": 100},
     "local-llama-quality": {"total": 4096, "reserve_output": 512},
     # Lakeshore: 32K (runs on campus GPU, Qwen supports 32K natively)
     # max_input = 32768 - 2048 = 30720 tokens (~120KB of text)

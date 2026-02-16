@@ -15,7 +15,6 @@ from stream.middleware.core.complexity_judge import (
     judge_complexity_with_llm,
 )
 from stream.middleware.core.tier_health import (
-    get_available_tiers,
     get_tier_error,
     is_tier_available,
 )
@@ -89,11 +88,7 @@ def get_tier_with_fallback(
             # IMPORTANT: Pass cloud_provider to get the CORRECT error from cache.
             # Without it, we'd look up "cloud" key and get Claude's error even when GPT was tested!
             error_msg, error_type = get_tier_error(tier, cloud_provider=tier_cloud_provider)
-            print(
-                f"🔍 ROUTING: {tier.upper()} unavailable - error_type={error_type}, error={error_msg[:100] if error_msg else 'None'}"
-            )
             if error_type == "auth":
-                print(f"❌ ROUTING: {tier.upper()} has auth error - not falling back")
                 raise AuthError(tier, error_msg)
             unavailable_tiers.append(tier)
 
@@ -144,7 +139,6 @@ def get_tier_for_query(
         # For Cloud tier, pass the user's selected cloud_provider to health check
         # so we test the ACTUAL provider they want (e.g., GPT), not the default (Claude)
         if is_tier_available(user_preference, cloud_provider=cloud_provider):
-            print(f"🔍 ROUTING: User override → {user_preference.upper()}")
             return RoutingResult(
                 tier=user_preference,
                 complexity="user_override",
@@ -156,9 +150,6 @@ def get_tier_for_query(
             # Raise an error so the user knows their selection couldn't be honored
             # IMPORTANT: Pass cloud_provider to get error for the ACTUAL provider tested
             error_msg, error_type = get_tier_error(user_preference, cloud_provider=cloud_provider)
-            print(
-                f"❌ ROUTING: User selected {user_preference.upper()} but it's unavailable: {error_msg}"
-            )
 
             # Provide specific error messages based on error type
             if error_type == "auth":
@@ -185,7 +176,7 @@ def get_tier_for_query(
         if complexity:
             method = "LLM judge"
         else:
-            print(f"⚠️ ROUTING: LLM judge failed ({error}), falling back to keywords")
+            logger.warning(f"LLM judge failed ({error}), falling back to keywords")
 
     # Fallback to keyword-based if LLM failed or disabled
     if complexity is None:
@@ -193,6 +184,8 @@ def get_tier_for_query(
         method = (
             f"keyword matching ('{matched_keyword}')" if matched_keyword else "default (medium)"
         )
+
+    logger.debug(method)
 
     # Map complexity to preferred tier
     if complexity == "low":
@@ -210,21 +203,10 @@ def get_tier_for_query(
 
     # If no tier available, raise error
     if tier is None:
-        print(f"❌ ROUTING FAILED: {fallback_reason}")
-        print(f"   Available tiers: {get_available_tiers()}")
+        logger.error(f"Routing failed: {fallback_reason}")
         raise Exception("All AI services are currently unavailable. Please try again later.")
 
-    # Determine if fallback occurred
     fallback_used = tier != preferred_tier
-
-    # Debug logging
-    print(f"🔍 SMART ROUTING ({method}):")
-    print(f"   Query: '{query[:80]}{'...' if len(query) > 80 else ''}'")
-    print(f"   Complexity: {complexity.upper()}")
-    print(f"   Decision: {fallback_reason}")
-    if fallback_used:
-        unavail_str = " → ".join(t.upper() for t in unavailable_tiers)
-        print(f"   ⚠️ FALLBACK: {unavail_str} → {tier.upper()}")
 
     return RoutingResult(
         tier=tier,

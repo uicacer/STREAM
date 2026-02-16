@@ -39,6 +39,7 @@ import litellm
 import yaml
 from fastapi import HTTPException
 
+import stream.proxy.app as _proxy_app
 from stream.middleware.config import LAKESHORE_PROXY_URL, OLLAMA_BASE_URL
 
 logger = logging.getLogger(__name__)
@@ -178,6 +179,116 @@ def _resolve_model(friendly_name: str) -> dict:
 # This replaces the HTTP call to the LiteLLM server with a direct library call.
 
 
+async def _forward_lakeshore(
+    model: str,
+    messages: list[dict],
+    temperature: float,
+    correlation_id: str,
+) -> AsyncGenerator[str, None]:
+    """
+    Call the Lakeshore Globus Compute client directly (desktop mode only).
+
+    WHY NOT USE litellm.acompletion() FOR LAKESHORE?
+    -------------------------------------------------
+    In desktop mode, litellm.acompletion() for lakeshore would make an HTTP
+    POST to http://127.0.0.1:5000/lakeshore/v1/chat/completions — which is
+    the SAME server we're running on. This "self-connection" is problematic:
+
+      litellm (our process) → HTTP POST → FastAPI (same process)
+                                            ↓
+                                    Proxy handler → Globus Compute
+                                            ↓
+                                    Response flows back through HTTP
+                                            ↓
+                              litellm reads the response
+
+    The server is both the client AND the server for the same request.
+    This can cause deadlocks, timeouts, and empty responses because the
+    single-worker event loop must handle both sides simultaneously.
+
+    SOLUTION: Skip HTTP entirely. Call the Globus Compute client directly
+    (it's already loaded in the same process), then convert the response
+    to the same SSE format that streaming.py expects.
+
+      forward_direct → globus_client.submit_inference() → Globus Compute
+                            ↓
+                    vLLM response (JSON) → convert to SSE chunks
+                            ↓
+                    streaming.py processes normally
+
+    The response format is identical either way — streaming.py doesn't
+    know or care whether the data came from HTTP or a direct call.
+    """
+    gc = _proxy_app.globus_client
+    if not gc or not gc.is_available():
+        raise HTTPException(status_code=503, detail="Globus Compute not configured")
+
+    # Get the vLLM model name (e.g., "Qwen/Qwen2.5-1.5B-Instruct").
+    # _MODEL_MAP stores it as "openai/Qwen/..." because litellm needs the
+    # "openai/" prefix to know which provider to use. But the actual vLLM
+    # model name on Lakeshore doesn't have that prefix.
+    entry = _MODEL_MAP.get(model, {})
+    vllm_model = entry.get("model", "").replace("openai/", "")
+
+    logger.info(
+        f"[{correlation_id}] Lakeshore direct call: {model} → {vllm_model}",
+        extra={"correlation_id": correlation_id, "model": model},
+    )
+
+    # Call Globus Compute directly — no HTTP, no self-connection.
+    # submit_inference sends the request to UIC's Lakeshore HPC cluster
+    # and waits for the vLLM response (using asyncio.to_thread internally
+    # so it doesn't block the event loop).
+    result = await gc.submit_inference(
+        messages=messages,
+        temperature=temperature,
+        model=vllm_model,
+    )
+
+    # Check for errors from Globus/vLLM
+    if isinstance(result, dict) and "error" in result:
+        error_msg = result.get("error", "Unknown Lakeshore error")
+        error_type = result.get("error_type", "")
+        if error_type == "AuthenticationError":
+            raise HTTPException(status_code=401, detail=error_msg)
+        raise HTTPException(status_code=503, detail=f"Lakeshore inference failed: {error_msg}")
+
+    # Convert the complete vLLM response to SSE chunks.
+    # vLLM returns a standard OpenAI chat completion response:
+    #   {"choices": [{"message": {"content": "the response text"}}], "usage": {...}}
+    #
+    # We split the content into word-by-word SSE events — the same format
+    # that litellm streaming would produce. This way streaming.py handles
+    # it identically to any other tier.
+    choices = result.get("choices", [])
+    if not choices:
+        yield "data: [DONE]"
+        return
+
+    content = choices[0].get("message", {}).get("content", "")
+    usage = result.get("usage", {})
+
+    # Yield content word by word as SSE delta chunks
+    if content:
+        words = content.split(" ")
+        for i, word in enumerate(words):
+            text = word if i == 0 else f" {word}"
+            chunk = {
+                "choices": [{"index": 0, "delta": {"content": text}}],
+            }
+            yield f"data: {json.dumps(chunk)}"
+
+    # Yield usage info in the final chunk (streaming.py reads this for cost)
+    if usage:
+        final_chunk = {
+            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+            "usage": usage,
+        }
+        yield f"data: {json.dumps(final_chunk)}"
+
+    yield "data: [DONE]"
+
+
 async def forward_direct(
     model: str,
     messages: list[dict],
@@ -198,6 +309,12 @@ async def forward_direct(
     works without any changes. It doesn't know or care whether the lines came
     from an HTTP server or a direct library call.
 
+    For Lakeshore tier: uses _forward_lakeshore() which calls Globus Compute
+    directly instead of going through HTTP (see that function's docstring).
+
+    For Local and Cloud tiers: uses litellm.acompletion() which calls the
+    provider API directly (Ollama for local, Anthropic/OpenAI for cloud).
+
     Args:
         model: Friendly model name (e.g., "cloud-claude", "local-llama")
                Gets translated to actual provider model name internally.
@@ -208,7 +325,13 @@ async def forward_direct(
     Yields:
         SSE-formatted lines (same format as LiteLLM HTTP server)
     """
-    # Translate friendly name → actual litellm kwargs
+    # Lakeshore: call Globus Compute directly (no HTTP self-connection)
+    if model.startswith("lakeshore"):
+        async for line in _forward_lakeshore(model, messages, temperature, correlation_id):
+            yield line
+        return
+
+    # Cloud and Local: call litellm library directly
     kwargs = _resolve_model(model)
     kwargs.update(
         {

@@ -277,12 +277,12 @@ export function TypingIndicator({
         <div className="flex items-center gap-2 ml-[60px]">
           {/* Phase 1: Analyzing */}
           <div
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-all duration-300
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-colors duration-300
               ${displayPhase === 'analyzing'
                 ? 'bg-purple-500/20 text-purple-600 dark:text-purple-400 ring-2 ring-purple-500/30'
                 : 'bg-purple-500/10 text-purple-500/60'
               }
-              ${analyzeComplete ? 'animate-stage-complete' : ''}
+              ${analyzeComplete && displayPhase === 'routing' ? 'animate-stage-complete' : ''}
             `}
           >
             <Brain className="w-3 h-3" />
@@ -297,14 +297,14 @@ export function TypingIndicator({
 
           {/* Phase 2: Routing */}
           <div
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-all duration-300
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-colors duration-300
               ${displayPhase === 'routing'
                 ? `${colors.bg} ${colors.text} ring-2 ${colors.border}`
                 : routeComplete
                   ? `${colors.bg} ${colors.text} opacity-60`
                   : 'bg-muted text-muted-foreground'
               }
-              ${routeComplete ? 'animate-stage-complete' : ''}
+              ${routeComplete && displayPhase === 'routing' ? 'animate-stage-complete' : ''}
             `}
           >
             <Router className="w-3 h-3" />
@@ -319,7 +319,7 @@ export function TypingIndicator({
 
           {/* Phase 3: Generating */}
           <div
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-all duration-300
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-colors duration-300
               ${displayPhase === 'generating'
                 ? `${colors.bg} ${colors.text} ring-2 ${colors.border} animate-stage-complete`
                 : 'bg-muted text-muted-foreground'
