@@ -38,6 +38,7 @@ Or after PyInstaller packaging (Phase 8):
     Double-click STREAM.app (macOS) / STREAM.exe (Windows)
 """
 
+import atexit  # Registers functions to run when the process exits (our safety-net cleanup)
 import logging
 import os
 import signal
@@ -84,14 +85,26 @@ logger = logging.getLogger(__name__)
 
 def is_port_in_use(host: str, port: int) -> bool:
     """
-    Check if a port is already occupied by another process.
+    Check if something is ACTIVELY LISTENING on a port.
 
     HOW IT WORKS:
     -------------
-    We try to create a TCP socket and bind it to the port. If the bind
-    succeeds, the port is free (no one else is using it). If it raises
-    OSError, something else (like Docker or a stale server) is already
-    listening on that port.
+    We try to CONNECT to the port (like a client would). If the connection
+    succeeds, a server is actively listening — the port is truly in use.
+    If the connection is refused or times out, nothing is listening.
+
+    WHY connect() INSTEAD OF bind():
+    ---------------------------------
+    The old approach used bind() — which fails if the port is in ANY state,
+    including TIME_WAIT. TIME_WAIT is a TCP state where the OS keeps the port
+    reserved for ~60 seconds after a socket closes, even though nothing is
+    listening. This caused false positives: the app would think the port was
+    occupied when it was actually free.
+
+    connect() only succeeds if a server is ACTIVELY ACCEPTING connections.
+    A port in TIME_WAIT returns ConnectionRefused — correctly identified as
+    "not in use." And uvicorn sets SO_REUSEADDR by default, so it can bind
+    through TIME_WAIT without any issues.
 
     WHY THIS MATTERS:
     -----------------
@@ -106,18 +119,15 @@ def is_port_in_use(host: str, port: int) -> bool:
         port: Port number to check (e.g., 5000)
 
     Returns:
-        True if the port is already in use, False if it's available
+        True if something is actively listening, False otherwise
     """
-    # socket.socket() creates a network connection endpoint.
-    # AF_INET = IPv4 address family, SOCK_STREAM = TCP (reliable, ordered).
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.settimeout(1)  # Don't hang forever if something is weird
         try:
-            # bind() tries to claim the port for this socket.
-            # If another process already owns it, the OS raises OSError.
-            sock.bind((host, port))
-            return False  # Bind succeeded → port is free
-        except OSError:
-            return True  # Bind failed → port is already taken
+            sock.connect((host, port))
+            return True  # Connection accepted → a server is listening
+        except (TimeoutError, ConnectionRefusedError, OSError):
+            return False  # Nothing listening (TIME_WAIT is fine)
 
 
 def _free_stale_port(host: str, port: int) -> bool:
@@ -219,6 +229,78 @@ def _free_stale_port(host: str, port: int) -> bool:
         return False
 
 
+# -------------------------------------------------------------------------
+# Uvicorn server + thread — module-level so cleanup can reach them.
+# -------------------------------------------------------------------------
+# We use uvicorn.Server instead of uvicorn.run() because run() gives us
+# no way to trigger a graceful shutdown. With Server, we can set
+# server.should_exit = True, which tells uvicorn to:
+#   1. Stop accepting new connections
+#   2. Finish processing in-flight requests
+#   3. Close the listening socket (release the port!)
+#   4. Exit the server loop
+#
+# We also keep a reference to the thread so we can JOIN it during cleanup.
+# Joining means "wait for this thread to actually finish" — unlike sleep(),
+# join() blocks until the thread's function returns, guaranteeing the socket
+# is fully released before we move on.
+_server: uvicorn.Server | None = None  # The uvicorn server instance
+_server_thread: threading.Thread | None = None  # The thread running the server
+_cleanup_done = False  # Idempotent guard — prevents running cleanup twice
+
+
+def _cleanup():
+    """
+    Shut down the server and Ollama. Safe to call multiple times.
+
+    This function is called from two places:
+      1. Normally: from main() after the user closes the window (Step 9)
+      2. Safety net: from atexit, in case the process exits unexpectedly
+
+    The _cleanup_done flag ensures we don't run cleanup twice.
+    """
+    global _cleanup_done, _server
+
+    # If we've already cleaned up (e.g., main() called us, then atexit
+    # fires again), skip — everything is already shut down.
+    if _cleanup_done:
+        return
+    _cleanup_done = True
+
+    # Step A: Tell uvicorn to shut down gracefully.
+    # This sets an internal flag that uvicorn checks on each event loop
+    # iteration. When it sees should_exit=True, it stops accepting new
+    # connections and begins its shutdown sequence.
+    if _server is not None:
+        _server.should_exit = True
+
+    # Step B: Wait for the server thread to actually finish.
+    # join() blocks until the thread's target function (start_fastapi_server)
+    # returns — which only happens AFTER uvicorn has fully closed its socket
+    # and released the port. This is the key difference from our old approach
+    # of time.sleep(0.5), which was just a guess and often wasn't enough.
+    # The 3-second timeout is a safety bound so we don't hang forever if
+    # something goes wrong inside uvicorn's shutdown.
+    if _server_thread is not None and _server_thread.is_alive():
+        _server_thread.join(timeout=3.0)
+
+    # Clear the reference so garbage collection can clean up.
+    _server = None
+
+    # Step C: Stop Ollama (the local AI model runner).
+    # We do this AFTER the server is fully stopped to avoid race conditions
+    # where a late-arriving request tries to talk to Ollama while it's dying.
+    stop_ollama()
+
+
+# Register cleanup to run on process exit. This catches cases where the
+# process exits without going through our normal Step 9 cleanup path:
+#   - SIGTERM from macOS "Force Quit"
+#   - Unhandled exception in main()
+#   - sys.exit() from somewhere unexpected
+atexit.register(_cleanup)
+
+
 def start_fastapi_server():
     """
     Start the FastAPI/uvicorn server in the current thread.
@@ -227,7 +309,7 @@ def start_fastapi_server():
     ---------------------------------
     We need FastAPI to run in a BACKGROUND thread (see main() below).
     threading.Thread(target=...) takes a function to run in the new thread.
-    So we wrap uvicorn.run() in this function and pass it as the target.
+    So we wrap the server startup in this function and pass it as the target.
 
     WHY WE PASS THE APP OBJECT (not a string path):
     ------------------------------------------------
@@ -236,7 +318,9 @@ def start_fastapi_server():
     where uvicorn's string-based import resolution doesn't work. Passing the
     object directly bypasses uvicorn's import mechanism entirely.
     """
-    uvicorn.run(
+    global _server
+
+    config = uvicorn.Config(
         # Pass the FastAPI app object directly (imported at module level above).
         # String paths like "stream.middleware.app:app" break in PyInstaller
         # bundles because the frozen module loader works differently.
@@ -248,6 +332,8 @@ def start_fastapi_server():
         # The React UI shows all the information the user needs.
         log_level="warning",
     )
+    _server = uvicorn.Server(config)
+    _server.run()
 
 
 def wait_for_server(host: str, port: int, timeout: float = 30.0) -> bool:
@@ -354,13 +440,16 @@ def main():
     # the main thread, we'd never get to open the window.
     #
     # daemon=True means: "Kill this thread automatically when the main thread
-    # exits." So when the user closes the PyWebView window (main thread ends),
-    # the FastAPI thread dies too. No need for explicit cleanup.
-    server_thread = threading.Thread(
+    # exits." This is a safety net — in normal operation, _cleanup() shuts
+    # down the server gracefully and joins this thread (waits for it to
+    # finish), so the port is properly released. The daemon flag ensures the
+    # thread still dies if _cleanup() somehow fails.
+    global _server_thread
+    _server_thread = threading.Thread(
         target=start_fastapi_server,
-        daemon=True,  # Auto-dies when main thread exits
+        daemon=True,  # Safety net: auto-dies if graceful shutdown fails
     )
-    server_thread.start()
+    _server_thread.start()
     print("FastAPI server starting in background...")
 
     # -------------------------------------------------------------------------
@@ -430,10 +519,16 @@ def main():
     # -------------------------------------------------------------------------
     # STEP 9: Cleanup (runs after the window is closed)
     # -------------------------------------------------------------------------
-    # If we started Ollama, stop it now. If the user had Ollama running before
-    # our app launched, stop_ollama() is a no-op (it checks _ollama_process).
+    # _cleanup() does three things:
+    #   1. Sets server.should_exit = True (tells uvicorn to shut down)
+    #   2. Joins the server thread (WAITS for uvicorn to fully release the port)
+    #   3. Stops Ollama
+    #
+    # This is also registered with atexit as a safety net, but calling it
+    # explicitly here gives us control over the sequence and logging.
+    # _cleanup() is idempotent — safe to call from both here and atexit.
     print("STREAM Desktop shutting down...")
-    stop_ollama()
+    _cleanup()
     print("Goodbye!")
 
 

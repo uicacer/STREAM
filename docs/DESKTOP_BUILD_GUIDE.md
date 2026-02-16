@@ -51,16 +51,16 @@ For normal code changes, you don't touch it.
 
 ```bash
 # If you changed Python code only:
-pyinstaller stream.spec --noconfirm
+pyinstaller stream.spec --noconfirm && cp -r dist/STREAM.app /Applications/
 
 # If you changed React frontend code:
 cd frontends/react && npm run build && cd ../..
-pyinstaller stream.spec --noconfirm
+pyinstaller stream.spec --noconfirm && cp -r dist/STREAM.app /Applications/
 
 # Test the result:
-open dist/STREAM.app          # macOS
+open /Applications/STREAM.app          # macOS (or find it in Launchpad)
 # or
-dist/STREAM.app/Contents/MacOS/STREAM   # see console output for debugging
+dist/STREAM.app/Contents/MacOS/STREAM  # see console output for debugging
 ```
 
 ### Step-by-Step
@@ -92,11 +92,31 @@ This takes about 60–90 seconds. The output goes to:
 - `dist/STREAM.app` — The final macOS app bundle
 - `build/stream/` — Intermediate cache (speeds up subsequent builds, safe to ignore)
 
-**Step 3: Test**
+**Step 3: Install to Applications (makes it appear in Launchpad)**
 
 ```bash
-# Option A: Double-click in Finder
-open dist/STREAM.app
+cp -r dist/STREAM.app /Applications/
+```
+
+This copies the built app into `/Applications`, which is where macOS looks for
+apps to show in Launchpad (the grid of app icons). Without this step, the app
+only exists in your project's `dist/` folder and won't appear in Launchpad or
+Spotlight search.
+
+You can combine the build and install into one command:
+
+```bash
+pyinstaller stream.spec --noconfirm && cp -r dist/STREAM.app /Applications/
+```
+
+**Note:** If an older version is already in `/Applications`, `cp -r` overwrites
+it. This is what you want — it replaces the old build with the new one.
+
+**Step 4: Test**
+
+```bash
+# Option A: Double-click in Finder or open from Launchpad
+open /Applications/STREAM.app
 
 # Option B: Run from terminal (see logs and errors in console)
 dist/STREAM.app/Contents/MacOS/STREAM

@@ -46,7 +46,7 @@ Both modes use the same Globus Compute client code to reach Lakeshore, but the r
 
 ## 2. What is Lakeshore?
 
-Lakeshore is UIC's HPC cluster operated by Academic Computing and Communications Center (ACCC). For STREAM, it provides:
+Lakeshore is UIC's HPC cluster operated by ACER. For STREAM, it provides:
 
 - **GPU node:** `ga-001` with NVIDIA A100 (MIG 3g.40gb partition)
 - **Model server:** vLLM serving `Qwen/Qwen2.5-1.5B-Instruct`
@@ -753,22 +753,23 @@ If we could send requests **directly** to vLLM (bypassing the Globus round-trip)
 
 The key insight is: **Globus Compute is excellent at solving the authentication and firewall problem, but it doesn't have to be the transport layer for every single request.** We can use Globus for the hard part (establishing access) and then switch to a faster channel for the data-intensive part (streaming inference).
 
-### 15.2 Approach 1: Globus-Assisted SSH Tunnel (Control Plane / Data Plane Separation)
+### 15.2 Approach 1: SSH Tunnel with Globus Compute as Universal Fallback
 
-#### The Core Idea
+#### The Two Authentication Systems
 
-This approach separates the connection into two layers, borrowing a concept from network engineering called **control plane / data plane separation**:
+STREAM currently uses two independent systems to reach Lakeshore, each with its own authentication:
 
-- **Control plane** (Globus Compute): Handles authentication, discovers where vLLM is running, and manages the connection lifecycle. Runs infrequently — once per session.
-- **Data plane** (SSH tunnel): Carries the actual inference requests at full speed. Runs for every request.
+**SSH authentication (key-based):**
+When you SSH to Lakeshore, your machine presents its private key (e.g., `~/.ssh/id_ed25519`) and the server checks if the corresponding public key exists in `~/.ssh/authorized_keys` on Lakeshore. If it matches, you're in — no password prompt, no visible authentication step. The handshake happens transparently in milliseconds. This is how users who already have SSH access to Lakeshore experience it: it "just works."
 
-Think of it like air travel: the control plane is the booking system (security checks, authentication, gate assignment), and the data plane is the actual airplane (fast transport). You go through security once, then fly multiple times.
+**Globus authentication (OAuth2-based):**
+Globus Compute uses OAuth2 through CILogon — a federated identity service for research. The user logs in with their university credentials in a browser, and Globus stores tokens in `~/.globus_compute/storage.db`. The Globus Compute endpoint on Lakeshore verifies these tokens. This is a different identity system — having an SSH key doesn't give you Globus access, and having Globus tokens doesn't give you SSH access.
 
-#### How SSH Tunneling Works
+The key insight: **these are orthogonal systems solving the same problem (proving you're authorized) through different mechanisms**. For users who already have SSH keys configured for Lakeshore — which is common for researchers and HPC users — the SSH path is simpler, faster, and already works.
 
-SSH (Secure Shell) is a protocol for secure remote access. Beyond running commands on remote machines, SSH can create **tunnels** — encrypted passages that forward network traffic between machines. There are two types relevant here:
+#### Why SSH Tunnels Are Faster
 
-**Local port forwarding** (what we'd use):
+An SSH tunnel creates a direct, encrypted pipe from your machine to the vLLM server on Lakeshore. The tunnel goes through a Lakeshore login node (which has network access to the GPU nodes):
 
 ```
 Your machine                    Lakeshore login node              GPU node
@@ -792,16 +793,74 @@ Breakdown:
 - `-N`: Don't run any remote command (just tunnel)
 - `-f`: Run in background
 
-Once this tunnel is established, `http://localhost:8000/v1/chat/completions` goes directly to vLLM — no Globus overhead, no AMQP routing. The latency drops to **just the inference time** plus SSH encryption overhead (negligible, ~5ms).
+Once this tunnel is established, `http://localhost:8000/v1/chat/completions` goes directly to vLLM — no Globus overhead, no AMQP routing, no serialization. The latency drops to **just the inference time** (~2-3 seconds) plus SSH encryption overhead (negligible, ~5ms).
 
-#### Where Globus Compute Fits In
+STREAM already supports this path. The `_route_via_ssh` function in [`proxy/app.py:238`](stream/proxy/app.py#L238) forwards requests directly to a vLLM endpoint URL. Setting `USE_GLOBUS_COMPUTE=false` and `LAKESHORE_VLLM_ENDPOINT=http://localhost:8000` in `.env` activates this mode.
 
-The problem with SSH tunnels is that they require knowing:
-1. Which GPU node is vLLM running on (could change if the SLURM job restarts)
-2. What port it's listening on
-3. Whether the SLURM job is still active
+#### What SSH Tunnels Enable Over Globus Compute
 
-Globus Compute can answer all of these questions by running a **discovery function** on Lakeshore:
+Beyond lower latency, a direct connection to vLLM unlocks **true token-by-token streaming**. Globus Compute is inherently batch-oriented (submit function → get complete result). With an SSH tunnel, we can pass `"stream": true` to vLLM and receive tokens as they're generated:
+
+```
+Current (Globus Compute, batch):
+  [====== 5s wait ======][all tokens arrive at once]
+
+With SSH tunnel (true streaming):
+  [== 2s first token ==][token][token][token][token]...
+```
+
+This makes the Lakeshore tier feel as responsive as the Cloud tier — the user sees text appearing progressively instead of waiting for the entire response.
+
+#### Where SSH Fails and Globus Compute Is Needed
+
+SSH tunnels require two things that Globus Compute does not:
+
+1. **SSH key access to Lakeshore login nodes.** The user must have a private key on their machine (e.g., `~/.ssh/id_ed25519`) with the corresponding public key in `~/.ssh/authorized_keys` on Lakeshore. Not all STREAM users will have this — particularly students in a classroom setting who interact with Lakeshore only through STREAM and have never SSH'd into an HPC cluster.
+
+2. **Network path to login nodes.** The user must be on a network that can reach Lakeshore's login nodes — typically the campus network or a VPN. From a coffee shop, home network without VPN, or a cloud server, SSH to `lakeshore.uic.edu` will not connect.
+
+Globus Compute solves both problems: it uses OAuth2 (university SSO, no SSH keys needed) and routes through the Globus cloud infrastructure (works from any internet connection, regardless of firewall). This is what makes it universal — but that universality comes at the cost of ~2-3 seconds of overhead per request.
+
+| Scenario | SSH Tunnel | Globus Compute |
+|----------|-----------|----------------|
+| Researcher on campus with SSH keys | **Best choice** (~2-3s) | Works but slower (~5s) |
+| Student on campus, no SSH keys | Cannot use | **Only option** (~5s) |
+| Researcher at home with VPN + SSH keys | Works (~2-3s) | Works (~5s) |
+| Student at home, no VPN | Cannot use | **Only option** (~5s) |
+| Docker on campus server | Works (~2-3s) | Works (~5s) |
+| Docker on AWS/cloud | Cannot use | **Only option** (~5s) |
+
+#### The Recommended Architecture: SSH-First with Globus Fallback
+
+Rather than choosing one transport, STREAM should try SSH first (fast path) and fall back to Globus Compute (universal path) when SSH is unavailable:
+
+```
+STARTUP:
+════════
+
+1. Try to establish SSH tunnel to Lakeshore
+   ssh -L 8000:ga-001:8000 user@lakeshore.uic.edu -N -f
+
+2a. SUCCESS → Use SSH tunnel for all requests (~2-3s per request)
+    Set LAKESHORE_VLLM_ENDPOINT=http://localhost:8000
+
+2b. FAILURE (no keys, no network) → Fall back to Globus Compute (~5s per request)
+    Use existing submit_inference() path
+
+RUNTIME:
+════════
+
+If SSH tunnel drops mid-session:
+  1. Detect failure (ConnectionRefused on localhost:8000)
+  2. Attempt to re-establish tunnel
+  3. If re-establishment fails → switch to Globus Compute for remaining session
+```
+
+This gives users with SSH access the fastest possible experience, while ensuring STREAM works for everyone through Globus Compute regardless of their network or key setup.
+
+#### Optional: Globus Compute for Dynamic Discovery
+
+If the vLLM SLURM job moves to a different node (e.g., job restarts after a node failure), the SSH tunnel target would be wrong. For deployments where the node and port are not fixed, Globus Compute can serve as a **discovery mechanism** — running a quick function on Lakeshore to query `squeue` and find where vLLM is currently running:
 
 ```python
 def discover_vllm_endpoint():
@@ -811,14 +870,11 @@ def discover_vllm_endpoint():
     """
     import subprocess
 
-    # Check if the vLLM SLURM job is running
     result = subprocess.run(
         ["squeue", "-u", "stream", "-n", "vllm-server", "--format=%N,%T"],
         capture_output=True, text=True
     )
 
-    # Parse the output to find the node and status
-    # e.g., "ga-001,RUNNING"
     lines = result.stdout.strip().split("\n")
     if len(lines) < 2:
         return {"status": "not_running", "node": None, "port": None}
@@ -829,119 +885,36 @@ def discover_vllm_endpoint():
         "status": status.lower(),
         "node": node,           # e.g., "ga-001"
         "port": 8000,           # vLLM's configured port
-        "model": "Qwen/Qwen2.5-1.5B-Instruct",
-        "max_model_len": 32768,
     }
 ```
 
-This function runs through the same Globus Compute infrastructure we already have — it solves the firewall problem for this one-time discovery call. The ~5-second Globus overhead is acceptable here because it only happens once.
+This costs ~5 seconds (one Globus round-trip) but only needs to run once per session, or when the tunnel breaks. For fixed deployments where the node and port are known in advance (as is currently the case with `ga-001:8000`), this discovery step is unnecessary — the tunnel target can be configured statically.
 
-#### The Complete Hybrid Flow
+#### Implementation in the Existing Codebase
 
-```
-SESSION STARTUP (once, ~5 seconds):
-═══════════════════════════════════
-
-1. STREAM starts up
-2. submit_inference(discover_vllm_endpoint)  ←── Globus Compute (through firewall)
-3. Result: {"node": "ga-001", "port": 8000, "status": "running"}
-4. Establish SSH tunnel:
-     ssh -L 8000:ga-001:8000 user@lakeshore.uic.edu -N -f
-5. Verify tunnel: HTTP GET http://localhost:8000/health
-6. Store tunnel info: {"local_port": 8000, "pid": 12345}
-
-EVERY SUBSEQUENT REQUEST (~2-3 seconds):
-════════════════════════════════════════
-
-1. User asks a question (complexity=MEDIUM → Lakeshore)
-2. HTTP POST http://localhost:8000/v1/chat/completions  ←── Direct through tunnel
-3. vLLM generates response on GPU
-4. Response streams back through SSH tunnel
-5. Total latency: ~2-3s (inference only!)
-
-TUNNEL RECOVERY (if tunnel drops):
-══════════════════════════════════
-
-1. Request to localhost:8000 fails (ConnectionRefused)
-2. Re-run discovery via Globus Compute (~5s)
-3. Re-establish SSH tunnel
-4. Retry the request
-```
-
-#### What This Approach Enables
-
-Beyond lower latency, a direct connection to vLLM unlocks **true token-by-token streaming**. Currently, Globus Compute returns the complete response at once (because FaaS is batch-oriented). With an SSH tunnel, we can pass `"stream": true` to vLLM and receive tokens as they're generated:
+The proxy code ([`proxy/app.py`](stream/proxy/app.py)) already has both paths:
 
 ```
-Current (Globus Compute, batch):
-  [====== 5s wait ======][all tokens arrive at once]
-
-With SSH tunnel (true streaming):
-  [== 2s first token ==][token][token][token][token]...
+_route_via_globus_compute  →  Current: every request through Globus (~5s)
+_route_via_ssh             →  Current: forwards to LAKESHORE_VLLM_ENDPOINT
 ```
 
-This makes the Lakeshore tier feel as responsive as the Cloud tier.
-
-#### Prerequisites and Limitations
-
-| Requirement | Details |
-|-------------|---------|
-| **SSH key access** | User needs passwordless SSH access to Lakeshore login nodes. The same user who set up the Globus Compute endpoint likely already has this. |
-| **Network access to login nodes** | SSH to `lakeshore.uic.edu` must be reachable. Works from campus network and VPN. Does NOT work from arbitrary public networks (coffee shop, home without VPN). |
-| **`paramiko` or system SSH** | The desktop app would need to create SSH tunnels programmatically. Python's `paramiko` library or `subprocess` with the system `ssh` command could do this. |
-| **SLURM job persistence** | vLLM must be running as a persistent SLURM job. If the job ends, the tunnel becomes useless. Globus discovery detects this. |
-
-#### When This Approach Works vs. Doesn't
-
-| Scenario | Works? | Why |
-|----------|--------|-----|
-| Student on campus Wi-Fi | Yes | Direct network path to login nodes |
-| Researcher on VPN | Yes | VPN extends campus network to their location |
-| Faculty in office (wired) | Yes | On campus network |
-| Student at home (no VPN) | No | Login nodes not reachable from public internet |
-| Docker deployment on campus server | Yes | Server has campus network access |
-| Docker deployment on AWS/cloud | No | Would need VPN or Globus Compute (current approach) |
-
-This limitation is why the hybrid approach should be an **additional mode**, not a replacement. STREAM would try the SSH tunnel first (fast path) and fall back to pure Globus Compute (slow but universal) if the tunnel can't be established.
-
-#### Implementation Sketch
-
-A new routing mode in the existing architecture:
-
-```
-_route_via_globus_compute    →  Current: every request through Globus (~5s)
-_route_via_ssh               →  Current: manual SSH tunnel (user sets up)
-_route_via_globus_ssh_hybrid →  New: Globus discovers, SSH carries data (~2-3s)
-```
-
-The proxy code ([`proxy/app.py`](stream/proxy/app.py)) already has `_route_via_globus_compute()` and `_route_via_ssh()`. The hybrid would combine them:
+The SSH-first architecture would add a startup-time tunnel manager and a routing preference:
 
 ```python
-async def _route_via_globus_ssh_hybrid(model, messages, temperature, max_tokens, stream):
+async def _route_lakeshore(model, messages, temperature, max_tokens, stream):
     """
-    Use Globus Compute for discovery and auth, SSH tunnel for data transport.
-
-    First request: discover vLLM via Globus, establish SSH tunnel
-    Subsequent requests: forward directly through tunnel
-    If tunnel drops: re-discover and re-establish
+    Route to Lakeshore using the fastest available transport.
+    SSH tunnel if available, Globus Compute as universal fallback.
     """
-    # Check if we have an active tunnel
-    if not _ssh_tunnel_active():
-        # Phase 1: Discovery via Globus Compute
-        vllm_info = await globus_client.submit_inference(discover_vllm_endpoint)
-
-        if vllm_info["status"] != "running":
-            raise HTTPException(503, "vLLM not running on Lakeshore")
-
-        # Phase 2: Establish SSH tunnel
-        _establish_ssh_tunnel(
-            remote_node=vllm_info["node"],
-            remote_port=vllm_info["port"],
-            local_port=8000,
+    if _ssh_tunnel_active():
+        # Fast path: direct to vLLM through SSH (~2-3s)
+        return await _route_via_ssh(model, messages, temperature, max_tokens, stream)
+    else:
+        # Universal fallback: through Globus Compute (~5s)
+        return await _route_via_globus_compute(
+            model, messages, temperature, max_tokens, stream
         )
-
-    # Phase 3: Forward through tunnel (fast path)
-    return await _route_via_ssh(model, messages, temperature, max_tokens, stream)
 ```
 
 ### 15.3 Approach 2: AMQP-Based Token Streaming (Streaming Through the Existing Channel)
@@ -1110,81 +1083,506 @@ async def _forward_lakeshore_streaming(model, messages, temperature, correlation
             return
 ```
 
-#### The Technical Challenge: Globus Compute SDK Limitations
+#### The Technical Challenge: Why Modifying Globus Compute Internals Is Impractical
 
-The main obstacle is that the Globus Compute SDK does not currently expose an API for publishing intermediate results from within a running function. The SDK's model is:
+The idea of streaming tokens through Globus Compute's own AMQP infrastructure is architecturally elegant but practically infeasible for a single-developer project. Here's why.
+
+The Globus Compute SDK's model is strictly one-shot:
 
 ```
 submit(function, args) → Future → result (one shot)
 ```
 
-There is no built-in way for the function to send partial results while it's still running. Implementing AMQP streaming would require one of the following:
+There is no built-in API for publishing intermediate results from within a running function. The SDK does not expose `publish_intermediate_result()` or `stream_results()` — a function runs to completion and returns one value. Implementing streaming *through* Globus would require modifying both the endpoint software (running on Lakeshore) and the client SDK (running in STREAM).
 
-**Option A: Custom Globus Compute endpoint extension.**
+More fundamentally, the Globus Compute endpoint runs your function in an isolated **worker process**, but the AMQP connection lives in the **endpoint daemon process**. These are separate OS processes. The worker has no direct access to the daemon's AMQP connection — there is a serialization boundary between them. Bridging this would require:
 
-The Globus Compute endpoint is open-source. One could extend it to support a `publish_intermediate_result()` function that running tasks can call. This would publish messages to the client's result queue using the endpoint's existing AMQP connection. The SDK on the client side would need a corresponding `stream_results()` method.
+1. An IPC (inter-process communication) channel between worker and daemon
+2. A new message type in the Globus Compute protocol for intermediate results
+3. A new client-side API to receive these intermediate results
+4. Changes to the AMQP queue topology (currently one result message per task)
 
-This is the cleanest approach but requires changes to both the endpoint software (running on Lakeshore) and the client SDK (running in STREAM). It could be proposed as a feature to the Globus Compute team.
+This is not a weekend project — it's a months-long effort that requires deep knowledge of the Globus Compute internals, and any implementation would **break when Globus updates their SDK** because it depends on undocumented internal architecture. The Globus team could reasonably change how workers communicate with the daemon, how results are serialized, or how AMQP queues are structured — and any of those changes would break a custom streaming extension.
 
-**Option B: Side-channel AMQP connection.**
+This approach makes sense as a **feature request to the Globus team** (and as a research contribution to the Globus ecosystem), but not as something to build and maintain independently.
 
-Instead of using Globus Compute's internal AMQP infrastructure, set up a separate AMQP broker (like RabbitMQ on a cloud server) that both the Lakeshore endpoint and the STREAM client can reach. The remote function publishes tokens to this broker, and the client consumes them.
+#### The Practical Solution: WebSocket Side-Channel Relay
+
+Instead of fighting Globus Compute's architecture, we work *alongside* it. The insight is that we can **separate the control plane from the data plane**:
+
+- **Control plane (Globus Compute):** Handles authentication, job submission, and task lifecycle — the things Globus is good at.
+- **Data plane (WebSocket relay):** Handles real-time token streaming — the thing Globus isn't designed for.
+
+Globus Compute still submits the function to Lakeshore. But instead of having the function return the complete response through Globus, the function opens a **WebSocket connection to an external relay server** and streams tokens through that side channel. The STREAM client also connects to the same relay server and receives tokens in real-time.
 
 ```
-Lakeshore GPU node                  External RabbitMQ              STREAM client
-==================                  =================              =============
-
-Remote function runs
-vLLM generates token₁
-Publish to queue ──────────────────→ Queue stores ──────────────→ Client receives
-vLLM generates token₂
-Publish to queue ──────────────────→ Queue stores ──────────────→ Client receives
-...
+                         ┌─────────────────────┐
+                         │   WebSocket Relay    │
+                         │  (public server or   │
+                         │   cloud VM, ~$5/mo)  │
+                         └──────┬────────┬──────┘
+                         outbound│        │outbound
+                        connection│      connection
+                                 │        │
+┌────────────────────┐           │        │           ┌──────────────────┐
+│   Lakeshore GPU    │───────────┘        └───────────│  STREAM client   │
+│                    │  tokens flow →→→→→→→→→          │  (user's laptop) │
+│  vLLM generates    │                                │                  │
+│  token by token    │                                │  displays tokens │
+│                    │                                │  progressively   │
+└────────────────────┘                                └──────────────────┘
+         ↑                                                     │
+         │              ┌─────────────────────┐                │
+         └──────────────│   Globus Compute    │────────────────┘
+            job submit  │   (control plane)   │  submit + poll
+            via AMQP    │                     │  via AMQP
+                        └─────────────────────┘
 ```
 
-This is simpler to implement (no changes to Globus SDK) but requires deploying and maintaining an external message broker. It also introduces a new network dependency.
+Both Lakeshore and the user's machine make **outbound** connections to the relay — neither needs to accept incoming connections. This is critical because it means:
 
-**Option C: WebSocket relay.**
+- **The relay works through firewalls.** Lakeshore's firewall blocks inbound connections but allows outbound. The user's home NAT/firewall also blocks inbound. Since both sides connect *out* to the relay, no firewall rules need to change.
+- **No SSH keys required.** The relay is a public WebSocket endpoint. Authentication is handled by Globus (the task ID acts as a shared secret — only the submitter and the worker know it).
+- **Works from anywhere.** Campus, home, coffee shop — as long as the user has internet, the relay works.
 
-The remote function opens a WebSocket connection to a relay server (could be the same cloud server), and the STREAM client also connects. Tokens flow through the relay in real-time.
+#### Why Can't the Relay Be on the User's Machine?
 
-This is similar to Option B but uses WebSocket instead of AMQP. It's more familiar to web developers but has the same dependency on an external relay server.
+A natural question: why deploy a separate relay server? Why not run it on the user's own laptop?
 
-#### Comparison: Current vs. Hybrid SSH vs. AMQP Streaming
+The problem is **NAT (Network Address Translation) and firewalls**. When you're at home, your laptop sits behind your router. Your laptop can make outbound connections to the internet (that's how browsing works), but **nothing on the internet can connect inbound to your laptop** — your router doesn't know which device to forward the connection to. This is the same fundamental problem that Globus Compute was built to solve.
 
-| Metric | Current (Globus Batch) | Hybrid SSH Tunnel | AMQP Streaming |
-|--------|----------------------|-------------------|----------------|
+For the relay to work, **both sides** (Lakeshore and the user) must be able to connect to it. If the relay is on the user's laptop:
+
+```
+Lakeshore → tries to connect to user's laptop → BLOCKED by user's NAT/firewall ✗
+```
+
+If the relay is on a public server:
+
+```
+Lakeshore → connects outbound to relay server → OK ✓
+User      → connects outbound to relay server → OK ✓
+```
+
+This is the same reason video calls use TURN servers, and why Globus itself routes through AWS — when both endpoints are behind firewalls, you need a publicly-reachable intermediary.
+
+The relay server itself is tiny (under 50 lines of code, uses negligible CPU/bandwidth). It could run on:
+- A $5/month cloud VM (DigitalOcean, AWS Lightsail)
+- A free-tier cloud function (AWS Lambda, Google Cloud Run)
+- Any existing server with a public IP (e.g., a UIC department server)
+
+#### Hosting the Relay on Lakeshore: Detailed Analysis
+
+The ideal deployment for the WebSocket relay is on Lakeshore itself — no external resources, no monthly costs, and all data stays within UIC's network. However, this requires ACER's cooperation on two fronts: opening a firewall port and approving a lightweight process on cluster infrastructure. This section details the technical requirements, security implications, and deployment options to support that conversation.
+
+##### The Firewall Problem
+
+The reason STREAM uses Globus Compute in the first place is that Lakeshore's firewall blocks inbound connections from the internet on all ports except a few explicitly allowed ones (like SSH on port 22). This same firewall would block a WebSocket relay.
+
+Lakeshore's firewall sits between the internet and the cluster. It has rules that control which incoming connections are allowed:
+
+```
+Lakeshore firewall rules (simplified):
+───────────────────────────────────────
+Port 22 (SSH)     → ALLOW inbound     (this is how users ssh to lakeshore.uic.edu)
+Port 443 (HTTPS)  → ALLOW inbound     (if any web services are exposed)
+Port 8765         → no rule → BLOCKED (our hypothetical relay port)
+Port 8000         → no rule → BLOCKED (vLLM's port on the GPU node)
+Everything else   → BLOCKED by default
+```
+
+If we run the WebSocket relay on Lakeshore and a user's STREAM app tries to connect:
+
+```
+User's laptop:  websocket.connect("ws://lakeshore.uic.edu:8765")
+
+Network path:
+  User's laptop  →  internet  →  UIC campus network  →  Lakeshore firewall  →  DROPPED
+                                                          (port 8765 not allowed)
+```
+
+The firewall doesn't inspect what the traffic is doing — it doesn't know the difference between "streaming AI tokens" and "anything else." It simply drops all incoming TCP connections on ports it hasn't been told to allow. This is standard HPC security practice: minimize the attack surface by only exposing what's strictly necessary.
+
+**What we'd need from ACER:** Open one TCP port (e.g., 8765) for inbound WebSocket connections. This is the same type of request as asking for a web service to be externally accessible — ACER has likely handled similar requests for other research projects that need external connectivity (web dashboards, Jupyter notebooks, API endpoints, etc.).
+
+##### The Login Node Problem
+
+HPC clusters have two types of nodes with very different roles:
+
+**Login nodes** (`lakeshore.uic.edu`) are shared machines where users:
+- Log in via SSH
+- Edit files, compile code
+- Submit SLURM jobs to compute nodes
+- Transfer data
+
+Login nodes are **shared resources** — dozens or hundreds of users are logged in simultaneously. Running persistent services (daemons, servers, long-running processes) on login nodes is against standard HPC usage policies because:
+- A misbehaving service could consume CPU/memory and slow down the login experience for everyone
+- Login nodes aren't designed for high availability (they get rebooted for maintenance)
+- If every researcher ran a service on the login node, it would become unusable
+
+So the naive approach — "start the relay on the login node and leave it running" — is not appropriate. You should not be running persistent services on the login node.
+
+**Compute nodes** (`ga-001`, etc.) are where actual work runs, managed by SLURM:
+- Users submit jobs, SLURM allocates resources
+- Jobs run in isolation with dedicated CPU/memory/GPU
+- When the job finishes, the resources are released
+
+The GPU node `ga-001` where vLLM runs is a compute node. But compute nodes are only reachable from within Lakeshore's internal network — they don't have public IP addresses and the firewall doesn't expose them. So running the relay on a compute node has the same firewall problem, plus the relay would die when the SLURM job ends.
+
+##### Deployment Options for ACER Discussion
+
+There are several ways ACER could accommodate the relay, listed from most to least ideal:
+
+**Option 1: Dedicated lightweight service node or VM (best option)**
+
+ACER could provision a small VM or container on Lakeshore's infrastructure specifically for the relay. This is the cleanest approach:
+
+- The relay runs as a managed service, separate from login and compute nodes
+- It doesn't interfere with other users or with job scheduling
+- ACER can control resource limits, monitor it, and restart it if needed
+- The firewall rule points to this specific VM, not to a login node
+
+Many HPC centers already have "service nodes" or "gateway nodes" for exactly this kind of purpose — hosting web dashboards (like Open OnDemand), Jupyter hubs, or API endpoints that need external access. The relay would fit naturally alongside these.
+
+**What to ask ACER:** "Could we get a small VM or service endpoint on Lakeshore's infrastructure to run a lightweight WebSocket relay for our research project? It needs one open TCP port for external WebSocket connections and access to Lakeshore's internal network to communicate with GPU compute nodes."
+
+**Why not a SLURM job?** A natural thought is to run the relay as a SLURM job on a compute node. This doesn't work because compute nodes don't have public IP addresses — they're only reachable from within Lakeshore's internal network. The user's laptop can't connect to a compute node any more than it can connect directly to vLLM. ACER would still need port forwarding or a reverse proxy, and now there's an additional problem: SLURM might assign the relay to a different node each time the job restarts, so the forwarding target keeps changing. SLURM jobs also have time limits, causing periodic downtime. A relay needs a stable, always-on home — not a job scheduler.
+
+**Option 2: Run on a login node with ACER's explicit approval**
+
+If ACER doesn't have service node infrastructure, they might approve running the relay directly on a login node as an exception. The relay's resource usage is genuinely negligible:
+
+- **CPU:** Near zero. The relay just forwards WebSocket messages — it doesn't parse, transform, or compute anything. It's doing the same work as an `ssh` connection, which is already running on the login node for every user.
+- **Memory:** Under 10MB. The relay holds open WebSocket connections (a few KB each) and a dictionary mapping task IDs to connections. Even with 100 concurrent users, it would use less memory than a single `vim` session.
+- **Bandwidth:** Minimal. AI responses are text — a typical 500-token response is ~2KB. Even 100 concurrent requests would generate less traffic than a single file transfer.
+- **Disk:** Zero. The relay is stateless — it doesn't log, doesn't write files, doesn't store anything.
+
+For context, the Globus Compute endpoint daemon itself is a persistent process that runs on Lakeshore continuously, maintaining AMQP connections and managing worker processes. The relay would use far fewer resources than the endpoint daemon. If ACER already permits the Globus endpoint daemon, the relay is a much lighter burden.
+
+**What to ask ACER:** "Our WebSocket relay uses under 10MB of memory and near-zero CPU — it just forwards text messages between two WebSocket connections. Could we run it as a lightweight daemon on a login node, similar to how the Globus Compute endpoint runs? Or is there a service node / gateway we should use instead?"
+
+**Option 3: Run behind ACER's existing reverse proxy**
+
+Many HPC centers run a reverse proxy (like NGINX or Apache) on their externally-facing infrastructure to expose web services (Jupyter, Open OnDemand, Grafana dashboards). If Lakeshore has such infrastructure, the relay could run on any internal node and be exposed through the existing reverse proxy.
+
+```
+Internet → ACER's NGINX (port 443, already open) → proxy pass to relay (internal node:8765)
+```
+
+This is elegant because it reuses existing infrastructure — no new firewall rules needed. The relay would be accessible at something like `wss://lakeshore.uic.edu/stream-relay/` through the existing HTTPS port. ACER might prefer this because it doesn't increase the firewall's attack surface at all.
+
+**What to ask ACER:** "Does Lakeshore have a reverse proxy or web gateway (like Open OnDemand or an NGINX frontend)? If so, could we route WebSocket traffic through it to an internal relay process?"
+
+##### Security Analysis: What the Open Port Exposes
+
+ACER's primary concern will be: "Does opening this port create a security risk for Lakeshore?" Here's a thorough analysis.
+
+**What the relay does:**
+
+The relay is a message forwarder. Its complete behavior is:
+1. Accept incoming WebSocket connections
+2. The first message on each connection is a task ID (a UUID string)
+3. Group connections by task ID
+4. Forward messages from one connection to all other connections with the same task ID
+5. Clean up when connections close
+
+That's it. The relay does not:
+- Execute any code received from connections
+- Access the filesystem (no reads, no writes, no directory listings)
+- Authenticate to Lakeshore services (no SSH, no SLURM, no sudo)
+- Have elevated privileges (runs as a regular user process)
+- Store any data (stateless — when a connection closes, it's gone)
+- Spawn subprocesses or run shell commands
+
+**Comparison to SSH (port 22), which is already open:**
+
+| Capability | SSH (port 22) | WebSocket relay (port 8765) |
+|-----------|--------------|---------------------------|
+| Execute arbitrary commands | Yes (full shell) | No |
+| Read/write files | Yes (any file user can access) | No |
+| Transfer files | Yes (scp, sftp) | No |
+| Tunnel to internal services | Yes (port forwarding) | No |
+| Escalate privileges | Possible (if sudo configured) | No |
+| Attack surface | Large (complex protocol, auth) | Tiny (forwards bytes) |
+
+The relay exposes **far less** than SSH. If an attacker connects to the relay, the worst they can do is:
+- Connect and send messages to a channel (but without a valid task ID, no one is listening)
+- Try to guess task IDs to eavesdrop on AI responses (mitigated by using UUIDs — 128 bits of randomness, infeasible to guess)
+- Open many connections to consume memory (mitigated by connection limits, which can be set in the relay code)
+
+**Potential concerns and mitigations:**
+
+| Concern | Risk Level | Mitigation |
+|---------|-----------|------------|
+| **Unauthorized eavesdropping** (attacker reads AI responses) | Low | Task IDs are UUIDs (128-bit random). Can add short-lived auth tokens for extra security. |
+| **DoS via connection flooding** | Low | Set max connections per IP (e.g., 10). The relay's memory footprint per connection is ~1KB, so even 10,000 connections would use ~10MB. |
+| **Code execution through relay** | None | The relay forwards bytes. It doesn't interpret, compile, or execute anything it receives. There is no `eval()`, no `exec()`, no shell access. |
+| **Lateral movement** (attacker uses relay to access other Lakeshore services) | None | The relay is a WebSocket forwarder. It doesn't make connections to other services. An attacker connecting to the relay cannot use it to reach SLURM, SSH, databases, or any other internal service. |
+| **Data exfiltration** | None | The relay doesn't access the filesystem or any Lakeshore data. It only sees the AI tokens that flow through it, which are generated by the model in response to user prompts — not stored research data. |
+| **Privilege escalation** | None | The relay runs as a regular user (no root, no sudo). Even if the relay process were somehow compromised, the attacker would only have the permissions of that user account. |
+
+**TLS encryption (recommended):**
+
+For production deployment, the relay should use TLS (`wss://` instead of `ws://`). This encrypts all traffic between the user and the relay, preventing anyone on the network path from reading the AI responses. If ACER's reverse proxy option (Option 3 above) is available, TLS comes for free — the existing HTTPS certificate handles it.
+
+If running standalone, ACER could provide a TLS certificate for the relay, or the relay could use a Let's Encrypt certificate if it has a DNS name.
+
+##### Summary: What to Discuss With ACER
+
+Here's a concise summary of the request and its justification:
+
+**The request:** We need a way for external users to receive real-time WebSocket messages from a lightweight relay process running on Lakeshore's infrastructure. This requires either (a) one open TCP port, (b) a reverse proxy route, or (c) a small service VM.
+
+**Why:** STREAM uses Globus Compute to submit AI inference jobs to Lakeshore's GPUs. Currently, the entire response must complete before any text is sent back to the user (~5 seconds of blank screen). With a WebSocket relay, tokens can stream to the user as the GPU generates them — the same experience as ChatGPT. This requires a persistent relay process that both the GPU node (internal) and the user's laptop (external) can connect to.
+
+**Resource requirements:**
+- CPU: Near zero (just forwarding text messages)
+- Memory: Under 10MB (even with many concurrent users)
+- Bandwidth: Negligible (text tokens, ~2KB per response)
+- Disk: Zero (stateless, no logging)
+
+**Security posture:**
+- The relay is a pure message forwarder — it doesn't execute code, access files, or connect to other services
+- It exposes far less than SSH (port 22), which is already open
+- Connection authentication via UUID task IDs (128-bit random, infeasible to guess)
+- Can add TLS encryption and auth tokens for additional security
+- If hosted on Lakeshore, all data stays within UIC's network — no tokens leave university infrastructure
+
+**Preferred deployment (in order):**
+1. Service VM or dedicated endpoint (cleanest separation)
+2. Route through existing reverse proxy/web gateway (no new firewall rules)
+3. Login node daemon with explicit approval (lightest resource usage, but login nodes aren't meant for services)
+4. External cloud VM (fallback if ACER can't accommodate on-cluster hosting — see prototype demo below)
+
+#### How Globus Compute's Role Changes With the Relay
+
+To summarize how the two approaches differ at a high level:
+
+**Current approach (Globus Compute alone):**
+
+1. Globus Compute submits the job to Lakeshore
+2. The remote function calls vLLM and waits for the **complete** response (all tokens)
+3. The function returns the full response through Globus Compute's AMQP channel
+4. Globus delivers the complete result back to STREAM — all tokens arrive at once
+5. STREAM then *simulates* streaming by splitting the response into word chunks with artificial delays
+
+The user sees nothing for ~5 seconds, then text starts appearing — but it's fake streaming. The GPU finished its work long ago; we're just replaying the result slowly.
+
+**WebSocket relay approach:**
+
+1. Globus Compute submits the job to Lakeshore — same as before
+2. The remote function calls vLLM with `stream=True` and forwards each token through the **WebSocket relay** as it's generated
+3. The user's STREAM app receives tokens through the relay in real-time — Globus is not involved in this data flow
+4. Globus Compute eventually gets back a small summary (`{"status": "streamed"}`) just to close out the task
+
+Globus Compute's role changes from **carrying the full payload** to **starting the job**. The heavy lifting (token delivery) moves to the relay. Globus still handles the hard parts — authentication, getting through the firewall, launching the function on the right GPU node — but it no longer carries the actual response data.
+
+#### Why Is This Faster? Time-to-First-Token vs. Total Time
+
+An important distinction: the WebSocket relay approach does **not** reduce the total time to generate a response. If vLLM takes 3 seconds of compute to produce 200 tokens, it still takes 3 seconds either way. What changes is **when the user sees the first token**.
+
+**Current approach (batch):**
+
+```
+Time:  0s          1s          2s          3s          4s          5s
+       │           │           │           │           │           │
+       ├── Globus submit ──────┤           │           │           │
+       │   (AMQP routing)      │           │           │           │
+       │                       ├── vLLM generates all tokens ─────┤
+       │                       │   (user sees NOTHING)            │
+       │                       │                                  ├── Globus return ──→ ALL tokens
+       │                       │                                  │   arrive at once
+       │                       │                                  │
+User:  [waiting...             waiting...              waiting... │ sees everything]
+                                                                  ↑
+                                                          first token at ~5s
+```
+
+**WebSocket relay approach (streaming):**
+
+```
+Time:  0s          1s          2s          3s          3.1s   3.2s  ...  5s
+       │           │           │           │           │      │          │
+       ├── Globus submit ──────┤           │           │      │          │
+       │   (AMQP routing)      │           │           │      │          │
+       │                       ├── vLLM generates ─────┼──────┼──────────┤
+       │                       │   token₁ ─── relay ───→      │          │
+       │                       │   token₂ ──── relay ──────────→         │
+       │                       │   ...                                   │
+       │                       │   token_N ──── relay ───────────────────→
+       │                       │                                         │
+User:  [waiting...             waiting...  │ sees token₁! tokens keep flowing...]
+                                           ↑
+                                   first token at ~3s
+```
+
+The total wall-clock time is similar (~5s). But the **perceived** experience is dramatically different:
+
+| Metric | Current (batch) | WebSocket relay |
+|--------|----------------|-----------------|
+| **Time to first token** | ~5 seconds | ~3 seconds |
+| **User sees progress** | No (blank screen for 5s) | Yes (text appears at 3s) |
+| **True streaming** | No (simulated after all tokens arrive) | Yes (real tokens from GPU) |
+| **Can cancel mid-generation** | No (GPU already finished) | Yes (stop the function) |
+| **Feels like ChatGPT** | Somewhat (simulated) | Yes (real progressive display) |
+
+This matters for user experience. Research on perceived latency shows that users tolerate longer total waits when they see progressive feedback. A 5-second blank screen feels much slower than 3 seconds of waiting followed by 2 seconds of text appearing. This is the same reason ChatGPT streams tokens — the total generation time is the same, but the perceived responsiveness is much better.
+
+#### Concrete Implementation: The WebSocket Relay
+
+The relay server is remarkably simple — under 50 lines of Python:
+
+```python
+# relay_server.py — deploy on any public server
+import asyncio
+import websockets
+import json
+
+# Active channels: task_id → set of connected WebSocket clients
+channels = {}
+
+async def handler(ws):
+    """
+    Handle a WebSocket connection from either a Lakeshore worker or a STREAM client.
+
+    Protocol:
+    1. First message is the task_id (shared secret from Globus Compute)
+    2. All subsequent messages are forwarded to all other clients in the same channel
+    """
+    # First message identifies which task this connection belongs to
+    task_id = await ws.recv()
+
+    # Join the channel for this task
+    channels.setdefault(task_id, set()).add(ws)
+
+    try:
+        async for message in ws:
+            # Forward to all other clients in this channel
+            for client in channels.get(task_id, set()):
+                if client != ws:
+                    await client.send(message)
+    finally:
+        # Clean up when connection closes
+        channels.get(task_id, set()).discard(ws)
+        if not channels.get(task_id):
+            del channels[task_id]
+
+# Start the relay server
+asyncio.run(websockets.serve(handler, "0.0.0.0", 8765))
+```
+
+The remote function (running on Lakeshore) streams tokens to the relay:
+
+```python
+def remote_vllm_inference_streaming(vllm_url, model, messages, temperature,
+                                     max_tokens, task_id, relay_url):
+    """
+    Runs on Lakeshore via Globus Compute.
+    Calls vLLM with streaming enabled and forwards each token
+    to the WebSocket relay for real-time delivery to the client.
+    """
+    import requests
+    import json
+    import websocket  # websocket-client library (synchronous)
+
+    # Connect to the relay and identify ourselves with the task_id
+    ws = websocket.create_connection(relay_url)
+    ws.send(task_id)
+
+    # Call vLLM with stream=True — it returns Server-Sent Events
+    response = requests.post(
+        f"{vllm_url}/v1/chat/completions",
+        json={
+            "model": model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "stream": True,  # This is the key difference from current approach
+        },
+        stream=True,
+        timeout=60,
+    )
+
+    # Forward each SSE event through the relay
+    for line in response.iter_lines():
+        if not line:
+            continue
+        line_text = line.decode("utf-8")
+        if line_text.startswith("data: "):
+            ws.send(line_text)  # Forward the SSE chunk as-is
+
+    ws.close()
+    return {"status": "streamed"}
+```
+
+On the client side, STREAM connects to the same relay and yields tokens as SSE events:
+
+```python
+async def _forward_lakeshore_streaming(task_id, relay_url):
+    """
+    Connect to the WebSocket relay and yield SSE chunks as they arrive
+    from Lakeshore. Each chunk is a real token from vLLM's streaming output.
+    """
+    import websockets
+
+    async with websockets.connect(relay_url) as ws:
+        # Join the channel for our task
+        await ws.send(task_id)
+
+        # Receive tokens as they arrive from Lakeshore
+        async for message in ws:
+            yield message  # This is an SSE "data: {...}" line
+```
+
+The orchestration would work as follows:
+
+1. **Submit via Globus Compute** (control plane): `executor.submit(remote_vllm_inference_streaming, ...)` — this takes ~1-2 seconds for AMQP routing.
+2. **Immediately connect to relay** (data plane): While Globus routes the task, the client opens a WebSocket to the relay using the same `task_id`.
+3. **Tokens flow through relay**: Once the remote function starts on Lakeshore, it connects to the relay and begins streaming. The client receives tokens within ~50ms of generation.
+4. **Globus returns summary**: When the function completes, Globus returns `{"status": "streamed"}` through the normal channel. STREAM uses this to confirm the task finished (or to detect errors if the relay connection dropped).
+
+#### Comparison: Current vs. Hybrid SSH vs. WebSocket Relay
+
+| Metric | Current (Globus Batch) | Hybrid SSH Tunnel | WebSocket Relay |
+|--------|----------------------|-------------------|-----------------|
 | **First token latency** | ~5 seconds | ~2-3 seconds | ~3 seconds |
 | **Per-token latency** | N/A (all at once) | Real-time (~5ms) | Near-real-time (~50ms) |
 | **True streaming** | No (simulated) | Yes | Yes |
 | **Works off-campus** | Yes | No (needs SSH access) | Yes |
-| **Additional infrastructure** | None | SSH keys configured | Custom endpoint or external broker |
-| **Implementation complexity** | Current (done) | Medium | High |
+| **Additional infrastructure** | None | SSH keys configured | Relay server (~$5/mo) |
+| **Implementation complexity** | Current (done) | Medium | Medium |
 | **Cancel mid-generation** | No | Yes | Yes |
 | **Firewall transparent** | Yes | Partial (needs SSH) | Yes |
+| **No user setup required** | Yes | No (SSH keys) | Yes |
 
 #### Research Contribution Potential
 
-The AMQP streaming approach addresses a gap in the Globus Compute ecosystem: **interactive FaaS workloads**. Most Globus Compute use cases are batch-oriented (submit a job, get a result minutes later). AI inference is fundamentally different — users expect real-time, token-by-token responses. Proposing and implementing a streaming extension to Globus Compute could benefit not just STREAM but any research application that needs interactive access to HPC resources:
+The WebSocket relay approach addresses a gap in the Globus Compute ecosystem: **interactive FaaS workloads**. Most Globus Compute use cases are batch-oriented (submit a job, get a result minutes later). AI inference is fundamentally different — users expect real-time, token-by-token responses.
+
+The pattern of separating the control plane (Globus Compute for auth/submission) from the data plane (WebSocket relay for streaming) is generalizable to any research application that needs interactive access to HPC resources:
 
 - Real-time data visualization from running simulations
 - Interactive scientific computing notebooks connected to HPC backends
 - Streaming sensor data processing on GPU clusters
 - Any application where the user is waiting for progressive results
 
-This could be presented as a collaboration opportunity with the Globus team at the University of Chicago and Argonne National Laboratory.
+The control plane / data plane separation could also be proposed as a design pattern to the Globus team at the University of Chicago and Argonne National Laboratory, potentially motivating native streaming support in future SDK versions.
 
 ### 15.4 Recommended Roadmap
 
-Based on feasibility and impact, the recommended implementation order is:
+Based on feasibility, user impact, and the goal of seamless UX:
 
-| Phase | Approach | Effort | Impact |
-|-------|----------|--------|--------|
-| **Phase 1** | Globus-assisted SSH tunnel | Medium | High (2-3s → direct vLLM) |
-| **Phase 2** | AMQP streaming (side-channel broker) | Medium-High | Medium (true streaming, universal) |
-| **Phase 3** | AMQP streaming (native Globus extension) | High (requires Globus collaboration) | Very High (ecosystem-wide benefit) |
+| Phase | Approach | Effort | Impact | Target Users |
+|-------|----------|--------|--------|--------------|
+| **Phase 1** | WebSocket relay (side-channel streaming) | Medium (~1 developer) | High (true streaming, 3s first token) | All users, any network |
+| **Phase 2** | SSH tunnel fast-path (optional optimization) | Low-Medium | Medium (2s first token for SSH users) | Campus users with SSH keys |
+| **Phase 3** | Propose native Globus streaming extension | Collaborative (Globus team) | Very High (ecosystem-wide benefit) | All Globus Compute users |
 
-Phase 1 delivers the largest immediate latency improvement for campus users. Phase 2 brings true streaming to all users regardless of network location. Phase 3 is a research contribution that could benefit the broader Globus Compute community.
+**Phase 1** is the priority. It delivers true streaming to all users regardless of network location, requires no user setup (no SSH keys, no VPN), and can be built by a single developer. The relay server is under 50 lines of code and costs ~$5/month to host.
+
+**Phase 2** is an optional optimization for users who already have SSH access to Lakeshore. It reduces first-token latency from ~3s to ~2s by bypassing Globus entirely for the data path. This is a nice-to-have but not essential — the relay already provides a good experience for everyone.
+
+**Phase 3** is a research contribution. If the Globus team added native streaming support to their SDK, the relay server would become unnecessary — tokens could flow through Globus's own AMQP infrastructure. This is the long-term ideal, but it requires collaboration with the Globus team and shouldn't block Phase 1.
 
 ---
 
@@ -1204,4 +1602,4 @@ STREAM's Lakeshore connectivity demonstrates how a research middleware system ca
 
 6. **Centralized context window configuration** — `MODEL_CONTEXT_LIMITS` in `config.py` serves as the single source of truth for token limits across proxy, desktop direct calls, and context validation.
 
-The irreducible ~5-second latency for Lakeshore requests is inherent to the Globus Compute FaaS architecture (multi-hop AMQP routing through cloud infrastructure) and represents the trade-off for secure, firewall-transparent HPC access without SSH or VPN infrastructure.
+The irreducible ~5-second latency for Lakeshore requests is inherent to the Globus Compute FaaS architecture (multi-hop AMQP routing through cloud infrastructure) and represents the trade-off for secure, firewall-transparent HPC access without SSH or VPN infrastructure. The proposed WebSocket relay approach (Section 15) offers a practical path to true streaming with ~3-second first-token latency while preserving the seamless, zero-setup user experience that Globus Compute provides.

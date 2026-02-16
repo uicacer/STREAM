@@ -30,6 +30,7 @@ Since there's no server in desktop mode, we load the same YAML file
 and do the translation ourselves (see _load_model_map below).
 """
 
+import asyncio
 import json
 import logging
 from collections.abc import AsyncGenerator
@@ -299,15 +300,25 @@ async def _forward_lakeshore(
         extra={"correlation_id": correlation_id},
     )
 
-    # Yield content word by word as SSE delta chunks
+    # Yield content word by word as SSE delta chunks.
+    # We add a small delay between chunks to simulate streaming — the same
+    # approach as _convert_json_to_sse_stream() in proxy/app.py (server mode).
+    # Without this delay, all words yield in a single event loop tick and
+    # FastAPI sends them as one block — the frontend sees the whole response
+    # appear at once instead of progressively.
+    words_per_chunk = 2  # Match server mode: 2 words per chunk
+    delay_between_chunks = 0.05  # 50ms — comfortable reading pace
+
     if content:
         words = content.split(" ")
-        for i, word in enumerate(words):
-            text = word if i == 0 else f" {word}"
+        for i in range(0, len(words), words_per_chunk):
+            word_group = words[i : i + words_per_chunk]
+            text = " ".join(word_group) if i == 0 else " " + " ".join(word_group)
             chunk = {
                 "choices": [{"index": 0, "delta": {"content": text}}],
             }
             yield f"data: {json.dumps(chunk)}"
+            await asyncio.sleep(delay_between_chunks)
 
     # Yield usage info in the final chunk (streaming.py reads this for cost)
     if usage:
