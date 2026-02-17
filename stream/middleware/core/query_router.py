@@ -217,19 +217,28 @@ def get_tier_for_query(
     )
 
 
-def get_model_for_tier(tier: str, cloud_provider: str | None = None) -> str:
+def get_model_for_tier(
+    tier: str,
+    cloud_provider: str | None = None,
+    local_model: str | None = None,
+    lakeshore_model: str | None = None,
+) -> str:
     """
     Get model name for a tier.
 
     Args:
         tier: The tier to get model for (local, lakeshore, cloud)
         cloud_provider: Optional cloud provider override for cloud tier
-                       (cloud-claude, cloud-gpt, cloud-gpt-cheap)
+        local_model: Optional model override for local tier
+        lakeshore_model: Optional model override for lakeshore tier
 
     Returns:
         Model name to use with LiteLLM
     """
-    # For cloud tier, allow user to select specific provider
+    if tier == "local" and local_model:
+        return local_model
+    if tier == "lakeshore" and lakeshore_model:
+        return lakeshore_model
     if tier == "cloud" and cloud_provider:
         return cloud_provider
     return DEFAULT_MODELS.get(tier, DEFAULT_MODELS["local"])

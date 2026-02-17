@@ -45,6 +45,22 @@ export type Tier = 'auto' | 'local' | 'lakeshore' | 'cloud'
 export type JudgeStrategy = 'ollama-1b' | 'ollama-3b' | 'haiku'
 
 /**
+ * LocalModel - Available models for the Local tier (Ollama)
+ *
+ * - "local-llama-tiny"    → Llama 3.2 1B - Fastest, least capable
+ * - "local-llama"         → Llama 3.2 3B - Balanced (default)
+ * - "local-llama-quality" → Llama 3.1 8B - Best local quality, slower
+ */
+export type LocalModel = 'local-llama-tiny' | 'local-llama' | 'local-llama-quality'
+
+/**
+ * LakeshoreModel - Available models for the Lakeshore tier (Campus GPU)
+ *
+ * - "lakeshore-qwen" → Qwen 2.5 1.5B on UIC HPC cluster
+ */
+export type LakeshoreModel = 'lakeshore-qwen'
+
+/**
  * CloudProvider - Available cloud model providers
  *
  * When using the "cloud" tier, users can choose which provider to use.
@@ -94,6 +110,16 @@ export interface ChatSettings {
    * Lower for factual tasks, higher for creative writing.
    */
   temperature: number
+
+  /**
+   * Which model to use for the Local tier
+   */
+  localModel?: LocalModel
+
+  /**
+   * Which model to use for the Lakeshore tier
+   */
+  lakeshoreModel?: LakeshoreModel
 
   /**
    * Which cloud provider to use when tier is "cloud"

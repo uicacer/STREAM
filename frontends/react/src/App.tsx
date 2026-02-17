@@ -67,9 +67,9 @@ export default function App() {
 
   /**
    * State: Sidebar width (for resizing)
-   * Default is 320px, min is 250px, max is 450px
+   * Default is 340px, min is 250px, max is 450px
    */
-  const [sidebarWidth, setSidebarWidth] = useState(320)
+  const [sidebarWidth, setSidebarWidth] = useState(340)
   const isResizing = useRef(false)
 
   /**
@@ -284,11 +284,11 @@ export default function App() {
           {/**
            * Sidebar Header with Collapse Button
            */}
-          <div className="flex items-center justify-between h-12 px-3 border-b shrink-0">
-            <span className="text-sm font-medium text-muted-foreground">Menu</span>
+          <div className="flex items-center justify-center h-12 px-3 border-b shrink-0 relative">
+            <span className="text-sm font-medium text-muted-foreground">Control Panel</span>
             <button
               onClick={() => setSidebarCollapsed(true)}
-              className="p-1.5 rounded-md hover:bg-muted transition-colors"
+              className="absolute right-3 p-1.5 rounded-md hover:bg-muted transition-colors"
               aria-label="Collapse sidebar"
             >
               <PanelLeftClose className="w-4 h-4 text-muted-foreground" />

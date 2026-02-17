@@ -256,7 +256,8 @@ export interface TierDisplayInfo {
  * Get tier display info (color, tooltip) - SINGLE SOURCE OF TRUTH
  *
  * Status logic:
- * - Lakeshore: red if not authenticated, yellow if authenticated but HPC down, green if ready
+ * - Lakeshore: green if authenticated AND HPC available, red otherwise
+ *   (auth status is shown separately via the "Lakeshore authenticated" panel)
  * - Other tiers: green if available, red if not
  * - Loading (null status): gray
  */
@@ -269,15 +270,13 @@ export function getTierDisplayInfo(
     return { color: 'bg-gray-400', tooltip: 'Loading...' }
   }
 
-  // Lakeshore has special authentication logic
+  // Lakeshore: green only when fully ready (authenticated + HPC available)
   if (tier === 'lakeshore') {
-    if (tierStatus.authenticated !== true) {
-      return { color: 'bg-red-500', tooltip: 'Not authenticated' }
+    if (tierStatus.authenticated === true && tierStatus.available) {
+      return { color: 'bg-green-500', tooltip: 'Available' }
     }
-    if (!tierStatus.available) {
-      return { color: 'bg-yellow-500', tooltip: 'HPC unavailable' }
-    }
-    return { color: 'bg-green-500', tooltip: 'Available' }
+    const reason = tierStatus.authenticated !== true ? 'Not authenticated' : 'HPC unavailable'
+    return { color: 'bg-red-500', tooltip: reason }
   }
 
   // Other tiers: simple available/unavailable

@@ -16,12 +16,9 @@
 import { useRef, useState } from 'react'
 import {
   Bot,
-  Cpu,
+  Laptop,
   Building2,
   Cloud,
-  Zap,
-  Target,
-  Sparkles,
   ChevronDown,
   ChevronUp,
   BarChart3,
@@ -31,11 +28,12 @@ import {
   Loader2,
   AlertTriangle,
 } from 'lucide-react'
+import { ModelLogo } from '../icons/ProviderLogos'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useChatStore } from '../../stores/chatStore'
 import { useHealthStore, getTierDisplayInfo } from '../../stores/healthStore'
 import { authenticateGlobus } from '../../api/auth'
-import type { Tier, JudgeStrategy, CloudProvider } from '../../types'
+import type { Tier, JudgeStrategy, CloudProvider, LocalModel, LakeshoreModel } from '../../types'
 
 /**
  * Example queries for quick start
@@ -48,64 +46,92 @@ const EXAMPLE_QUERIES = [
   "What is Python?",                                    // LOW → Local
   "How do I submit a GPU job?",                         // MEDIUM → Lakeshore
   "Explain quantum computing",                          // MEDIUM → Lakeshore
-  "Design a microservices architecture for a real-time collaborative document editing system with conflict resolution, version control, and offline support. Include security considerations and scalability patterns.",  // HIGH → Cloud
+  "Write a short regex that validates an email address and explain each part",  // HIGH → Cloud
 ]
 
 /**
  * Tier configuration with icons and descriptions
  */
-const TIER_CONFIG: Record<Tier, { icon: typeof Bot; label: string; description: string }> = {
+const TIER_CONFIG: Record<Tier, { icon: typeof Bot; label: string; shortLabel: string; description: string; color: string }> = {
   auto: {
     icon: Bot,
     label: 'Auto (Smart Routing)',
-    description: 'Let STREAM choose based on complexity',
+    shortLabel: 'Auto',
+    description: 'Let STREAM choose based on query complexity',
+    color: 'text-purple-500',
   },
   local: {
-    icon: Cpu,
+    icon: Laptop,
     label: 'Local (Ollama)',
+    shortLabel: 'Local',
     description: 'Free, runs on your machine',
+    color: 'text-orange-500',
   },
   lakeshore: {
     icon: Building2,
     label: 'Lakeshore (Campus GPU)',
+    shortLabel: 'Lakeshore',
     description: 'UIC HPC cluster',
+    color: 'text-green-500',
   },
   cloud: {
     icon: Cloud,
     label: 'Cloud (Claude/GPT)',
+    shortLabel: 'Cloud',
     description: 'Most capable, paid',
+    color: 'text-blue-500',
   },
 }
 
 /**
  * Judge strategy configuration
  */
-const JUDGE_CONFIG: Record<JudgeStrategy, { icon: typeof Zap; label: string; description: string }> = {
+const JUDGE_CONFIG: Record<JudgeStrategy, { model: string; label: string; description: string }> = {
   'ollama-1b': {
-    icon: Zap,
-    label: 'Ollama 1B',
+    model: 'llama',
+    label: 'Llama 1B',
     description: 'Fastest, less accurate, free',
   },
   'ollama-3b': {
-    icon: Target,
-    label: 'Ollama 3B',
+    model: 'llama',
+    label: 'Llama 3B',
     description: 'Balanced, free',
   },
   haiku: {
-    icon: Sparkles,
+    model: 'haiku',
     label: 'Claude Haiku',
     description: '~$1/5K judgments, most accurate',
   },
 }
 
 /**
- * Cloud provider configuration
+ * Per-tier model configurations
  *
  * Source: stream/gateway/litellm_config.yaml
- * - cloud-claude: claude-sonnet-4-20250514
- * - cloud-gpt: gpt-4-turbo-2024-04-09
- * - cloud-gpt-cheap: gpt-3.5-turbo-0125
+ * Each tier has its own set of available models.
  */
+const LOCAL_MODEL_CONFIG: Record<LocalModel, { label: string; description: string }> = {
+  'local-llama-tiny': {
+    label: 'Llama 3.2 1B',
+    description: 'Fastest, least capable',
+  },
+  'local-llama': {
+    label: 'Llama 3.2 3B',
+    description: 'Balanced speed & quality',
+  },
+  'local-llama-quality': {
+    label: 'Llama 3.1 8B',
+    description: 'Best local quality, slower',
+  },
+}
+
+const LAKESHORE_MODEL_CONFIG: Record<LakeshoreModel, { label: string; description: string }> = {
+  'lakeshore-qwen': {
+    label: 'Qwen 2.5 1.5B',
+    description: 'UIC HPC cluster',
+  },
+}
+
 const CLOUD_PROVIDER_CONFIG: Record<CloudProvider, { label: string; provider: string }> = {
   'cloud-claude': {
     label: 'Claude Sonnet 4',
@@ -132,10 +158,14 @@ export function SettingsPanel({ onExampleQuery }: SettingsPanelProps) {
   const tier = useSettingsStore((state) => state.tier)
   const judgeStrategy = useSettingsStore((state) => state.judgeStrategy)
   const temperature = useSettingsStore((state) => state.temperature)
+  const localModel = useSettingsStore((state) => state.localModel)
+  const lakeshoreModel = useSettingsStore((state) => state.lakeshoreModel)
   const cloudProvider = useSettingsStore((state) => state.cloudProvider)
   const setTier = useSettingsStore((state) => state.setTier)
   const setJudgeStrategy = useSettingsStore((state) => state.setJudgeStrategy)
   const setTemperature = useSettingsStore((state) => state.setTemperature)
+  const setLocalModel = useSettingsStore((state) => state.setLocalModel)
+  const setLakeshoreModel = useSettingsStore((state) => state.setLakeshoreModel)
   const setCloudProvider = useSettingsStore((state) => state.setCloudProvider)
 
   /**
@@ -171,6 +201,9 @@ export function SettingsPanel({ onExampleQuery }: SettingsPanelProps) {
   /**
    * Local state for expandable sections
    */
+  const [localOpen, setLocalOpen] = useState(false)
+  const [lakeshoreOpen, setLakeshoreOpen] = useState(false)
+  const [cloudOpen, setCloudOpen] = useState(false)
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [statsOpen, setStatsOpen] = useState(true)
 
@@ -251,12 +284,11 @@ export function SettingsPanel({ onExampleQuery }: SettingsPanelProps) {
       {/**
        * Tier Selector
        */}
-      <div>
-        <h3 className="text-sm font-medium mb-2 flex items-center gap-2">
-          <Bot className="w-4 h-4" />
+      <div className="mb-2">
+        <h3 className="text-sm font-medium mb-2">
           Model Tier
         </h3>
-        <div className="space-y-1">
+        <div className="grid grid-cols-2 gap-1">
           {(Object.entries(TIER_CONFIG) as [Tier, typeof TIER_CONFIG['auto']][]).map(
             ([tierKey, config]) => {
               const Icon = config.icon
@@ -274,15 +306,15 @@ export function SettingsPanel({ onExampleQuery }: SettingsPanelProps) {
                 : getTierDisplayInfo(tierKey, healthStatus)
 
               const statusDot = displayInfo?.color ?? null
-              const statusTooltip = displayInfo?.tooltip ?? ''
+              const statusTooltip = displayInfo?.tooltip ?? config.description
 
               return (
                 <button
                   key={tierKey}
                   onClick={() => setTier(tierKey)}
-                  title={statusTooltip}
+                  title={statusTooltip || config.description}
                   className={`
-                    w-full flex items-center gap-2 px-3 py-2 rounded-lg text-left text-sm
+                    flex-1 flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg text-sm font-medium
                     transition-colors
                     ${isSelected
                       ? 'bg-primary text-primary-foreground'
@@ -290,49 +322,52 @@ export function SettingsPanel({ onExampleQuery }: SettingsPanelProps) {
                     }
                   `}
                 >
-                  <Icon className="w-4 h-4 flex-shrink-0" />
-                  <div className="min-w-0 flex-1">
-                    <div className="font-medium truncate flex items-center gap-1.5">
-                      {config.label}
-                      {tierKey === 'cloud' && isProviderChanging ? (
-                        <Loader2 className="w-3 h-3 animate-spin text-white flex-shrink-0" />
-                      ) : statusDot && (
-                        <span className={`w-2 h-2 rounded-full ${statusDot} flex-shrink-0`} />
-                      )}
-                      {isLakeshoreUnavailable && (
-                        <Lock className="w-3 h-3 text-yellow-500" />
-                      )}
-                    </div>
-                    <div className={`text-xs truncate ${isSelected ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>
-                      {config.description}
-                    </div>
-                  </div>
+                  <Icon className={`w-6 h-6 flex-shrink-0 ${!isSelected ? config.color : ''}`} />
+                  {config.shortLabel}
+                  {tierKey === 'cloud' && isProviderChanging ? (
+                    <Loader2 className="w-2.5 h-2.5 animate-spin flex-shrink-0" />
+                  ) : statusDot && (
+                    <span className={`w-1.5 h-1.5 rounded-full ${statusDot} flex-shrink-0`} />
+                  )}
+                  {isLakeshoreUnavailable && (
+                    <Lock className="w-2.5 h-2.5 text-yellow-500 flex-shrink-0" />
+                  )}
                 </button>
               )
             }
           )}
         </div>
+        <p className="text-xs text-muted-foreground mt-1.5">{TIER_CONFIG[tier].description}</p>
       </div>
 
       {/**
-       * Cloud Provider Selector (only when tier is 'cloud')
+       * Per-Tier Model Selection (3 collapsible sections)
        */}
-      {tier === 'cloud' && (
-        <div className="border rounded-lg p-3 bg-muted/30">
-          <label className="text-sm text-muted-foreground block mb-2">
-            Cloud Provider
-          </label>
-          <div className="space-y-1">
-            {(Object.entries(CLOUD_PROVIDER_CONFIG) as [CloudProvider, typeof CLOUD_PROVIDER_CONFIG['cloud-claude']][]).map(
-              ([providerKey, config]) => {
-                const isSelected = cloudProvider === providerKey
 
+      {/* Local Models */}
+      <div className="border rounded-lg bg-muted/30 overflow-hidden">
+        <button
+          onClick={() => setLocalOpen(!localOpen)}
+          className="w-full flex items-center gap-2 px-3 py-2.5 text-sm hover:bg-muted/50 transition-colors"
+        >
+          <Laptop className="w-4 h-4 flex-shrink-0 text-orange-500" />
+          <span className="font-medium">Local Models</span>
+          <span className="text-xs text-muted-foreground ml-auto mr-2">
+            {LOCAL_MODEL_CONFIG[localModel]?.label}
+          </span>
+          {localOpen ? <ChevronUp className="w-3.5 h-3.5 text-muted-foreground" /> : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />}
+        </button>
+        {localOpen && (
+          <div className="px-3 pb-3 space-y-1">
+            {(Object.entries(LOCAL_MODEL_CONFIG) as [LocalModel, typeof LOCAL_MODEL_CONFIG['local-llama']][]).map(
+              ([modelKey, config]) => {
+                const isSelected = localModel === modelKey
                 return (
                   <button
-                    key={providerKey}
-                    onClick={() => handleCloudProviderChange(providerKey)}
+                    key={modelKey}
+                    onClick={() => setLocalModel(modelKey)}
                     className={`
-                      w-full flex items-center justify-between px-3 py-2 rounded-lg text-left text-sm
+                      w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left text-sm
                       transition-colors
                       ${isSelected
                         ? 'bg-primary/10 text-primary border border-primary/30'
@@ -340,18 +375,104 @@ export function SettingsPanel({ onExampleQuery }: SettingsPanelProps) {
                       }
                     `}
                   >
-                    <span className="font-medium">{config.label}</span>
+                    <ModelLogo model={modelKey} className="w-4 h-4 flex-shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <div className="font-medium">{config.label}</div>
+                      <div className="text-xs text-muted-foreground">{config.description}</div>
+                    </div>
+                  </button>
+                )
+              }
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Lakeshore Models */}
+      <div className="border rounded-lg bg-muted/30 overflow-hidden">
+        <button
+          onClick={() => setLakeshoreOpen(!lakeshoreOpen)}
+          className="w-full flex items-center gap-2 px-3 py-2.5 text-sm hover:bg-muted/50 transition-colors"
+        >
+          <Building2 className="w-4 h-4 flex-shrink-0 text-green-500" />
+          <span className="font-medium">Lakeshore Models</span>
+          <span className="text-xs text-muted-foreground ml-auto mr-2">
+            {LAKESHORE_MODEL_CONFIG[lakeshoreModel]?.label}
+          </span>
+          {lakeshoreOpen ? <ChevronUp className="w-3.5 h-3.5 text-muted-foreground" /> : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />}
+        </button>
+        {lakeshoreOpen && (
+          <div className="px-3 pb-3 space-y-1">
+            {(Object.entries(LAKESHORE_MODEL_CONFIG) as [LakeshoreModel, typeof LAKESHORE_MODEL_CONFIG['lakeshore-qwen']][]).map(
+              ([modelKey, config]) => {
+                const isSelected = lakeshoreModel === modelKey
+                return (
+                  <button
+                    key={modelKey}
+                    onClick={() => setLakeshoreModel(modelKey)}
+                    className={`
+                      w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left text-sm
+                      transition-colors
+                      ${isSelected
+                        ? 'bg-primary/10 text-primary border border-primary/30'
+                        : 'hover:bg-muted text-foreground'
+                      }
+                    `}
+                  >
+                    <ModelLogo model={modelKey} className="w-4 h-4 flex-shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <div className="font-medium">{config.label}</div>
+                      <div className="text-xs text-muted-foreground">{config.description}</div>
+                    </div>
+                  </button>
+                )
+              }
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Cloud Models */}
+      <div className="border rounded-lg bg-muted/30 overflow-hidden">
+        <button
+          onClick={() => setCloudOpen(!cloudOpen)}
+          className="w-full flex items-center gap-2 px-3 py-2.5 text-sm hover:bg-muted/50 transition-colors"
+        >
+          <Cloud className="w-4 h-4 flex-shrink-0 text-blue-500" />
+          <span className="font-medium">Cloud Models</span>
+          <span className="text-xs text-muted-foreground ml-auto mr-2">
+            {CLOUD_PROVIDER_CONFIG[cloudProvider]?.label}
+          </span>
+          {cloudOpen ? <ChevronUp className="w-3.5 h-3.5 text-muted-foreground" /> : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />}
+        </button>
+        {cloudOpen && (
+          <div className="px-3 pb-3 space-y-1">
+            {(Object.entries(CLOUD_PROVIDER_CONFIG) as [CloudProvider, typeof CLOUD_PROVIDER_CONFIG['cloud-claude']][]).map(
+              ([providerKey, config]) => {
+                const isSelected = cloudProvider === providerKey
+                return (
+                  <button
+                    key={providerKey}
+                    onClick={() => handleCloudProviderChange(providerKey)}
+                    className={`
+                      w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left text-sm
+                      transition-colors
+                      ${isSelected
+                        ? 'bg-primary/10 text-primary border border-primary/30'
+                        : 'hover:bg-muted text-foreground'
+                      }
+                    `}
+                  >
+                    <ModelLogo model={providerKey} className="w-4 h-4 flex-shrink-0" />
+                    <span className="font-medium flex-1">{config.label}</span>
                     <span className="text-xs text-muted-foreground">{config.provider}</span>
                   </button>
                 )
               }
             )}
           </div>
-        </div>
-      )}
-
-      {/* Cloud auth errors are shown via AuthErrorDialog when requests fail,
-          not proactively in settings panel */}
+        )}
+      </div>
 
       {/**
        * Lakeshore Authentication Panel
@@ -422,12 +543,66 @@ export function SettingsPanel({ onExampleQuery }: SettingsPanelProps) {
        */}
       {showAuthSuccess && (
         <div className="border rounded-lg p-3 bg-green-500/10 border-green-500/30">
-          <div className="flex items-center gap-2 text-green-600 dark:text-green-400">
+          <div className="flex items-center justify-center gap-2 text-green-600 dark:text-green-400">
             <Unlock className="w-4 h-4" />
             <span className="text-sm font-medium">Lakeshore authenticated</span>
           </div>
         </div>
       )}
+
+      {/**
+       * Session Stats (expanded by default)
+       */}
+      <div className="border-t pt-3">
+        <button
+          onClick={() => setStatsOpen(!statsOpen)}
+          className="w-full flex items-center justify-between text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <span className="flex items-center gap-2">
+            <BarChart3 className="w-4 h-4" />
+            Session Stats
+          </span>
+          {statsOpen ? (
+            <ChevronUp className="w-4 h-4" />
+          ) : (
+            <ChevronDown className="w-4 h-4" />
+          )}
+        </button>
+
+        {statsOpen && (
+          <div className="mt-3 space-y-2">
+            {/* Total cost - full width row */}
+            <div className="bg-muted/50 rounded-lg p-2 flex items-center justify-between">
+              <div className="text-xs text-muted-foreground">Total Cost</div>
+              <div className="text-sm font-semibold">${stats.totalCost.toFixed(4)}</div>
+            </div>
+
+            {/* Per-tier breakdown - 2x2 grid */}
+            <div className="grid grid-cols-2 gap-1">
+              <div className="bg-muted/50 rounded-lg p-2 flex items-center justify-center gap-1.5 text-sm font-medium">
+                <Bot className="w-4 h-4 text-purple-500" />
+                <span>{stats.queries}</span>
+                <span className="text-xs text-muted-foreground font-normal">Total</span>
+              </div>
+              <div className="bg-muted/50 rounded-lg p-2 flex items-center justify-center gap-1.5 text-sm font-medium">
+                <Laptop className="w-4 h-4 text-orange-500" />
+                <span>{stats.localQueries}</span>
+                <span className="text-xs text-muted-foreground font-normal">Local</span>
+              </div>
+              <div className="bg-muted/50 rounded-lg p-2 flex items-center justify-center gap-1.5 text-sm font-medium">
+                <Building2 className="w-4 h-4 text-green-500" />
+                <span>{stats.lakeshoreQueries}</span>
+                <span className="text-xs text-muted-foreground font-normal">Lakeshore</span>
+              </div>
+              <div className="bg-muted/50 rounded-lg p-2 flex items-center justify-center gap-1.5 text-sm font-medium">
+                <Cloud className="w-4 h-4 text-blue-500" />
+                <span>{stats.cloudQueries}</span>
+                <span className="text-xs text-muted-foreground font-normal">Cloud</span>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
 
       {/**
        * Advanced Settings (expandable)
@@ -485,7 +660,6 @@ export function SettingsPanel({ onExampleQuery }: SettingsPanelProps) {
               <div className="space-y-1">
                 {(Object.entries(JUDGE_CONFIG) as [JudgeStrategy, typeof JUDGE_CONFIG['ollama-1b']][]).map(
                   ([strategyKey, config]) => {
-                    const Icon = config.icon
                     const isSelected = judgeStrategy === strategyKey
                     const isDisabled = tier !== 'auto'
 
@@ -505,7 +679,7 @@ export function SettingsPanel({ onExampleQuery }: SettingsPanelProps) {
                           }
                         `}
                       >
-                        <Icon className="w-4 h-4 flex-shrink-0" />
+                        <ModelLogo model={config.model} className="w-4 h-4 flex-shrink-0" />
                         <div className="min-w-0">
                           <div className="font-medium">{config.label}</div>
                           <div className="text-xs text-muted-foreground">
@@ -523,54 +697,9 @@ export function SettingsPanel({ onExampleQuery }: SettingsPanelProps) {
       </div>
 
       {/**
-       * Session Stats
-       */}
-      <div className="border-t pt-3">
-        <button
-          onClick={() => setStatsOpen(!statsOpen)}
-          className="w-full flex items-center justify-between text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
-        >
-          <span className="flex items-center gap-2">
-            <BarChart3 className="w-4 h-4" />
-            Session Stats
-          </span>
-          {statsOpen ? (
-            <ChevronUp className="w-4 h-4" />
-          ) : (
-            <ChevronDown className="w-4 h-4" />
-          )}
-        </button>
-
-        {statsOpen && (
-          <div className="mt-3 grid grid-cols-2 gap-2">
-            <div className="bg-muted/50 rounded-lg p-2">
-              <div className="text-lg font-semibold">{stats.queries}</div>
-              <div className="text-xs text-muted-foreground">Total Queries</div>
-            </div>
-            <div className="bg-muted/50 rounded-lg p-2">
-              <div className="text-lg font-semibold">${stats.totalCost.toFixed(4)}</div>
-              <div className="text-xs text-muted-foreground">Total Cost</div>
-            </div>
-            <div className="bg-muted/50 rounded-lg p-2">
-              <div className="text-lg font-semibold">{stats.localQueries}</div>
-              <div className="text-xs text-muted-foreground">💻 Local (Free)</div>
-            </div>
-            <div className="bg-muted/50 rounded-lg p-2">
-              <div className="text-lg font-semibold">{stats.lakeshoreQueries}</div>
-              <div className="text-xs text-muted-foreground">🏫 Lakeshore</div>
-            </div>
-            <div className="bg-muted/50 rounded-lg p-2 col-span-2">
-              <div className="text-lg font-semibold">{stats.cloudQueries}</div>
-              <div className="text-xs text-muted-foreground">☁️ Cloud</div>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/**
        * Example Queries
        */}
-      <div className="border-t pt-3">
+      <div className="border-t pt-3 mt-4">
         <h3 className="text-sm font-medium mb-2 flex items-center gap-2">
           <Lightbulb className="w-4 h-4" />
           Try These

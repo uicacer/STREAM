@@ -228,24 +228,24 @@ class OllamaModelManager:
         print("You can cancel with Ctrl+C if needed.\n")
 
         try:
-            # Run with or without progress output
-            if show_progress:
-                # Show real-time progress
-                process = subprocess.Popen(
-                    ["ollama", "pull", model_name],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                )
+            process = subprocess.Popen(
+                ["ollama", "pull", model_name],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
 
-                # Stream output
+            if show_progress:
+                # Stream output so user sees download progress
                 for line in process.stdout:
                     print(line, end="")
-
-                process.wait()
-                success = process.returncode == 0
             else:
-                success = True
+                # Consume output silently (still need to read it to avoid
+                # blocking the subprocess if the pipe buffer fills up)
+                process.stdout.read()
+
+            process.wait()
+            success = process.returncode == 0
 
             if success:
                 print(f"\n✅ Model '{model_name}' downloaded successfully!")

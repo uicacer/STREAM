@@ -28,6 +28,7 @@ from stream.middleware.core.database_sqlite import log_cost
 from stream.middleware.core.litellm_client import forward_to_litellm
 from stream.middleware.core.metrics import MetricsTracker
 from stream.middleware.core.query_router import get_model_for_tier
+from stream.middleware.core.tier_health import mark_tier_unavailable
 from stream.middleware.utils.cost_calculator import calculate_query_cost
 from stream.middleware.utils.fallback import get_fallback_reason, get_fallback_tier
 from stream.middleware.utils.token_estimator import estimate_tokens, estimate_tokens_from_text
@@ -635,6 +636,11 @@ async def create_streaming_response(
             # Should we attempt fallback?
             # Yes if: (1) it's a tier failure AND (2) we haven't exhausted retries
             if is_tier_failure and attempt < MAX_FALLBACK_ATTEMPTS - 1:
+                # Mark the failed tier as unavailable so the health indicator
+                # flips to red immediately (next poll will re-check and restore
+                # if the tier recovers).
+                mark_tier_unavailable(current_tier, str(e.detail)[:200])
+
                 logger.warning(
                     f"[{correlation_id}] {current_tier.upper()} tier failed: {e.detail}",
                     extra={
@@ -688,6 +694,8 @@ async def create_streaming_response(
 
                 else:
                     # No more fallback tiers available
+                    mark_tier_unavailable(current_tier, str(e.detail)[:200])
+
                     logger.error(
                         f"[{correlation_id}] No fallback tiers available",
                         extra={
@@ -707,6 +715,9 @@ async def create_streaming_response(
             else:
                 # Either not a tier failure (e.g., bad request)
                 # OR we've exhausted all retry attempts
+                if is_tier_failure:
+                    mark_tier_unavailable(current_tier, str(e.detail)[:200])
+
                 logger.error(
                     f"[{correlation_id}] Streaming error (no fallback): {str(e)}",
                     exc_info=True,
@@ -738,6 +749,8 @@ async def create_streaming_response(
             # UNEXPECTED ERROR (not HTTPException)
             # ---------------------------------------------------------------------
             # This should rarely happen - indicates a bug or unexpected condition
+            mark_tier_unavailable(current_tier, str(e)[:200])
+
             logger.error(
                 f"[{correlation_id}] Unexpected streaming error: {str(e)}",
                 exc_info=True,  # Include full traceback for debugging

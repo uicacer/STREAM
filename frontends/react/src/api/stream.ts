@@ -135,6 +135,8 @@ export async function streamChat(
       // User's preferences
       temperature: settings.temperature,
       judge_strategy: settings.judgeStrategy,
+      local_model: settings.localModel,
+      lakeshore_model: settings.lakeshoreModel,
       cloud_provider: settings.cloudProvider,
     }),
     signal: abortSignal,

@@ -5,9 +5,8 @@
  * Shows real-time availability status of all AI tiers in the header.
  *
  * Status indicators:
- * - Green dot = Available
- * - Red dot = Unavailable (for Lakeshore: not authenticated - shows VPN warning)
- * - Yellow dot = Lakeshore authenticated but HPC unavailable
+ * - Green dot = Available (for Lakeshore: authenticated AND HPC available)
+ * - Red dot = Unavailable (for Lakeshore: not authenticated or HPC down)
  *
  * Lakeshore authentication note:
  * Users must disable VPN before authenticating with Globus.

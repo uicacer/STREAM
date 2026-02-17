@@ -8,9 +8,6 @@ Extracted from app.py to keep the main application file clean.
 import logging
 import sys
 
-from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
-
 from stream.middleware.config import (
     CORS_ORIGINS,
     DEBUG,
@@ -26,7 +23,6 @@ from stream.middleware.core.tier_health import check_all_tiers
 from stream.middleware.core.warm_ping import warm_up_all_tiers
 
 logger = logging.getLogger(__name__)
-console = Console()
 
 
 async def startup():
@@ -46,7 +42,11 @@ async def startup():
     logger.info(f"📊 Debug mode: {DEBUG}")
     logger.info(f"🔗 CORS origins: {CORS_ORIGINS}")
 
-    # Step 1: Check/download Ollama models
+    # Step 1: Check Ollama models
+    # In desktop mode, the interactive download prompt runs in main.py
+    # BEFORE the server starts (so it doesn't block the startup lifecycle).
+    # Here we only log warnings for missing models (useful in Docker/server mode
+    # where models should already be pre-downloaded).
     logger.info("🔍 Checking required Ollama models...")
     await _check_ollama_models()
 
@@ -111,17 +111,14 @@ async def shutdown():
 
 async def _check_ollama_models():
     """
-    Check if required Ollama models are available.
+    Log warnings for missing Ollama models (non-blocking).
 
-    In Docker (non-interactive):
-        - Logs warnings if models missing
-        - Shows instructions for manual download
-        - Continues startup (doesn't block)
+    This runs inside the FastAPI startup lifecycle, so it must NEVER block
+    on user input — that would prevent the server from accepting requests
+    and cause the health-check timeout in desktop mode.
 
-    In local dev (interactive):
-        - Prompts user to download missing models
-        - Downloads if user confirms
-        - Continues regardless
+    Interactive downloads are handled earlier in main.py (desktop mode) or
+    by the user manually (Docker mode).
     """
     manager = OllamaModelManager()
     missing_models = []
@@ -131,65 +128,13 @@ async def _check_ollama_models():
             missing_models.append(ollama_model)
             logger.warning(f"⚠️  Model {ollama_model} not found")
 
-            size_estimate = manager.get_model_size_estimate(ollama_model)
-            logger.warning(f"   Estimated size: {size_estimate}")
-
-            # Check if running in interactive mode (TTY) or Docker
-            if sys.stdin.isatty():
-                # Interactive mode: ask user to download
-                console.print(f"\nModel [bold]{ollama_model}[/bold] not found.")
-                console.print(f"Size: [bold]{size_estimate}[/bold]")
-                response = (
-                    console.input(
-                        "Download now? ([bold green]y[/bold green]/[bold red]n[/bold red]): "
-                    )
-                    .strip()
-                    .lower()
-                )
-
-                if response in ["y", "yes"]:
-                    with Progress(
-                        SpinnerColumn(),
-                        TextColumn("[progress.description]{task.description}"),
-                        TimeElapsedColumn(),
-                        console=console,
-                    ) as progress:
-                        task = progress.add_task(
-                            f"Downloading [bold]{ollama_model}[/bold]...", start=False
-                        )
-                        progress.start_task(task)
-
-                        success = manager.pull_model(ollama_model, show_progress=False)
-
-                        if success:
-                            progress.update(
-                                task,
-                                description=f"[green]✓ {ollama_model} downloaded[/green]",
-                            )
-                            logger.info(f"✅ Downloaded {ollama_model}")
-                        else:
-                            progress.update(
-                                task,
-                                description=f"[red]✗ Failed to download {ollama_model}[/red]",
-                            )
-                            logger.error(f"❌ Failed to download {ollama_model}")
-                else:
-                    logger.warning(f"   Skipping {ollama_model}")
-            else:
-                # Docker mode: show instructions
-                logger.warning("⚠️  Running in Docker - models should be pre-downloaded")
-                logger.warning(
-                    f"   To download: docker exec -it stream-ollama ollama pull {ollama_model}"
-                )
-
     if not missing_models:
         logger.info("✅ All Ollama models available")
     else:
-        logger.warning(f"⚠️  {len(missing_models)} model(s) not found")
+        logger.warning(
+            f"⚠️  {len(missing_models)} model(s) not found — LOCAL tier may be unavailable"
+        )
         if not sys.stdin.isatty():
-            logger.warning("=" * 70)
             logger.warning("📋 To download missing models:")
             for model in missing_models:
                 logger.warning(f"   docker exec -it stream-ollama ollama pull {model}")
-            logger.warning("=" * 70)
-            logger.warning("⚠️  LOCAL tier unavailable until models downloaded")

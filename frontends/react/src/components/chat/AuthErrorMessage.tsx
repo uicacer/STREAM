@@ -10,7 +10,7 @@
  * - Go to Settings for more options
  */
 
-import { AlertTriangle, Home, Building2, Settings, X } from 'lucide-react'
+import { AlertTriangle, Laptop, Building2, Settings, X } from 'lucide-react'
 import { useHealthStore } from '../../stores/healthStore'
 
 export interface AuthErrorInfo {
@@ -76,7 +76,7 @@ export function AuthErrorMessage({
                        bg-orange-500/10 text-orange-600 dark:text-orange-400
                        hover:bg-orange-500/20 transition-colors border border-orange-500/30"
           >
-            <Home className="w-4 h-4" />
+            <Laptop className="w-4 h-4" />
             Use Local
           </button>
         )}

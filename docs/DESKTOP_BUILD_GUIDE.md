@@ -125,6 +125,75 @@ dist/STREAM.app/Contents/MacOS/STREAM
 Option B is better for debugging because you see all print statements and errors
 directly in your terminal. Option A just shows the app window.
 
+## Development Workflow (Hot Reload)
+
+During development, you don't need to rebuild the desktop app to see every change.
+Instead, run the backend and the Vite dev server separately — edits to frontend
+files appear instantly in the browser without any rebuild step.
+
+### Setup
+
+**Terminal 1 — Start the backend (dev mode):**
+
+```bash
+cd /Users/nassar/Documents/CODES/STREAM
+python -m stream.desktop.main --dev
+```
+
+This starts the FastAPI backend on `http://127.0.0.1:5000` with all desktop
+defaults applied (SQLite, direct litellm calls, Ollama on localhost) but
+without opening a native window.
+
+**Important:** Do NOT run `python -m stream.middleware.app` directly — it
+reads Docker hostnames from `.env` that don't exist on your machine.
+
+**Terminal 2 — Start the Vite dev server:**
+
+```bash
+cd frontends/react
+npm run dev:vite
+```
+
+This starts the Vite dev server on `http://localhost:3000` with Hot Module
+Replacement (HMR) enabled.
+
+**Open `http://localhost:3000` in your browser.** The Vite config
+(`vite.config.ts`) already proxies `/v1` and `/health` requests to the backend
+on port 5000, so the frontend talks to your local middleware automatically.
+
+### How It Works
+
+```
+Browser (localhost:3000)
+   │
+   ├── Frontend assets ──→ Vite dev server (port 3000, instant HMR)
+   └── API requests ─────→ Proxied to FastAPI middleware (port 5000)
+```
+
+- **Frontend changes** (React components, CSS, stores): Save the file → browser
+  updates instantly via HMR. No reload needed.
+- **Backend changes** (Python routes, core logic): Restart the middleware process
+  in Terminal 1. The frontend reconnects automatically.
+
+### What to Do After Changes
+
+| What changed | What to do |
+|---|---|
+| **Frontend only** | Nothing — Vite HMR updates the browser instantly on save |
+| **Backend only** | Restart Terminal 1 (`Ctrl+C`, re-run the command). Terminal 2 stays running |
+| **Both** | Restart Terminal 1 only. Frontend changes are already live via HMR |
+| **New npm package** | Restart Terminal 2 (`Ctrl+C`, `npm install`, `npm run dev:vite`) |
+
+### When to Do a Full Rebuild
+
+Only rebuild with PyInstaller when you need to:
+- Test the actual packaged `.app` (PyWebView window, Ollama lifecycle, etc.)
+- Ship a new version to `/Applications`
+- Verify that PyInstaller bundles everything correctly
+
+For day-to-day frontend and backend work, the browser workflow above is
+identical to what the desktop app shows.
+
 ## Build Output Structure
 
 ```

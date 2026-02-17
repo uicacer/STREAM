@@ -22,7 +22,8 @@ import ReactMarkdown from 'react-markdown'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import 'katex/dist/katex.min.css'
-import { Copy, Check, Cpu, Building2, Cloud, Clock, AlertTriangle } from 'lucide-react'
+import { Copy, Check, Laptop, Building2, Cloud, Clock, AlertTriangle } from 'lucide-react'
+import { ModelLogo } from '../icons/ProviderLogos'
 import { cn } from '../../lib/utils'
 import { ThinkingBlock } from './ThinkingBlock'
 import type { Message as MessageType } from '../../types'
@@ -32,7 +33,7 @@ import type { Message as MessageType } from '../../types'
  */
 const TIER_CONFIG = {
   local: {
-    icon: Cpu,
+    icon: Laptop,
     label: 'LOCAL',
     color: 'text-orange-600 dark:text-orange-400',
     bgColor: 'bg-orange-500/10',
@@ -164,8 +165,9 @@ export function Message({ message, isStreaming = false }: MessageProps) {
             </span>
           </div>
 
-          {/* Model name */}
-          <span className="text-muted-foreground">
+          {/* Model name with provider logo */}
+          <span className="text-muted-foreground flex items-center gap-1">
+            <ModelLogo model={message.metadata.model || ''} className="w-3.5 h-3.5" />
             {formatModelName(message.metadata.model || 'unknown')}
           </span>
 

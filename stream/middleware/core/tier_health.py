@@ -27,6 +27,7 @@ from stream.middleware.config import (
     OLLAMA_MODELS,
     STREAM_MODE,
 )
+from stream.middleware.core.globus_auth import is_authenticated as globus_is_authenticated
 
 # In desktop mode, we call litellm as a Python library (no HTTP gateway).
 # _resolve_model() translates STREAM's internal model names into the kwargs
@@ -68,6 +69,22 @@ def set_active_cloud_provider(provider: str | None):
     global _active_cloud_provider
     if provider:
         _active_cloud_provider = provider
+
+
+def mark_tier_unavailable(tier: str, error: str) -> None:
+    """
+    Mark a tier as unavailable after a real query failure.
+
+    Called by the chat route when a request to a tier fails at runtime.
+    The next periodic health poll will re-check and restore the indicator
+    if the tier recovers.
+    """
+    if tier in _tier_health:
+        _tier_health[tier]["available"] = False
+        _tier_health[tier]["error"] = error
+        _tier_health[tier]["error_type"] = "connection"
+        _tier_health[tier]["last_check"] = datetime.now().isoformat()
+        logger.warning(f"[Health] Marked {tier} as unavailable: {error}")
 
 
 def check_tier_health(
@@ -120,7 +137,9 @@ def check_tier_health(
 
                 return True, None
 
-        # LAKESHORE: Check proxy health and (in server mode) test inference
+        # LAKESHORE: Cheap health check — verify config + auth + proxy reachable.
+        # No inference test here (too expensive for a 30-second poll).
+        # If a real query fails, mark_tier_unavailable() flips the indicator red.
         elif tier == "lakeshore":
             if STREAM_MODE == "desktop":
                 # Desktop mode: proxy is embedded in the same server process.
@@ -130,6 +149,8 @@ def check_tier_health(
                 gc = _proxy_app.globus_client
                 if not gc or not gc.is_available():
                     return False, "Globus Compute not configured or unavailable"
+                if not globus_is_authenticated():
+                    return False, "Globus Compute authentication required"
                 return True, None
 
             # Server mode: proxy runs as a separate container, check via HTTP
@@ -144,7 +165,6 @@ def check_tier_health(
                     health_data = response.json()
                     if health_data.get("status") != "healthy":
                         return False, "Lakeshore proxy unhealthy"
-                    # Check for Globus auth errors
                     if health_data.get("globus_authenticated") is False:
                         return False, "Globus Compute authentication required"
             except httpx.ConnectError:
@@ -152,58 +172,7 @@ def check_tier_health(
             except Exception as e:
                 return False, f"Lakeshore proxy error: {str(e)}"
 
-            # Server mode: test ACTUAL inference through the LiteLLM HTTP gateway.
-            # LiteLLM handles model name translation and routing.
-            for attempt in range(2):
-                try:
-                    with httpx.Client(timeout=20.0) as client:  # HPC can be slow
-                        response = client.post(
-                            f"{LITELLM_BASE_URL}/v1/chat/completions",
-                            json={
-                                "model": model,  # LiteLLM translates this
-                                "messages": [{"role": "user", "content": "ping"}],
-                                "max_tokens": 1,  # Minimal response
-                                "stream": False,
-                            },
-                            headers={
-                                "Authorization": f"Bearer {LITELLM_API_KEY}",
-                                "Content-Type": "application/json",
-                            },
-                        )
-
-                        if response.status_code == 200:
-                            return True, None
-                        else:
-                            # Parse error to get useful info
-                            try:
-                                error_data = response.json()
-                                error_msg = str(
-                                    error_data.get(
-                                        "detail",
-                                        error_data.get("error", f"HTTP {response.status_code}"),
-                                    )
-                                )
-                                # Check for common HPC issues
-                                if "ManagerLost" in error_msg:
-                                    return False, "HPC workers crashed (ManagerLost)"
-                                if "authentication" in error_msg.lower():
-                                    return (
-                                        False,
-                                        f"Globus Compute authentication required: {error_msg[:80]}",
-                                    )
-                                return False, f"Inference failed: {error_msg[:100]}"
-                            except Exception:
-                                return False, f"HTTP {response.status_code}"
-
-                except httpx.TimeoutException:
-                    if attempt < 1:
-                        time.sleep(2)
-                        continue
-                    return False, "Inference timeout (HPC workers may be unavailable)"
-                except Exception as e:
-                    return False, f"Inference error: {str(e)}"
-
-            return False, "Inference failed after retries"
+            return True, None
 
         # CLOUD: Verify the cloud provider is reachable and the API key is valid.
         # Makes a minimal 1-token test call. Works for ANY provider litellm supports

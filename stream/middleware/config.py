@@ -221,6 +221,7 @@ DEFAULT_MODELS = {
 OLLAMA_MODELS = {
     "local-llama-tiny": "llama3.2:1b",
     "local-llama": "llama3.2:3b",
+    "local-llama-quality": "llama3.1:8b",
 }
 
 # =============================================================================

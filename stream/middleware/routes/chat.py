@@ -126,6 +126,16 @@ class ChatCompletionRequest(BaseModel):
         description="Judge strategy for complexity analysis (ollama-1b, ollama-3b, haiku). Default: ollama-3b",
     )
 
+    local_model: str | None = Field(
+        default=None,
+        description="Model to use for local tier (local-llama-tiny, local-llama, local-llama-quality). Default: local-llama",
+    )
+
+    lakeshore_model: str | None = Field(
+        default=None,
+        description="Model to use for lakeshore tier (lakeshore-qwen). Default: lakeshore-qwen",
+    )
+
     cloud_provider: str | None = Field(
         default=None,
         description="Cloud provider to use when tier is 'cloud' (cloud-claude, cloud-gpt, cloud-gpt-cheap). Default: cloud-claude",
@@ -320,7 +330,12 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
         ) from e
 
     tier = routing_result.tier
-    model = get_model_for_tier(tier, cloud_provider=request_body.cloud_provider)
+    model = get_model_for_tier(
+        tier,
+        cloud_provider=request_body.cloud_provider,
+        local_model=request_body.local_model,
+        lakeshore_model=request_body.lakeshore_model,
+    )
 
     # Track routing fallback info for UI notification
     routing_fallback_info = None

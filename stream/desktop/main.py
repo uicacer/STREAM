@@ -75,12 +75,129 @@ apply_desktop_defaults()
 
 # NOW it's safe to import middleware modules — config.py will see
 # STREAM_MODE="desktop" and all the other desktop defaults we just set.
+from rich.console import Console
+from rich.progress import (
+    BarColumn,
+    DownloadColumn,
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    TimeElapsedColumn,
+    TransferSpeedColumn,
+)
+
 from stream.desktop.first_run import is_first_run, run_first_run_setup
 from stream.desktop.ollama_lifecycle import start_ollama, stop_ollama
 from stream.middleware.app import app as fastapi_app  # The FastAPI application object
-from stream.middleware.config import MIDDLEWARE_HOST, MIDDLEWARE_PORT
+from stream.middleware.config import MIDDLEWARE_HOST, MIDDLEWARE_PORT, OLLAMA_MODELS
+from stream.middleware.core.ollama_manager import OllamaModelManager
 
 logger = logging.getLogger(__name__)
+console = Console()
+
+
+def check_and_download_ollama_models():
+    """
+    Check required Ollama models and offer to download missing ones.
+
+    This runs on the MAIN THREAD before the FastAPI server starts, so
+    interactive prompts and long downloads don't block the server lifecycle.
+    Uses Ollama's HTTP API with streaming to show a real progress bar.
+    """
+    manager = OllamaModelManager()
+
+    for _alias, ollama_model in OLLAMA_MODELS.items():
+        if manager.is_model_available(ollama_model):
+            continue
+
+        size_estimate = manager.get_model_size_estimate(ollama_model)
+        console.print(f"\nModel [bold]{ollama_model}[/bold] not found.")
+        console.print(f"Size: [bold]{size_estimate}[/bold]")
+        response = (
+            console.input("Download now? ([bold green]y[/bold green]/[bold red]n[/bold red]): ")
+            .strip()
+            .lower()
+        )
+
+        if response not in ["y", "yes"]:
+            console.print(f"  Skipping {ollama_model} — local tier may be limited")
+            continue
+
+        # Download using Ollama HTTP API with streaming progress
+        _download_model_with_progress(manager.ollama_url, ollama_model)
+        # Refresh the manager's model list so subsequent checks see it
+        manager.available_models = manager._get_available_models()
+
+
+def _download_model_with_progress(ollama_url: str, model_name: str):
+    """
+    Download an Ollama model with a Rich progress bar.
+
+    Uses the /api/pull endpoint with streaming, which returns NDJSON lines
+    containing 'total' and 'completed' byte counts per layer.
+    """
+    import json
+
+    try:
+        with httpx.stream(
+            "POST",
+            f"{ollama_url}/api/pull",
+            json={"name": model_name},
+            timeout=None,  # No timeout — large models can take a while
+        ) as resp:
+            if resp.status_code != 200:
+                console.print(f"[red]Failed to start download: HTTP {resp.status_code}[/red]")
+                return
+
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                BarColumn(),
+                DownloadColumn(),
+                TransferSpeedColumn(),
+                TimeElapsedColumn(),
+                console=console,
+            ) as progress:
+                task = progress.add_task(f"Pulling {model_name}", total=None)
+                current_digest = None
+
+                for line in resp.iter_lines():
+                    if not line:
+                        continue
+                    try:
+                        data = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+
+                    status = data.get("status", "")
+                    total = data.get("total")
+                    completed = data.get("completed", 0)
+                    digest = data.get("digest")
+
+                    # When a new layer starts, reset the progress bar
+                    if digest and digest != current_digest:
+                        current_digest = digest
+                        short_digest = digest.split(":")[-1][:12]
+                        progress.update(
+                            task, description=f"{status} {short_digest}", completed=0, total=total
+                        )
+                    elif total:
+                        progress.update(task, completed=completed, total=total)
+                    else:
+                        # Status-only lines (e.g., "verifying sha256 digest")
+                        progress.update(task, description=status)
+
+                    if status == "success":
+                        progress.update(task, description=f"[green]Downloaded {model_name}[/green]")
+
+        console.print(f"[green]✓ {model_name} ready[/green]")
+
+    except httpx.ConnectError:
+        console.print(f"[red]Cannot connect to Ollama at {ollama_url} — is it running?[/red]")
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Download cancelled[/yellow]")
+    except Exception as e:
+        console.print(f"[red]Download failed: {e}[/red]")
 
 
 def is_port_in_use(host: str, port: int) -> bool:
@@ -379,9 +496,19 @@ def main():
 
     This function orchestrates the entire launch process, step by step.
     Each step depends on the previous one succeeding.
+
+    Flags:
+        --dev   Start the backend without opening a native window.
+                Use this during development alongside `npm run dev:vite`
+                for instant hot-reload in the browser at localhost:3000.
     """
 
-    print("STREAM Desktop starting...")
+    dev_mode = "--dev" in sys.argv
+
+    if dev_mode:
+        print("STREAM Desktop starting (dev mode — no window)...")
+    else:
+        print("STREAM Desktop starting...")
 
     # -------------------------------------------------------------------------
     # STEP 2: First-run setup (only on the very first launch)
@@ -407,6 +534,15 @@ def main():
     if not ollama_ok:
         print("Warning: Ollama is not available — local models will be disabled")
         print("The app will still work with cloud models (requires API keys)")
+
+    # -------------------------------------------------------------------------
+    # STEP 4b: Check/download required Ollama models
+    # -------------------------------------------------------------------------
+    # This runs BEFORE the server starts so interactive download prompts
+    # don't block the FastAPI startup lifecycle. The download uses Ollama's
+    # HTTP streaming API to show a real progress bar.
+    if ollama_ok:
+        check_and_download_ollama_models()
 
     # -------------------------------------------------------------------------
     # STEP 5: Check for port conflicts and auto-recover if possible
@@ -481,7 +617,22 @@ def main():
     #   start()         = "show the window and wait for the user to close it"
     #
     # Everything after start() only runs AFTER the window is closed.
-    if _HAS_WEBVIEW:
+    if dev_mode:
+        # Dev mode — no window. The developer uses the Vite dev server
+        # (localhost:3000) in their browser for hot-reload.
+        print()
+        print(f"Backend ready at {server_url}")
+        print("Open http://localhost:3000 in your browser (Vite dev server)")
+        print("Press Ctrl+C to stop the server")
+
+        try:
+            # Keep the main thread alive so the daemon server thread keeps running.
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            print("\nShutting down...")
+
+    elif _HAS_WEBVIEW:
         # PyWebView is installed — open a native OS window (no browser chrome).
         # We add a timestamp query parameter (?_t=...) to the URL to prevent
         # WebKit from serving a stale cached version of the page. This is called

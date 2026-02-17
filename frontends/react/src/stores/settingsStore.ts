@@ -19,7 +19,7 @@
 
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { Tier, JudgeStrategy, ChatSettings, CloudProvider } from '../types'
+import type { Tier, JudgeStrategy, ChatSettings, CloudProvider, LocalModel, LakeshoreModel } from '../types'
 
 /**
  * SettingsState - The shape of our settings store
@@ -30,6 +30,8 @@ interface SettingsState {
   judgeStrategy: JudgeStrategy
   temperature: number
   theme: 'system' | 'light' | 'dark'
+  localModel: LocalModel
+  lakeshoreModel: LakeshoreModel
   cloudProvider: CloudProvider
 
   /**
@@ -43,6 +45,8 @@ interface SettingsState {
   setJudgeStrategy: (strategy: JudgeStrategy) => void
   setTemperature: (temp: number) => void
   setTheme: (theme: 'system' | 'light' | 'dark') => void
+  setLocalModel: (model: LocalModel) => void
+  setLakeshoreModel: (model: LakeshoreModel) => void
   setCloudProvider: (provider: CloudProvider) => void
   getSettings: () => ChatSettings
 
@@ -87,7 +91,9 @@ export const useSettingsStore = create<SettingsState>()(
       judgeStrategy: 'ollama-3b',  // Safe fallback (matches backend default)
       temperature: 0.7,
       theme: 'dark',
-      cloudProvider: 'cloud-claude',  // Default cloud provider
+      localModel: 'local-llama',          // Default local model (3B)
+      lakeshoreModel: 'lakeshore-qwen',   // Default lakeshore model
+      cloudProvider: 'cloud-claude',      // Default cloud provider
       _initialized: false,
 
       // ============= Actions =============
@@ -97,6 +103,10 @@ export const useSettingsStore = create<SettingsState>()(
       setJudgeStrategy: (judgeStrategy) => set({ judgeStrategy }),
 
       setTemperature: (temperature) => set({ temperature }),
+
+      setLocalModel: (localModel) => set({ localModel }),
+
+      setLakeshoreModel: (lakeshoreModel) => set({ lakeshoreModel }),
 
       setCloudProvider: (cloudProvider) => set({ cloudProvider }),
 
@@ -122,6 +132,8 @@ export const useSettingsStore = create<SettingsState>()(
           tier: state.tier,
           judgeStrategy: state.judgeStrategy,
           temperature: state.temperature,
+          localModel: state.localModel,
+          lakeshoreModel: state.lakeshoreModel,
           cloudProvider: state.cloudProvider,
         }
       },
@@ -158,7 +170,7 @@ export const useSettingsStore = create<SettingsState>()(
       /**
        * Version for migrations - increment when storage format changes
        */
-      version: 3,
+      version: 4,
       /**
        * Migration: Runs automatically when storage version changes.
        * Each version upgrade fixes a specific issue with persisted state.
@@ -189,6 +201,17 @@ export const useSettingsStore = create<SettingsState>()(
           }
         }
 
+        if (version < 4) {
+          // v3 → v4: Add per-tier model selection.
+          // Set defaults for existing users who don't have these fields yet.
+          console.log('[Settings] Migration v4: adding per-tier model defaults')
+          return {
+            ...state,
+            localModel: 'local-llama',
+            lakeshoreModel: 'lakeshore-qwen',
+          }
+        }
+
         return state
       },
       /**
@@ -206,7 +229,9 @@ export const useSettingsStore = create<SettingsState>()(
         judgeStrategy: state.judgeStrategy,
         temperature: state.temperature,
         theme: state.theme,
-        cloudProvider: state.cloudProvider,  // Persist cloud provider choice
+        localModel: state.localModel,           // Persist per-tier model choices
+        lakeshoreModel: state.lakeshoreModel,
+        cloudProvider: state.cloudProvider,
         _initialized: state._initialized,
       }),
     }

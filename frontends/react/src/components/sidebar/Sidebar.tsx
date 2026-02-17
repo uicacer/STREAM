@@ -96,12 +96,12 @@ export function Sidebar({ onClose, isMobile: _isMobile, onExampleQuery }: Sideba
       {/**
        * Tab Switcher
        */}
-      <div className="flex border-b">
+      <div className="flex bg-background">
         <button
           onClick={() => setActiveTab('settings')}
           className={`flex-1 flex items-center justify-center gap-2 px-3 py-3 text-sm font-medium transition-colors
             ${activeTab === 'settings'
-              ? 'text-primary border-b-2 border-primary bg-background'
+              ? 'text-primary bg-muted/50 rounded-t-lg'
               : 'text-muted-foreground hover:text-foreground'
             }`}
         >
@@ -112,7 +112,7 @@ export function Sidebar({ onClose, isMobile: _isMobile, onExampleQuery }: Sideba
           onClick={() => setActiveTab('history')}
           className={`flex-1 flex items-center justify-center gap-2 px-3 py-3 text-sm font-medium transition-colors
             ${activeTab === 'history'
-              ? 'text-primary border-b-2 border-primary bg-background'
+              ? 'text-primary bg-muted/50 rounded-t-lg'
               : 'text-muted-foreground hover:text-foreground'
             }`}
         >

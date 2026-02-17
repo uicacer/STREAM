@@ -17,11 +17,11 @@
  */
 
 import { useState, useEffect, useMemo, useRef } from 'react'
-import { Home, Building2, Cloud, Bot, Sparkles, AlertTriangle, Brain, Router, Zap } from 'lucide-react'
+import { Laptop, Building2, Cloud, Bot, Sparkles, AlertTriangle, Brain, Router, Zap } from 'lucide-react'
 
 // Tier icon mapping
 const tierIcons = {
-  local: Home,
+  local: Laptop,
   lakeshore: Building2,
   cloud: Cloud,
   auto: Bot,
@@ -282,7 +282,7 @@ export function TypingIndicator({
                 ? 'bg-purple-500/20 text-purple-600 dark:text-purple-400 ring-2 ring-purple-500/30'
                 : 'bg-purple-500/10 text-purple-500/60'
               }
-              ${analyzeComplete && displayPhase === 'routing' ? 'animate-stage-complete' : ''}
+              ${''}
             `}
           >
             <Brain className="w-3 h-3" />
@@ -304,7 +304,7 @@ export function TypingIndicator({
                   ? `${colors.bg} ${colors.text} opacity-60`
                   : 'bg-muted text-muted-foreground'
               }
-              ${routeComplete && displayPhase === 'routing' ? 'animate-stage-complete' : ''}
+              ${''}
             `}
           >
             <Router className="w-3 h-3" />
@@ -321,7 +321,7 @@ export function TypingIndicator({
           <div
             className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-colors duration-300
               ${displayPhase === 'generating'
-                ? `${colors.bg} ${colors.text} ring-2 ${colors.border} animate-stage-complete`
+                ? `${colors.bg} ${colors.text} ring-2 ${colors.border}`
                 : 'bg-muted text-muted-foreground'
               }`}
           >
@@ -332,7 +332,7 @@ export function TypingIndicator({
           {/* Complexity badge (shown after routing complete) */}
           {routeComplete && complexityLabel && (
             <div
-              className={`ml-2 px-2.5 py-1 rounded-full text-xs font-semibold flex items-center gap-1.5 animate-stage-complete
+              className={`ml-2 px-2.5 py-1 rounded-full text-xs font-semibold flex items-center gap-1.5
                 ${complexityConfig[complexity as keyof typeof complexityConfig]?.bg || 'bg-muted'}
                 ${complexityConfig[complexity as keyof typeof complexityConfig]?.text || 'text-muted-foreground'}
               `}
