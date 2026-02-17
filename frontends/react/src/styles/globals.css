@@ -3,6 +3,30 @@
  * ==========================================================
  */
 
+/*
+ * Geist Font Family (by Vercel)
+ *
+ * Variable fonts — a single file covers all weights (100-900).
+ * font-display: swap shows fallback text immediately, then swaps
+ * to Geist once loaded (~50ms). No layout shift because Geist's
+ * metrics are close to system sans-serif.
+ */
+@font-face {
+  font-family: 'Geist Sans';
+  src: url('../../node_modules/geist/dist/fonts/geist-sans/Geist-Variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Geist Mono';
+  src: url('../../node_modules/geist/dist/fonts/geist-mono/GeistMono-Variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -36,23 +60,34 @@
   }
 
   .dark {
-    /* Dark mode - Rich dark theme with vibrant accents */
-    --background: 222 47% 8%;
-    --foreground: 210 40% 98%;
-    --card: 222 47% 11%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222 47% 11%;
-    --popover-foreground: 210 40% 98%;
+    /*
+     * Dark mode - Optimized for long reading sessions
+     *
+     * Key change: reduced foreground brightness from 98% to 84% to eliminate
+     * "halation" (bright text bleeding into dark background). Pure white on
+     * very dark backgrounds creates a contrast ratio >17:1 which causes eye
+     * strain. The new ratio is ~11:1, still well above WCAG AA (4.5:1) but
+     * much more comfortable for extended reading.
+     *
+     * Background lifted from 8% to 11% to further reduce the luminance gap.
+     * Card/popover lifted proportionally (11% → 14%) to maintain visual hierarchy.
+     */
+    --background: 222 47% 11%;
+    --foreground: 220 13% 84%;
+    --card: 222 47% 14%;
+    --card-foreground: 220 13% 84%;
+    --popover: 222 47% 14%;
+    --popover-foreground: 220 13% 84%;
     --primary: 217 91% 60%;
     --primary-foreground: 0 0% 100%;
     --secondary: 217 33% 17%;
-    --secondary-foreground: 210 40% 98%;
+    --secondary-foreground: 220 13% 84%;
     --muted: 217 33% 17%;
     --muted-foreground: 215 20% 65%;
     --accent: 217 33% 17%;
-    --accent-foreground: 210 40% 98%;
+    --accent-foreground: 220 13% 84%;
     --destructive: 0 63% 31%;
-    --destructive-foreground: 210 40% 98%;
+    --destructive-foreground: 220 13% 84%;
     --border: 217 33% 17%;
     --input: 217 33% 17%;
     --ring: 217 91% 60%;
@@ -62,6 +97,22 @@
 @layer base {
   * { @apply border-border; }
   body { @apply bg-background text-foreground; }
+
+  /*
+   * Override prose-invert body/heading/bold colors to match our theme.
+   *
+   * Tailwind Typography's prose-invert uses its own hardcoded colors
+   * (body=gray-300, headings=white, bold=white) which ignore our
+   * --foreground CSS variable. This override wires them to the theme
+   * so the softened foreground applies consistently to message content.
+   */
+  .dark .prose-invert {
+    --tw-prose-body: hsl(var(--foreground));
+    --tw-prose-headings: hsl(var(--foreground));
+    --tw-prose-bold: hsl(var(--foreground));
+    --tw-prose-counters: hsl(var(--muted-foreground));
+    --tw-prose-bullets: hsl(var(--muted-foreground));
+  }
 
   /* Custom scrollbar styling */
   ::-webkit-scrollbar {

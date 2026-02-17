@@ -399,7 +399,7 @@ export function ChatContainer() {
         onScroll={handleScroll}
         className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8"
       >
-        <div className="max-w-6xl mx-auto space-y-6">
+        <div className="max-w-4xl mx-auto space-y-6">
           {messages.map((message) => (
             <Message key={message.id} message={message} />
           ))}

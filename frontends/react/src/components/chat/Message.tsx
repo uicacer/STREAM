@@ -133,15 +133,15 @@ export function Message({ message, isStreaming = false }: MessageProps) {
           <p className="whitespace-pre-wrap text-base">{message.content}</p>
         ) : (
           <div className="prose prose-lg dark:prose-invert max-w-none
-                          prose-p:my-3 prose-p:leading-7 prose-p:text-base
-                          prose-headings:my-4 prose-headings:font-semibold
+                          prose-p:my-3 prose-p:leading-8 prose-p:text-base
+                          prose-headings:my-4 prose-headings:font-semibold prose-headings:text-foreground
                           prose-h1:text-2xl prose-h2:text-xl prose-h3:text-lg
-                          prose-pre:bg-slate-900 prose-pre:text-slate-50 prose-pre:rounded-xl prose-pre:p-4 prose-pre:my-4
+                          prose-pre:bg-slate-800 prose-pre:text-slate-200 prose-pre:rounded-xl prose-pre:p-4 prose-pre:my-4
                           prose-pre:text-base prose-pre:leading-7 prose-pre:overflow-x-auto
-                          prose-code:bg-slate-100 dark:prose-code:bg-slate-800 prose-code:rounded-md prose-code:px-1.5 prose-code:py-0.5
+                          prose-code:bg-slate-100 dark:prose-code:bg-slate-700/50 prose-code:rounded-md prose-code:px-1.5 prose-code:py-0.5
                           prose-code:text-base prose-code:font-medium
                           prose-code:before:content-none prose-code:after:content-none
-                          prose-ul:my-3 prose-ol:my-3 prose-li:my-1 prose-li:text-base
+                          prose-ul:my-3 prose-ol:my-3 prose-li:my-1 prose-li:text-base prose-li:leading-8
                           prose-strong:font-semibold prose-strong:text-foreground
                           prose-a:text-primary prose-a:no-underline hover:prose-a:underline">
             <ReactMarkdown
@@ -158,7 +158,7 @@ export function Message({ message, isStreaming = false }: MessageProps) {
        * Routing details row (assistant messages only)
        */}
       {!isUser && message.metadata && (
-        <div className="flex items-center gap-3 text-sm text-muted-foreground px-1 flex-wrap">
+        <div className="flex items-center gap-3 text-xs text-muted-foreground px-1 flex-wrap">
           {/* Tier badge with color */}
           <div className={cn(
             "flex items-center gap-1.5 px-2.5 py-1 rounded-full",
