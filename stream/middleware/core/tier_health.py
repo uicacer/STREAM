@@ -20,6 +20,7 @@ from stream.middleware.config import (
     CLOUD_PROVIDERS,
     DEFAULT_MODELS,
     HEALTH_CHECK_TTL,
+    LAKESHORE_HEALTH_TIMEOUT,
     LAKESHORE_PROXY_URL,
     LITELLM_API_KEY,
     LITELLM_BASE_URL,
@@ -71,26 +72,51 @@ def set_active_cloud_provider(provider: str | None):
         _active_cloud_provider = provider
 
 
-def mark_tier_unavailable(tier: str, error: str) -> None:
+def mark_tier_unavailable(
+    tier: str,
+    error: str,
+    lakeshore_model: str | None = None,
+) -> None:
     """
     Mark a tier as unavailable after a real query failure.
 
-    Called by the chat route when a request to a tier fails at runtime.
+    Called by the streaming code when a request to a tier fails at runtime.
     The next periodic health poll will re-check and restore the indicator
     if the tier recovers.
+
+    For Lakeshore, each model runs on a separate vLLM port on the HPC cluster
+    (e.g., qwen-1.5b on :8000, coder-1.5b on :8001, qwen-32b on :8004).
+    A single model being down (e.g., 32B not running) should NOT mark
+    the entire Lakeshore tier red — other models may still work.
+    So we use per-model cache keys: "lakeshore:lakeshore-qwen-32b".
+
+    Args:
+        tier: The tier to mark ("local", "lakeshore", or "cloud")
+        error: Error message describing the failure
+        lakeshore_model: For lakeshore tier, the specific model that failed.
+                        When provided, only that model is marked unavailable.
+                        When None, the entire tier is marked unavailable.
     """
-    if tier in _tier_health:
-        _tier_health[tier]["available"] = False
-        _tier_health[tier]["error"] = error
-        _tier_health[tier]["error_type"] = "connection"
-        _tier_health[tier]["last_check"] = datetime.now()
-        logger.warning(f"[Health] Marked {tier} as unavailable: {error}")
+    # Build cache key: use per-model key for lakeshore so each vLLM model
+    # is tracked independently (same pattern as cloud:{provider} and local:{model})
+    cache_key = tier
+    if tier == "lakeshore" and lakeshore_model:
+        cache_key = f"lakeshore:{lakeshore_model}"
+
+    _tier_health[cache_key] = {
+        "available": False,
+        "error": error,
+        "error_type": "connection",
+        "last_check": datetime.now(),
+    }
+    logger.warning(f"[Health] Marked {cache_key} as unavailable: {error}")
 
 
 def check_tier_health(
     tier: str,
     cloud_provider: str | None = None,
     local_model: str | None = None,
+    lakeshore_model: str | None = None,
 ) -> tuple[bool, str | None]:
     """
     Check if a specific tier is available.
@@ -106,6 +132,11 @@ def check_tier_health(
                        and billing — Claude being down shouldn't block GPT.
         local_model: For local tier, test a specific model (e.g., "local-llama-quality")
                     instead of the default. Verifies the model is installed in Ollama.
+        lakeshore_model: For lakeshore tier, the specific model to test
+                        (e.g., "lakeshore-qwen-32b"). We can't ping vLLM ports
+                        directly (they're behind Globus on the HPC), so this is
+                        used to check if a previous inference attempt failed for
+                        this specific model.
 
     Returns:
         Tuple of (is_available, error_message). error_message is None if available.
@@ -145,10 +176,32 @@ def check_tier_health(
 
                 return True, None
 
-        # LAKESHORE: Cheap health check — verify config + auth + proxy reachable.
-        # No inference test here (too expensive for a 30-second poll).
-        # If a real query fails, mark_tier_unavailable() flips the indicator red.
+        # LAKESHORE: Two-level health check.
+        #
+        # Level 1 (always runs, cheap ~100ms):
+        #   Verify Globus auth + proxy reachable. If this fails, ALL lakeshore
+        #   models are unavailable — no point testing individual ones.
+        #
+        # Level 2 (only when lakeshore_model is specified, ~5-15s):
+        #   Send a real 1-token inference through Globus to the specific model's
+        #   vLLM port. This confirms the model is actually running on the HPC.
+        #
+        # Why we need Level 2:
+        #   Each model runs as a separate vLLM instance on a different port
+        #   (e.g., qwen-1.5b on :8000, qwen-32b on :8004). The base check
+        #   (Level 1) only confirms "Globus is reachable" — it can't tell us
+        #   if a specific vLLM port is up. Without Level 2, switching to a
+        #   model that isn't running would still show a green health indicator.
+        #
+        # When does Level 2 run?
+        #   - When the frontend sends lakeshore_model in the health poll
+        #     (happens when user changes model selection in settings)
+        #   - Results are cached with a per-model key ("lakeshore:lakeshore-qwen-32b")
+        #   - Subsequent polls use the cached result until TTL expires
+        #   - So the slow check only happens once per model change, not every 30s
+        #
         elif tier == "lakeshore":
+            # === LEVEL 1: Base infrastructure check ===
             if STREAM_MODE == "desktop":
                 # Desktop mode: proxy is embedded in the same server process.
                 # Check the Globus client directly instead of HTTP (which would
@@ -159,6 +212,22 @@ def check_tier_health(
                     return False, "Globus Compute not configured or unavailable"
                 if not globus_is_authenticated():
                     return False, "Globus Compute authentication required"
+
+                # === LEVEL 2: Per-model vLLM port check (desktop mode) ===
+                # If a specific model was requested, send a real 1-token
+                # inference through Globus to verify the vLLM instance on
+                # that port is actually running and can generate output.
+                if lakeshore_model:
+                    logger.info(
+                        f"[Health] Running Level 2 check for {lakeshore_model} "
+                        f"(1-token inference via Globus, timeout={LAKESHORE_HEALTH_TIMEOUT}s)"
+                    )
+                    return gc.check_model_health(
+                        model=lakeshore_model,
+                        timeout=LAKESHORE_HEALTH_TIMEOUT,
+                    )
+
+                # No specific model requested — base check passed, tier is healthy
                 return True, None
 
             # Server mode: proxy runs as a separate container, check via HTTP
@@ -179,6 +248,46 @@ def check_tier_health(
                 return False, "Cannot connect to Lakeshore proxy. Is the proxy service running?"
             except Exception as e:
                 return False, f"Lakeshore proxy error: {str(e)}"
+
+            # === LEVEL 2: Per-model check (server mode) ===
+            # In server mode, the Globus client lives in the proxy container.
+            # Send a minimal inference request through the proxy to test the
+            # specific model's vLLM port.
+            if lakeshore_model:
+                try:
+                    logger.info(
+                        f"[Health] Running Level 2 check for {lakeshore_model} "
+                        f"via proxy (timeout={LAKESHORE_HEALTH_TIMEOUT}s)"
+                    )
+                    with httpx.Client(timeout=float(LAKESHORE_HEALTH_TIMEOUT)) as client:
+                        # Send a 1-token inference through the proxy.
+                        # The proxy routes this to Globus → HPC → vLLM on the
+                        # model's port. If the port isn't serving, we get an error.
+                        response = client.post(
+                            f"{LAKESHORE_PROXY_URL}/v1/chat/completions",
+                            json={
+                                "model": lakeshore_model,
+                                "messages": [{"role": "user", "content": "hi"}],
+                                "max_tokens": 1,
+                                "temperature": 0.0,
+                            },
+                        )
+                        if response.status_code == 200:
+                            return True, None
+                        else:
+                            error_msg = (
+                                response.text[:150]
+                                if response.text
+                                else f"HTTP {response.status_code}"
+                            )
+                            return False, f"Model not responding: {error_msg}"
+                except httpx.TimeoutException:
+                    return (
+                        False,
+                        f"Model not responding (timed out after {LAKESHORE_HEALTH_TIMEOUT}s)",
+                    )
+                except Exception as e:
+                    return False, f"Model health check error: {str(e)[:150]}"
 
             return True, None
 
@@ -381,6 +490,7 @@ def is_tier_available(
     ttl: int = HEALTH_CHECK_TTL,
     cloud_provider: str | None = None,
     local_model: str | None = None,
+    lakeshore_model: str | None = None,
 ) -> bool:
     """
     Check if tier is available (with caching).
@@ -397,31 +507,34 @@ def is_tier_available(
                        If None, uses DEFAULT_MODELS["cloud"].
         local_model: For local tier, the specific model to test (e.g., "local-llama-quality").
                     If None, uses DEFAULT_MODELS["local"].
+        lakeshore_model: For lakeshore tier, the specific model to test
+                        (e.g., "lakeshore-qwen-32b"). Each Lakeshore model runs on
+                        a separate vLLM port, so we track availability per-model.
+                        If None, uses the base "lakeshore" cache key.
 
-    Why cloud_provider matters:
-    ---------------------------
-    The health check tests ONE cloud model to determine if Cloud tier is available.
-    Without this parameter, it always tests the default provider (e.g., Claude).
+    Per-model cache keys:
+    ---------------------
+    Each tier supports per-model health tracking:
+      - Cloud:     "cloud:{provider}"      e.g., "cloud:cloud-gpt"
+      - Local:     "local:{model}"         e.g., "local:local-llama-quality"
+      - Lakeshore: "lakeshore:{model}"     e.g., "lakeshore:lakeshore-qwen-32b"
 
-    Problem scenario:
-    1. Claude has billing issues → health check fails → Cloud marked unavailable
-    2. User switches to GPT in settings (which works fine)
-    3. User selects Cloud tier → still fails because cache says "unavailable"
-    4. User is stuck, can't use Cloud even though GPT works
-
-    Solution:
-    By passing cloud_provider, we test the ACTUAL provider the user selected.
-    Each provider gets its own cache entry, so Claude being down doesn't block GPT.
-    The same logic applies to local_model — each Ollama model is checked independently.
+    This ensures that one model being down doesn't incorrectly mark the
+    entire tier as unavailable. For example, if the 32B model isn't running
+    on Lakeshore but the 1.5B is, selecting 32B should show red while
+    selecting 1.5B should show green.
     """
     # Use model-specific cache keys so each model is tracked independently.
     # This allows Claude to be "unhealthy" while GPT is "healthy",
-    # or local-llama to be installed while local-llama-quality is not.
+    # local-llama to be installed while local-llama-quality is not,
+    # and lakeshore-qwen-1.5b to be running while lakeshore-qwen-32b is not.
     cache_key = tier
     if tier == "cloud" and cloud_provider:
         cache_key = f"cloud:{cloud_provider}"
     elif tier == "local" and local_model:
         cache_key = f"local:{local_model}"
+    elif tier == "lakeshore" and lakeshore_model:
+        cache_key = f"lakeshore:{lakeshore_model}"
 
     status = _tier_health.get(cache_key)
 
@@ -438,7 +551,10 @@ def is_tier_available(
 
     # Pass model overrides so the check tests the right model
     is_available, error = check_tier_health(
-        tier, cloud_provider=cloud_provider, local_model=local_model
+        tier,
+        cloud_provider=cloud_provider,
+        local_model=local_model,
+        lakeshore_model=lakeshore_model,
     )
     error_type = _determine_error_type(error)
 
@@ -479,6 +595,7 @@ def get_available_tiers() -> list[str]:
 def get_tier_error(
     tier: str,
     cloud_provider: str | None = None,
+    lakeshore_model: str | None = None,
 ) -> tuple[str | None, str | None]:
     """
     Get the error details for a tier.
@@ -488,15 +605,20 @@ def get_tier_error(
         cloud_provider: For cloud tier, the specific provider (e.g., "cloud-gpt").
                        This must match what was passed to is_tier_available(),
                        otherwise we'll look up the wrong cache entry.
+        lakeshore_model: For lakeshore tier, the specific model (e.g., "lakeshore-qwen-32b").
+                        Same logic as cloud_provider — must match is_tier_available()
+                        so we look up the correct per-model cache entry.
 
-    Why cloud_provider matters:
-    ---------------------------
-    The health cache stores cloud provider errors separately:
+    Why model-specific keys matter:
+    -------------------------------
+    The health cache stores per-model errors separately:
     - "cloud" key has errors from default provider (Claude)
     - "cloud:cloud-gpt" key has errors from GPT
+    - "lakeshore" key has errors from base tier check
+    - "lakeshore:lakeshore-qwen-32b" key has errors from the 32B model check
 
-    If we test GPT but look up "cloud" key, we get Claude's old error!
-    This causes confusing messages like "AnthropicException" when GPT was tested.
+    If we test the 32B model but look up the "lakeshore" key, we'd get the
+    base tier status (which may be "healthy") even though 32B is down.
 
     Returns:
         Tuple of (error_message, error_type) where error_type is one of:
@@ -510,6 +632,8 @@ def get_tier_error(
     cache_key = tier
     if tier == "cloud" and cloud_provider:
         cache_key = f"cloud:{cloud_provider}"
+    elif tier == "lakeshore" and lakeshore_model:
+        cache_key = f"lakeshore:{lakeshore_model}"
 
     status = _tier_health.get(cache_key)
     if status is None:

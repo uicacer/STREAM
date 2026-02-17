@@ -639,7 +639,11 @@ async def create_streaming_response(
                 # Mark the failed tier as unavailable so the health indicator
                 # flips to red immediately (next poll will re-check and restore
                 # if the tier recovers).
-                mark_tier_unavailable(current_tier, str(e.detail)[:200])
+                mark_tier_unavailable(
+                    current_tier,
+                    str(e.detail)[:200],
+                    lakeshore_model=current_model if current_tier == "lakeshore" else None,
+                )
 
                 logger.warning(
                     f"[{correlation_id}] {current_tier.upper()} tier failed: {e.detail}",
@@ -694,7 +698,11 @@ async def create_streaming_response(
 
                 else:
                     # No more fallback tiers available
-                    mark_tier_unavailable(current_tier, str(e.detail)[:200])
+                    mark_tier_unavailable(
+                        current_tier,
+                        str(e.detail)[:200],
+                        lakeshore_model=current_model if current_tier == "lakeshore" else None,
+                    )
 
                     logger.error(
                         f"[{correlation_id}] No fallback tiers available",
@@ -716,7 +724,11 @@ async def create_streaming_response(
                 # Either not a tier failure (e.g., bad request)
                 # OR we've exhausted all retry attempts
                 if is_tier_failure:
-                    mark_tier_unavailable(current_tier, str(e.detail)[:200])
+                    mark_tier_unavailable(
+                        current_tier,
+                        str(e.detail)[:200],
+                        lakeshore_model=current_model if current_tier == "lakeshore" else None,
+                    )
 
                 logger.error(
                     f"[{correlation_id}] Streaming error (no fallback): {str(e)}",
@@ -749,7 +761,13 @@ async def create_streaming_response(
             # UNEXPECTED ERROR (not HTTPException)
             # ---------------------------------------------------------------------
             # This should rarely happen - indicates a bug or unexpected condition
-            mark_tier_unavailable(current_tier, str(e)[:200])
+            # Pass lakeshore_model so only the specific model gets marked
+            # unavailable, not the entire Lakeshore tier.
+            mark_tier_unavailable(
+                current_tier,
+                str(e)[:200],
+                lakeshore_model=current_model if current_tier == "lakeshore" else None,
+            )
 
             logger.error(
                 f"[{correlation_id}] Unexpected streaming error: {str(e)}",

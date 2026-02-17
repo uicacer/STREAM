@@ -312,6 +312,7 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
             user_query,
             request_body.model,
             cloud_provider=request_body.cloud_provider,
+            lakeshore_model=request_body.lakeshore_model,
         )
     except AuthError as e:
         # Auth error on a tier - don't fallback, show error to user

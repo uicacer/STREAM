@@ -691,6 +691,147 @@ class GlobusComputeClient:
                 "error_type": type(e).__name__,
             }
 
+    def check_model_health(self, model: str, timeout: int = 20) -> tuple[bool, str | None]:
+        """
+        SYNCHRONOUS per-model health check: sends a 1-token inference to a
+        specific Lakeshore model through Globus Compute, with a short timeout.
+
+        This is called by tier_health.check_tier_health() when the user selects
+        a specific Lakeshore model. It verifies that the model's vLLM instance
+        is actually running and can generate output.
+
+        Why sync (not async)?
+        ---------------------
+        check_tier_health() is a sync function called from both:
+          - Async context: health route handler (via is_tier_available)
+          - Sync context: query_router (via is_tier_available)
+        Making this async would require two code paths. Since the existing
+        health checks already block (httpx sync calls for local/cloud), adding
+        another blocking call is consistent with the codebase pattern.
+
+        How the timeout works:
+        ----------------------
+        There are two timeout layers:
+          1. Remote function: requests.post(timeout=180) on the HPC — this is
+             the vLLM request timeout inside remote_vllm_inference.
+          2. Client side: future.result(timeout=20) — this is OUR timeout.
+
+        Scenario: Model NOT running
+          → remote requests.post() gets ConnectionRefused immediately (~0s)
+          → Globus returns the error dict in ~5-6s (AMQP round-trip)
+          → We get result in ~6s, well within our 20s timeout.
+
+        Scenario: Model running, fast (1.5B)
+          → 1-token inference takes <1s on GPU
+          → Globus round-trip ~5s
+          → We get result in ~6s.
+
+        Scenario: Model running, slow (32B)
+          → 1-token inference takes 5-10s on GPU
+          → Globus round-trip ~5s
+          → We get result in ~10-15s. Still within 20s.
+
+        Scenario: Globus itself is broken
+          → future.result(timeout=20) raises TimeoutError at 20s.
+          → We return (False, "timeout message").
+
+        Note: If the remote function is still running on HPC when we timeout,
+        it continues running there but we ignore its result. This is a 1-token
+        request so it wastes negligible resources.
+
+        Args:
+            model: STREAM model key (e.g., "lakeshore-qwen-32b").
+                   Used to look up the correct vLLM port and HuggingFace name.
+            timeout: Max seconds to wait for the Globus round-trip.
+                    Default 20s — long enough for slow models, short enough
+                    to not block the UI.
+
+        Returns:
+            (is_healthy, error_message)
+            - (True, None) if the model responded successfully
+            - (False, "error description") if the model is down or unreachable
+        """
+        if not self.is_available():
+            return False, "Globus Compute not configured"
+
+        # Check authentication first — no point submitting if not authed.
+        # ensure_authenticated() is a cheap local check (no network call).
+        is_authenticated, auth_message = self.ensure_authenticated()
+        if not is_authenticated:
+            return False, auth_message or "Globus Compute authentication required"
+
+        try:
+            # Get the persistent Executor (reuses existing AMQP connection)
+            gce = self._get_executor()
+
+            # Resolve model-specific vLLM URL (each model runs on a different port).
+            # Example: "lakeshore-qwen-32b" → "http://ga-002:8004"
+            vllm_url = get_lakeshore_vllm_url(model)
+
+            # Resolve the HuggingFace model name that vLLM expects in API calls.
+            # STREAM uses internal names (e.g., "lakeshore-qwen-1.5b"), but vLLM
+            # was started with the HF name (e.g., "Qwen/Qwen2.5-1.5B-Instruct").
+            model_info = LAKESHORE_MODELS.get(model)
+            if not model_info:
+                return False, f"Unknown model: {model}"
+            hf_model = model_info["hf_name"]
+
+            logger.info(
+                f"[Health] Checking model {model} → {hf_model} at {vllm_url} "
+                f"(timeout={timeout}s)"
+            )
+
+            t_start = time.perf_counter()
+
+            # Submit minimal 1-token inference to the remote HPC node.
+            # This goes through the full Globus Compute path:
+            #   local → AMQP → Globus cloud → Lakeshore endpoint → vLLM on port
+            # The prompt "hi" and max_tokens=1 is the cheapest possible inference.
+            future = gce.submit(
+                remote_vllm_inference,
+                vllm_url,
+                hf_model,
+                [{"role": "user", "content": "hi"}],
+                0.0,  # temperature (deterministic — don't waste randomness)
+                1,  # max_tokens (just 1 token — we only care if it responds)
+                False,  # stream=False
+            )
+
+            # Block until the result arrives or timeout fires.
+            # This is the key difference from submit_inference() which uses
+            # asyncio.to_thread(). Here we block directly because
+            # check_tier_health() is a sync function. The timeout ensures
+            # we don't hang for 240s if something goes wrong.
+            result = future.result(timeout=timeout)
+
+            elapsed = time.perf_counter() - t_start
+            logger.info(f"[Health] Model {model} check completed in {elapsed:.1f}s")
+
+            # Check if the remote function returned an error dict.
+            # ConnectionRefused → {"error": "...", "error_type": "ConnectionError"}
+            # HTTP 4xx/5xx → {"error": "...", "error_type": "HTTPError"}
+            if isinstance(result, dict) and "error" in result:
+                error_msg = result.get("error", "Unknown error")
+                logger.warning(f"[Health] Model {model} is NOT available: {error_msg}")
+                return False, f"Model not responding: {error_msg[:150]}"
+
+            # Success — the model generated at least 1 token
+            logger.info(f"[Health] Model {model} is available ✓")
+            return True, None
+
+        except TimeoutError:
+            logger.warning(f"[Health] Model {model} health check timed out after {timeout}s")
+            return False, f"Model not responding (timed out after {timeout}s)"
+
+        except Exception as e:
+            # Unexpected error (AMQP connection issue, serialization failure, etc.)
+            # Don't reset the executor here — let the next real inference handle that.
+            logger.error(
+                f"[Health] Model {model} health check failed: {e}",
+                exc_info=True,
+            )
+            return False, f"Health check error: {str(e)[:150]}"
+
     async def health_check(self) -> tuple[bool, str | None]:
         """
         Perform a health check by submitting a simple test inference.

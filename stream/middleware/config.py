@@ -237,6 +237,21 @@ HEALTH_CHECK_TTL = 360  # 6 minutes - for internal routing decisions
 QUICK_CHECK_TTL = 30  # 30 seconds - for frontend status display
 HEALTH_CHECK_TIMEOUT = 5.0
 
+# Timeout for Lakeshore per-model health checks (seconds).
+# This is used when the user selects a specific Lakeshore model and we need to
+# verify it's actually running by sending a 1-token inference through Globus.
+#
+# How the timeout works:
+#   - Model NOT running: Globus submits to HPC, remote `requests.post()` gets
+#     ConnectionRefused immediately → result comes back in ~5-6s (Globus round-trip).
+#   - Model running & fast (1.5B): 1-token generation is <1s → result in ~5-7s.
+#   - Model running but slow (32B): 1-token might take 5-10s → result in ~10-15s.
+#   - Globus/network issues: times out at this limit.
+#
+# 20s is long enough for even slow models, short enough to not block the UI.
+# (The full inference timeout is 240s — way too long for a health check.)
+LAKESHORE_HEALTH_TIMEOUT = int(os.getenv("LAKESHORE_HEALTH_TIMEOUT", "20"))
+
 # =============================================================================
 # JUDGE CONFIGURATION
 # =============================================================================

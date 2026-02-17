@@ -35,6 +35,7 @@ def get_tier_with_fallback(
     preferred_tier: str,
     complexity: str,
     cloud_provider: str | None = None,
+    lakeshore_model: str | None = None,
 ) -> tuple[str, str, list[str]]:
     """
     Get tier with intelligent fallback.
@@ -44,6 +45,8 @@ def get_tier_with_fallback(
         complexity: Query complexity (low/medium/high)
         cloud_provider: For cloud tier, the specific provider (e.g., "cloud-gpt")
                        Passed to health check so we test the right provider.
+        lakeshore_model: For lakeshore tier, the specific model (e.g., "lakeshore-qwen-32b")
+                        Passed to health check so we test the right model's vLLM port.
 
     Returns:
         Tuple of (tier, message, unavailable_tiers)
@@ -68,11 +71,17 @@ def get_tier_with_fallback(
     unavailable_tiers = []
 
     for tier in fallback_chain:
-        # For cloud tier, pass cloud_provider so we check the RIGHT provider's health
-        # (e.g., GPT might be healthy while Claude has billing issues)
+        # Pass per-tier model overrides so we check the RIGHT model's health.
+        # e.g., GPT might be healthy while Claude has billing issues,
+        # or lakeshore-qwen-1.5b might be up while lakeshore-qwen-32b is down.
         tier_cloud_provider = cloud_provider if tier == "cloud" else None
+        tier_lakeshore_model = lakeshore_model if tier == "lakeshore" else None
 
-        if is_tier_available(tier, cloud_provider=tier_cloud_provider):
+        if is_tier_available(
+            tier,
+            cloud_provider=tier_cloud_provider,
+            lakeshore_model=tier_lakeshore_model,
+        ):
             if tier == preferred_tier:
                 return tier, f"{complexity.upper()} → {tier.upper()}", []
             else:
@@ -85,9 +94,13 @@ def get_tier_with_fallback(
                 )
         else:
             # Check if this is an auth error - DON'T fall back, show error to user
-            # IMPORTANT: Pass cloud_provider to get the CORRECT error from cache.
-            # Without it, we'd look up "cloud" key and get Claude's error even when GPT was tested!
-            error_msg, error_type = get_tier_error(tier, cloud_provider=tier_cloud_provider)
+            # IMPORTANT: Pass model-specific params to get the CORRECT error from cache.
+            # Without it, we'd look up the wrong cache key and get stale errors!
+            error_msg, error_type = get_tier_error(
+                tier,
+                cloud_provider=tier_cloud_provider,
+                lakeshore_model=tier_lakeshore_model,
+            )
             if error_type == "auth":
                 raise AuthError(tier, error_msg)
             unavailable_tiers.append(tier)
@@ -123,9 +136,16 @@ def get_tier_for_query(
     query: str,
     user_preference: str = "auto",
     cloud_provider: str | None = None,
+    lakeshore_model: str | None = None,
 ) -> RoutingResult:
     """
     Determine which tier to use based on LLM judge + keyword fallback + health checks.
+
+    Args:
+        query: The user's query text
+        user_preference: "auto", "local", "lakeshore", or "cloud"
+        cloud_provider: For cloud tier, the specific provider (e.g., "cloud-gpt")
+        lakeshore_model: For lakeshore tier, the specific model (e.g., "lakeshore-qwen-32b")
 
     Returns a RoutingResult with:
     - tier: The actual tier to use
@@ -136,9 +156,13 @@ def get_tier_for_query(
     """
     # If user explicitly chose a tier, respect it strictly (no silent fallback)
     if user_preference in ["local", "lakeshore", "cloud"]:
-        # For Cloud tier, pass the user's selected cloud_provider to health check
-        # so we test the ACTUAL provider they want (e.g., GPT), not the default (Claude)
-        if is_tier_available(user_preference, cloud_provider=cloud_provider):
+        # Pass per-tier model overrides so we test the ACTUAL model the user wants
+        # (e.g., GPT not Claude, or lakeshore-qwen-32b not the default 1.5b)
+        if is_tier_available(
+            user_preference,
+            cloud_provider=cloud_provider,
+            lakeshore_model=lakeshore_model if user_preference == "lakeshore" else None,
+        ):
             return RoutingResult(
                 tier=user_preference,
                 complexity="user_override",
@@ -148,8 +172,12 @@ def get_tier_for_query(
         else:
             # User explicitly selected this tier - don't silently fallback
             # Raise an error so the user knows their selection couldn't be honored
-            # IMPORTANT: Pass cloud_provider to get error for the ACTUAL provider tested
-            error_msg, error_type = get_tier_error(user_preference, cloud_provider=cloud_provider)
+            # IMPORTANT: Pass model-specific params to get the CORRECT cached error
+            error_msg, error_type = get_tier_error(
+                user_preference,
+                cloud_provider=cloud_provider,
+                lakeshore_model=lakeshore_model if user_preference == "lakeshore" else None,
+            )
 
             # Provide specific error messages based on error type
             if error_type == "auth":
@@ -196,9 +224,13 @@ def get_tier_for_query(
         preferred_tier = "cloud"
 
     # Get tier with intelligent fallback (raises AuthError if auth issue)
-    # Pass cloud_provider so Auto mode checks the user's selected provider (not default Claude)
+    # Pass model-specific params so Auto mode checks the user's selected models
+    # (not default Claude / default lakeshore-qwen-1.5b)
     tier, fallback_reason, unavailable_tiers = get_tier_with_fallback(
-        preferred_tier, complexity, cloud_provider=cloud_provider
+        preferred_tier,
+        complexity,
+        cloud_provider=cloud_provider,
+        lakeshore_model=lakeshore_model,
     )
 
     # If no tier available, raise error

@@ -55,10 +55,16 @@ async def get_tier_health(
     Args:
         cloud_provider: Optional. Checks health for this specific cloud provider.
         local_model: Optional. Checks that this specific Ollama model is installed.
-        lakeshore_model: Optional. Passed for completeness (Lakeshore check is auth-based).
+        lakeshore_model: Optional. When provided, does a real 1-token inference
+                        test through Globus to verify this specific model's vLLM
+                        instance is running. Without this, only base Globus auth
+                        is checked (which would show green even if the model
+                        isn't running). Results are cached per-model.
 
     NOTE: This calls is_tier_available() which does a FRESH check if the
     cached status is stale. This ensures the frontend gets up-to-date info.
+    For Lakeshore with a specific model, the first check may take ~5-15s
+    (Globus round-trip), but subsequent polls use the cached result.
     """
     # Remember the user's cloud provider selection so the background monitor
     # and get_available_tiers() test the RIGHT provider (not the default).
@@ -68,9 +74,14 @@ async def get_tier_health(
     tiers = {}
     for tier_name in ["local", "lakeshore", "cloud"]:
         try:
-            # Per-tier model overrides for health checks
+            # Per-tier model overrides for health checks.
+            # Each tier can test a specific model independently:
+            #   - Cloud: test user's selected provider (Claude vs GPT)
+            #   - Local: test user's selected Ollama model
+            #   - Lakeshore: test user's selected vLLM model (new!)
             tier_cloud_provider = cloud_provider if tier_name == "cloud" else None
             tier_local_model = local_model if tier_name == "local" else None
+            tier_lakeshore_model = lakeshore_model if tier_name == "lakeshore" else None
 
             # Use shorter TTL (30 sec) for frontend polling to show near real-time status
             is_available = is_tier_available(
@@ -78,14 +89,19 @@ async def get_tier_health(
                 ttl=QUICK_CHECK_TTL,
                 cloud_provider=tier_cloud_provider,
                 local_model=tier_local_model,
+                lakeshore_model=tier_lakeshore_model,
             )
 
-            # Build the cache key to get the correct status
+            # Build the cache key to get the correct status.
+            # Must match the key used by is_tier_available() so we read
+            # back the result that was just cached.
             cache_key = tier_name
             if tier_name == "cloud" and cloud_provider:
                 cache_key = f"cloud:{cloud_provider}"
             elif tier_name == "local" and local_model:
                 cache_key = f"local:{local_model}"
+            elif tier_name == "lakeshore" and lakeshore_model:
+                cache_key = f"lakeshore:{lakeshore_model}"
 
             # Now get the updated status from cache (which was just refreshed if stale)
             status = _tier_health.get(cache_key, {})
