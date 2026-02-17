@@ -41,7 +41,12 @@ import yaml
 from fastapi import HTTPException
 
 import stream.proxy.app as _proxy_app
-from stream.middleware.config import LAKESHORE_PROXY_URL, MODEL_CONTEXT_LIMITS, OLLAMA_BASE_URL
+from stream.middleware.config import (
+    LAKESHORE_MODELS,
+    LAKESHORE_PROXY_URL,
+    MODEL_CONTEXT_LIMITS,
+    OLLAMA_BASE_URL,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -224,40 +229,30 @@ async def _forward_lakeshore(
     if not gc or not gc.is_available():
         raise HTTPException(status_code=503, detail="Globus Compute not configured")
 
-    # Get the vLLM model name (e.g., "Qwen/Qwen2.5-1.5B-Instruct").
-    # _MODEL_MAP stores it as "openai/Qwen/..." because litellm needs the
-    # "openai/" prefix to know which provider to use. But the actual vLLM
-    # model name on Lakeshore doesn't have that prefix.
-    entry = _MODEL_MAP.get(model, {})
-    vllm_model = entry.get("model", "").replace("openai/", "")
+    # Resolve the HuggingFace model name for logging.
+    model_info = LAKESHORE_MODELS.get(model)
+    hf_name = model_info["hf_name"] if model_info else model
 
     logger.info(
-        f"[{correlation_id}] Lakeshore direct call: {model} → {vllm_model}",
+        f"[{correlation_id}] Lakeshore direct call: {model} → {hf_name}",
         extra={"correlation_id": correlation_id, "model": model},
     )
 
     # Call Globus Compute directly — no HTTP, no self-connection.
-    # submit_inference sends the request to UIC's Lakeshore HPC cluster
-    # and waits for the vLLM response (using asyncio.to_thread internally
-    # so it doesn't block the event loop).
+    # submit_inference handles vLLM URL routing and HF name resolution
+    # internally using LAKESHORE_MODELS config.
     #
     # max_tokens = how many tokens the model is allowed to generate.
     # We read this from MODEL_CONTEXT_LIMITS (defined in config.py) where
     # each model has a "reserve_output" field — that's the number of tokens
-    # reserved for the model's response. Without passing this, submit_inference
-    # defaults to 512, which truncates most responses mid-sentence.
-    #
-    # Example from config.py:
-    #   "lakeshore-qwen": {"total": 32768, "reserve_output": 2048}
-    #   → max_tokens = 2048 (enough for ~1 page of text)
-    #
+    # reserved for the model's response.
     model_limits = MODEL_CONTEXT_LIMITS.get(model, {})
     max_tokens = model_limits.get("reserve_output", 2048)
 
     result = await gc.submit_inference(
         messages=messages,
         temperature=temperature,
-        model=vllm_model,
+        model=model,
         max_tokens=max_tokens,
     )
 

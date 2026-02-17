@@ -46,7 +46,7 @@ const EXAMPLE_QUERIES = [
   "What is Python?",                                    // LOW → Local
   "How do I submit a GPU job?",                         // MEDIUM → Lakeshore
   "Explain quantum computing",                          // MEDIUM → Lakeshore
-  "Write a short regex that validates an email address and explain each part",  // HIGH → Cloud
+  "Design a microservices architecture for a real-time chat app",  // HIGH → Cloud
 ]
 
 /**
@@ -126,9 +126,24 @@ const LOCAL_MODEL_CONFIG: Record<LocalModel, { label: string; description: strin
 }
 
 const LAKESHORE_MODEL_CONFIG: Record<LakeshoreModel, { label: string; description: string }> = {
-  'lakeshore-qwen': {
+  // Demo config: all keys point to Qwen 1.5B on the backend (single SLURM job).
+  // Labels reflect what's actually running. To switch to 32B production models,
+  // update these labels AND the LAKESHORE_MODELS dict in config.py.
+  'lakeshore-qwen-32b': {
     label: 'Qwen 2.5 1.5B',
-    description: 'UIC HPC cluster',
+    description: 'General purpose',
+  },
+  'lakeshore-coder-32b': {
+    label: 'Qwen 2.5 Coder 1.5B',
+    description: 'Coding specialist',
+  },
+  'lakeshore-deepseek-r1': {
+    label: 'DeepSeek R1 1.5B',
+    description: 'Deep reasoning',
+  },
+  'lakeshore-qwq': {
+    label: 'QwQ 1.5B',
+    description: 'Reasoning (o1-style)',
   },
 }
 
@@ -179,23 +194,39 @@ export function SettingsPanel({ onExampleQuery }: SettingsPanelProps) {
   const localHealth = useHealthStore((state) => state.local)
   const lakeshoreHealth = useHealthStore((state) => state.lakeshore)
   const cloudHealth = useHealthStore((state) => state.cloud)
-  const isProviderChanging = useHealthStore((state) => state.isProviderChanging)
-  const fetchHealthForProviderChange = useHealthStore((state) => state.fetchHealthForProviderChange)
+  const changingTier = useHealthStore((state) => state.changingTier)
+  const fetchHealthForModelChange = useHealthStore((state) => state.fetchHealthForModelChange)
 
   /**
-   * Handle cloud provider change - updates setting AND triggers health check
-   * Debounced to prevent rapid clicks from firing multiple health checks
+   * Handle model change for any tier - updates setting AND triggers health re-check.
+   * Debounced to prevent rapid clicks from firing multiple health checks.
    */
-  const providerChangeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const modelChangeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const triggerHealthRecheck = (tier: string) => {
+    if (modelChangeTimer.current) {
+      clearTimeout(modelChangeTimer.current)
+    }
+    modelChangeTimer.current = setTimeout(() => {
+      fetchHealthForModelChange(tier)
+    }, 100)
+  }
+
+  const handleLocalModelChange = (model: LocalModel) => {
+    console.log('[SettingsPanel] Local model changing to:', model)
+    setLocalModel(model)
+    triggerHealthRecheck('local')
+  }
+
+  const handleLakeshoreModelChange = (model: LakeshoreModel) => {
+    console.log('[SettingsPanel] Lakeshore model changing to:', model)
+    setLakeshoreModel(model)
+    triggerHealthRecheck('lakeshore')
+  }
+
   const handleCloudProviderChange = (provider: CloudProvider) => {
     console.log('[SettingsPanel] Cloud provider changing to:', provider)
     setCloudProvider(provider)
-    if (providerChangeTimer.current) {
-      clearTimeout(providerChangeTimer.current)
-    }
-    providerChangeTimer.current = setTimeout(() => {
-      fetchHealthForProviderChange()
-    }, 100)
+    triggerHealthRecheck('cloud')
   }
 
   /**
@@ -324,7 +355,7 @@ export function SettingsPanel({ onExampleQuery }: SettingsPanelProps) {
                 >
                   <Icon className={`w-6 h-6 flex-shrink-0 ${!isSelected ? config.color : ''}`} />
                   {config.shortLabel}
-                  {tierKey === 'cloud' && isProviderChanging ? (
+                  {changingTier === tierKey ? (
                     <Loader2 className="w-2.5 h-2.5 animate-spin flex-shrink-0" />
                   ) : statusDot && (
                     <span className={`w-1.5 h-1.5 rounded-full ${statusDot} flex-shrink-0`} />
@@ -365,7 +396,7 @@ export function SettingsPanel({ onExampleQuery }: SettingsPanelProps) {
                 return (
                   <button
                     key={modelKey}
-                    onClick={() => setLocalModel(modelKey)}
+                    onClick={() => handleLocalModelChange(modelKey)}
                     className={`
                       w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left text-sm
                       transition-colors
@@ -397,19 +428,19 @@ export function SettingsPanel({ onExampleQuery }: SettingsPanelProps) {
           <Building2 className="w-4 h-4 flex-shrink-0 text-green-500" />
           <span className="font-medium">Lakeshore Models</span>
           <span className="text-xs text-muted-foreground ml-auto mr-2">
-            {LAKESHORE_MODEL_CONFIG[lakeshoreModel]?.label}
+            {LAKESHORE_MODEL_CONFIG[lakeshoreModel]?.label ?? lakeshoreModel}
           </span>
           {lakeshoreOpen ? <ChevronUp className="w-3.5 h-3.5 text-muted-foreground" /> : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />}
         </button>
         {lakeshoreOpen && (
           <div className="px-3 pb-3 space-y-1">
-            {(Object.entries(LAKESHORE_MODEL_CONFIG) as [LakeshoreModel, typeof LAKESHORE_MODEL_CONFIG['lakeshore-qwen']][]).map(
+            {(Object.entries(LAKESHORE_MODEL_CONFIG) as [LakeshoreModel, typeof LAKESHORE_MODEL_CONFIG['lakeshore-qwen-32b']][]).map(
               ([modelKey, config]) => {
                 const isSelected = lakeshoreModel === modelKey
                 return (
                   <button
                     key={modelKey}
-                    onClick={() => setLakeshoreModel(modelKey)}
+                    onClick={() => handleLakeshoreModelChange(modelKey)}
                     className={`
                       w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left text-sm
                       transition-colors
@@ -580,7 +611,6 @@ export function SettingsPanel({ onExampleQuery }: SettingsPanelProps) {
             {/* Per-tier breakdown - 2x2 grid */}
             <div className="grid grid-cols-2 gap-1">
               <div className="bg-muted/50 rounded-lg p-2 flex items-center justify-center gap-1.5 text-sm font-medium">
-                <Bot className="w-4 h-4 text-purple-500" />
                 <span>{stats.queries}</span>
                 <span className="text-xs text-muted-foreground font-normal">Total</span>
               </div>

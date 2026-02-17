@@ -56,9 +56,14 @@ export type LocalModel = 'local-llama-tiny' | 'local-llama' | 'local-llama-quali
 /**
  * LakeshoreModel - Available models for the Lakeshore tier (Campus GPU)
  *
- * - "lakeshore-qwen" → Qwen 2.5 1.5B on UIC HPC cluster
+ * Each model runs as a separate vLLM instance on a different GPU (3g.40gb MIG slice).
+ * All 32B models use AWQ 4-bit quantization for quality + efficiency.
  */
-export type LakeshoreModel = 'lakeshore-qwen'
+export type LakeshoreModel =
+  | 'lakeshore-qwen-32b'
+  | 'lakeshore-coder-32b'
+  | 'lakeshore-deepseek-r1'
+  | 'lakeshore-qwq'
 
 /**
  * CloudProvider - Available cloud model providers

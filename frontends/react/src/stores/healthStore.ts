@@ -33,12 +33,12 @@ interface HealthState {
   // Meta
   lastUpdate: string | null
   isLoading: boolean
-  isProviderChanging: boolean // true ONLY when user switches cloud provider
+  changingTier: string | null // which tier is being re-checked (null = none)
   error: string | null
 
   // Actions
   fetchHealth: () => Promise<void>
-  fetchHealthForProviderChange: () => Promise<void>
+  fetchHealthForModelChange: (tier: string) => Promise<void>
   forceRefresh: () => Promise<void>
   startPolling: () => void
   stopPolling: () => void
@@ -56,7 +56,7 @@ export const useHealthStore = create<HealthState>((set, get) => ({
   cloud: null,
   lastUpdate: null,
   isLoading: false,
-  isProviderChanging: false,
+  changingTier: null,
   error: null,
 
   // Fetch current health status (background poll - no spinner)
@@ -66,9 +66,9 @@ export const useHealthStore = create<HealthState>((set, get) => ({
     try {
       set({ isLoading: true, error: null })
 
-      const cloudProvider = useSettingsStore.getState().cloudProvider
+      const { cloudProvider, localModel, lakeshoreModel } = useSettingsStore.getState()
       const [healthData, authData] = await Promise.all([
-        fetchTierHealth(cloudProvider),
+        fetchTierHealth(cloudProvider, localModel, lakeshoreModel),
         checkAuthStatus().catch(() => null),
       ])
 
@@ -99,29 +99,29 @@ export const useHealthStore = create<HealthState>((set, get) => ({
         cloud: healthData.tiers.cloud,
         lastUpdate: healthData.timestamp,
         isLoading: false,
-        isProviderChanging: false,
+        changingTier: null,
       })
     } catch (err) {
       if (requestId !== currentRequestId) return
       const message = err instanceof Error ? err.message : 'Failed to fetch health'
-      set({ error: message, isLoading: false, isProviderChanging: false })
+      set({ error: message, isLoading: false, changingTier: null })
     }
   },
 
-  // Fetch health after user switches cloud provider (shows spinner)
-  fetchHealthForProviderChange: async () => {
+  // Fetch health after user switches a specific tier's model (shows spinner on that tier)
+  fetchHealthForModelChange: async (tier: string) => {
     const requestId = ++currentRequestId
     const startTime = Date.now()
     const MIN_LOADING_TIME = 600
 
     try {
-      set({ isLoading: true, isProviderChanging: true, error: null })
+      set({ isLoading: true, changingTier: tier, error: null })
 
-      const cloudProvider = useSettingsStore.getState().cloudProvider
-      console.log(`[healthStore] Provider change: fetching for ${cloudProvider}`)
+      const { cloudProvider, localModel, lakeshoreModel } = useSettingsStore.getState()
+      console.log(`[healthStore] Model change: checking health`)
 
       const [healthData, authData] = await Promise.all([
-        fetchTierHealth(cloudProvider),
+        fetchTierHealth(cloudProvider, localModel, lakeshoreModel),
         checkAuthStatus().catch(() => null),
       ])
 
@@ -154,7 +154,7 @@ export const useHealthStore = create<HealthState>((set, get) => ({
         cloud: healthData.tiers.cloud,
         lastUpdate: healthData.timestamp,
         isLoading: false,
-        isProviderChanging: false,
+        changingTier: null,
       })
     } catch (err) {
       if (requestId !== currentRequestId) return
@@ -166,7 +166,7 @@ export const useHealthStore = create<HealthState>((set, get) => ({
       }
 
       if (requestId !== currentRequestId) return
-      set({ error: message, isLoading: false, isProviderChanging: false })
+      set({ error: message, isLoading: false, changingTier: null })
     }
   },
 

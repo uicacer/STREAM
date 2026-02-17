@@ -25,7 +25,7 @@ from globus_compute_sdk.serialize import AllCodeStrategies, ComputeSerializer
 from globus_sdk import GlobusAPIError
 from globus_sdk.login_flows.command_line_login_flow_manager import CommandLineLoginFlowEOFError
 
-from stream.middleware.config import MODEL_CONTEXT_LIMITS
+from stream.middleware.config import LAKESHORE_MODELS, MODEL_CONTEXT_LIMITS, get_lakeshore_vllm_url
 
 logger = logging.getLogger(__name__)
 
@@ -455,7 +455,7 @@ class GlobusComputeClient:
         # many tokens are reserved for the model's response — the same value
         # used by context_window.py and litellm_direct.py.
         if max_tokens is None:
-            lakeshore_limits = MODEL_CONTEXT_LIMITS.get("lakeshore-qwen", {})
+            lakeshore_limits = MODEL_CONTEXT_LIMITS.get(model, {})
             max_tokens = lakeshore_limits.get("reserve_output", 2048)
 
         if not self.is_available():
@@ -493,14 +493,24 @@ class GlobusComputeClient:
 
             t_executor = time.perf_counter()
 
+            # Resolve the vLLM URL for this specific model.
+            # Each Lakeshore model runs on a different port (e.g., 8000, 8001, ...).
+            vllm_url = get_lakeshore_vllm_url(model)
+
+            # Resolve the HuggingFace model name that vLLM expects.
+            # STREAM uses internal names like "lakeshore-qwen-32b", but the vLLM
+            # instance is loaded with the HF name (e.g., "Qwen/Qwen2.5-32B-Instruct-AWQ").
+            model_info = LAKESHORE_MODELS.get(model)
+            hf_model = model_info["hf_name"] if model_info else model
+
             # Submit the function to execute remotely on Lakeshore.
             # gce.submit() serializes remote_vllm_inference + its arguments,
             # sends them to Globus cloud via AMQP, which routes them to the
             # Lakeshore HPC endpoint. The function runs on a GPU node there.
             future = gce.submit(
                 remote_vllm_inference,
-                self.vllm_url,
-                model,
+                vllm_url,
+                hf_model,
                 messages,
                 temperature,
                 max_tokens,

@@ -90,6 +90,7 @@ def mark_tier_unavailable(tier: str, error: str) -> None:
 def check_tier_health(
     tier: str,
     cloud_provider: str | None = None,
+    local_model: str | None = None,
 ) -> tuple[bool, str | None]:
     """
     Check if a specific tier is available.
@@ -103,12 +104,19 @@ def check_tier_health(
         cloud_provider: For cloud tier, test a specific provider (e.g., "cloud-gpt")
                        instead of the default. Each provider has its own API key
                        and billing — Claude being down shouldn't block GPT.
+        local_model: For local tier, test a specific model (e.g., "local-llama-quality")
+                    instead of the default. Verifies the model is installed in Ollama.
 
     Returns:
         Tuple of (is_available, error_message). error_message is None if available.
     """
-    # For cloud tier, use the specified provider or fall back to default
-    model = cloud_provider if (tier == "cloud" and cloud_provider) else DEFAULT_MODELS.get(tier)
+    # Use per-tier model override or fall back to default
+    if tier == "cloud" and cloud_provider:
+        model = cloud_provider
+    elif tier == "local" and local_model:
+        model = local_model
+    else:
+        model = DEFAULT_MODELS.get(tier)
     if not model:
         return False, f"No model configured for tier {tier}"
 
@@ -372,6 +380,7 @@ def is_tier_available(
     tier: str,
     ttl: int = HEALTH_CHECK_TTL,
     cloud_provider: str | None = None,
+    local_model: str | None = None,
 ) -> bool:
     """
     Check if tier is available (with caching).
@@ -386,6 +395,8 @@ def is_tier_available(
              or QUICK_CHECK_TTL (30 sec) for frontend polling.
         cloud_provider: For cloud tier, the specific provider to test (e.g., "cloud-gpt").
                        If None, uses DEFAULT_MODELS["cloud"].
+        local_model: For local tier, the specific model to test (e.g., "local-llama-quality").
+                    If None, uses DEFAULT_MODELS["local"].
 
     Why cloud_provider matters:
     ---------------------------
@@ -401,12 +412,16 @@ def is_tier_available(
     Solution:
     By passing cloud_provider, we test the ACTUAL provider the user selected.
     Each provider gets its own cache entry, so Claude being down doesn't block GPT.
+    The same logic applies to local_model — each Ollama model is checked independently.
     """
-    # For cloud tier with a specific provider, use provider-specific cache key
-    # This allows Claude to be "unhealthy" while GPT is "healthy"
+    # Use model-specific cache keys so each model is tracked independently.
+    # This allows Claude to be "unhealthy" while GPT is "healthy",
+    # or local-llama to be installed while local-llama-quality is not.
     cache_key = tier
     if tier == "cloud" and cloud_provider:
         cache_key = f"cloud:{cloud_provider}"
+    elif tier == "local" and local_model:
+        cache_key = f"local:{local_model}"
 
     status = _tier_health.get(cache_key)
 
@@ -421,8 +436,10 @@ def is_tier_available(
     # Cache expired — run a fresh health check
     logger.debug(f"Cache expired for {cache_key} (TTL={ttl}s), running health check")
 
-    # Pass cloud_provider so the check tests the right provider model
-    is_available, error = check_tier_health(tier, cloud_provider=cloud_provider)
+    # Pass model overrides so the check tests the right model
+    is_available, error = check_tier_health(
+        tier, cloud_provider=cloud_provider, local_model=local_model
+    )
     error_type = _determine_error_type(error)
 
     # Preserve auth errors even if a subsequent check times out.

@@ -94,23 +94,55 @@ model_list:
   # ===========================================================================
 
 # LAKESHORE TIER (via Proxy)
+  # All Lakeshore models route through the proxy, which forwards to the
+  # correct vLLM instance via Globus Compute (preferred) or SSH (fallback).
+  # $0 per token — runs on university-owned GPUs.
+
+  - model_name: lakeshore-qwen-32b
+    litellm_params:
+      model: openai/Qwen/Qwen2.5-32B-Instruct-AWQ
+      api_base: http://lakeshore-proxy:8001/v1
+      api_key: dummy
+    model_info:
+      input_cost_per_token: 0.0
+      output_cost_per_token: 0.0
+
+  - model_name: lakeshore-coder-32b
+    litellm_params:
+      model: openai/Qwen/Qwen2.5-Coder-32B-Instruct-AWQ
+      api_base: http://lakeshore-proxy:8001/v1
+      api_key: dummy
+    model_info:
+      input_cost_per_token: 0.0
+      output_cost_per_token: 0.0
+
+  - model_name: lakeshore-deepseek-r1
+    litellm_params:
+      model: openai/deepseek-ai/DeepSeek-R1-Distill-Qwen-32B
+      api_base: http://lakeshore-proxy:8001/v1
+      api_key: dummy
+    model_info:
+      input_cost_per_token: 0.0
+      output_cost_per_token: 0.0
+
+  - model_name: lakeshore-qwq
+    litellm_params:
+      model: openai/Qwen/QwQ-32B-AWQ
+      api_base: http://lakeshore-proxy:8001/v1
+      api_key: dummy
+    model_info:
+      input_cost_per_token: 0.0
+      output_cost_per_token: 0.0
+
+  # Legacy — kept for backwards compatibility during testing
   - model_name: lakeshore-qwen
     litellm_params:
       model: openai/Qwen/Qwen2.5-1.5B-Instruct
       api_base: http://lakeshore-proxy:8001/v1
-      # ↑ "lakeshore-proxy" = Docker service name for the Lakeshore proxy
-      # The proxy handles routing via either:
-      #   - Globus Compute (preferred): Submits jobs to remote endpoint
-      #   - SSH Port Forward (fallback): Forwards to host.docker.internal:8000
-      # Mode is configured via USE_GLOBUS_COMPUTE environment variable
       api_key: dummy
     model_info:
-      # $0 because Lakeshore runs on university-owned GPUs — no per-token cost.
       input_cost_per_token: 0.0
       output_cost_per_token: 0.0
-      # max_tokens: 2048
-      # rpm: 60  # Rate limit (requests per minute)
-      # tpm: 100000  # Token limit (tokens per minute)
 
 # =============================================================================
 # ROUTER SETTINGS
@@ -122,6 +154,10 @@ router_settings:
     local-llama: 90
     local-llama-quality: 120
     lakeshore-qwen: 120
+    lakeshore-qwen-32b: 120
+    lakeshore-coder-32b: 120
+    lakeshore-deepseek-r1: 120
+    lakeshore-qwq: 120
     cloud-claude: 120
     cloud-gpt: 120
 

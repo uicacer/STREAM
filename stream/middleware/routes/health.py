@@ -41,7 +41,11 @@ async def health_check():
 
 
 @router.get("/health/tiers")
-async def get_tier_health(cloud_provider: str | None = None):
+async def get_tier_health(
+    cloud_provider: str | None = None,
+    local_model: str | None = None,
+    lakeshore_model: str | None = None,
+):
     """
     Get current health status of all AI tiers.
 
@@ -49,10 +53,9 @@ async def get_tier_health(cloud_provider: str | None = None):
     Frontend polls this every 30 seconds to show tier status indicators.
 
     Args:
-        cloud_provider: Optional. If provided, checks health for this specific
-                       cloud provider (e.g., "cloud-gpt") instead of the default.
-                       This allows the UI to show correct status when user
-                       switches providers (e.g., Claude has billing issues but GPT works).
+        cloud_provider: Optional. Checks health for this specific cloud provider.
+        local_model: Optional. Checks that this specific Ollama model is installed.
+        lakeshore_model: Optional. Passed for completeness (Lakeshore check is auth-based).
 
     NOTE: This calls is_tier_available() which does a FRESH check if the
     cached status is stale. This ensures the frontend gets up-to-date info.
@@ -65,20 +68,24 @@ async def get_tier_health(cloud_provider: str | None = None):
     tiers = {}
     for tier_name in ["local", "lakeshore", "cloud"]:
         try:
-            # For cloud tier, use the user's selected provider if specified
+            # Per-tier model overrides for health checks
             tier_cloud_provider = cloud_provider if tier_name == "cloud" else None
+            tier_local_model = local_model if tier_name == "local" else None
 
             # Use shorter TTL (30 sec) for frontend polling to show near real-time status
             is_available = is_tier_available(
                 tier_name,
                 ttl=QUICK_CHECK_TTL,
                 cloud_provider=tier_cloud_provider,
+                local_model=tier_local_model,
             )
 
             # Build the cache key to get the correct status
             cache_key = tier_name
             if tier_name == "cloud" and cloud_provider:
                 cache_key = f"cloud:{cloud_provider}"
+            elif tier_name == "local" and local_model:
+                cache_key = f"local:{local_model}"
 
             # Now get the updated status from cache (which was just refreshed if stale)
             status = _tier_health.get(cache_key, {})

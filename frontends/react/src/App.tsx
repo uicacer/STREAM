@@ -67,9 +67,9 @@ export default function App() {
 
   /**
    * State: Sidebar width (for resizing)
-   * Default is 340px, min is 250px, max is 450px
+   * Default is 370px, min is 250px, max is 500px
    */
-  const [sidebarWidth, setSidebarWidth] = useState(340)
+  const [sidebarWidth, setSidebarWidth] = useState(370)
   const isResizing = useRef(false)
 
   /**
@@ -83,7 +83,7 @@ export default function App() {
 
   const handleMouseMove = useCallback((e: MouseEvent) => {
     if (!isResizing.current) return
-    const newWidth = Math.min(Math.max(e.clientX, 250), 450)
+    const newWidth = Math.min(Math.max(e.clientX, 250), 500)
     setSidebarWidth(newWidth)
   }, [])
 

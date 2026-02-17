@@ -27,16 +27,23 @@ export interface TierHealthResponse {
 /**
  * Fetch current health status of all tiers
  *
- * @param cloudProvider - Optional. If provided, checks health for this specific
- *                       cloud provider instead of the default (Claude).
- *                       Pass the user's selected provider (e.g., "cloud-gpt")
- *                       so the Cloud indicator shows the correct status.
+ * @param cloudProvider - Optional. Checks health for this specific cloud provider.
+ * @param localModel - Optional. Checks that this specific Ollama model is installed.
+ * @param lakeshoreModel - Optional. Passed for completeness (Lakeshore health is auth-based).
  */
-export async function fetchTierHealth(cloudProvider?: string): Promise<TierHealthResponse> {
-  // Build URL with optional cloud_provider query param
-  const url = cloudProvider
-    ? `/health/tiers?cloud_provider=${encodeURIComponent(cloudProvider)}`
-    : '/health/tiers'
+export async function fetchTierHealth(
+  cloudProvider?: string,
+  localModel?: string,
+  lakeshoreModel?: string,
+): Promise<TierHealthResponse> {
+  // Build URL with optional query params
+  const params = new URLSearchParams()
+  if (cloudProvider) params.set('cloud_provider', cloudProvider)
+  if (localModel) params.set('local_model', localModel)
+  if (lakeshoreModel) params.set('lakeshore_model', lakeshoreModel)
+
+  const query = params.toString()
+  const url = query ? `/health/tiers?${query}` : '/health/tiers'
 
   const response = await fetch(url)
 

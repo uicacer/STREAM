@@ -33,7 +33,7 @@ export function TierStatus() {
   const lakeshore = useHealthStore(state => state.lakeshore)
   const cloud = useHealthStore(state => state.cloud)
   const error = useHealthStore(state => state.error)
-  const isProviderChanging = useHealthStore(state => state.isProviderChanging)
+  const changingTier = useHealthStore(state => state.changingTier)
   const startPolling = useHealthStore(state => state.startPolling)
   const stopPolling = useHealthStore(state => state.stopPolling)
 
@@ -55,17 +55,17 @@ export function TierStatus() {
     return getTierDisplayInfo(tierKey, tierData)
   }
 
-  // Debug: log when isProviderChanging changes
+  // Debug: log when changingTier changes
   useEffect(() => {
-    console.log('[TierStatus] isProviderChanging changed to:', isProviderChanging)
-  }, [isProviderChanging])
+    console.log('[TierStatus] changingTier changed to:', changingTier)
+  }, [changingTier])
 
   return (
     <div className="flex items-center gap-3">
       {tiers.map(({ key, label }) => {
         const { color, tooltip } = getStatus(key)
-        // Show pulsing animation on Cloud indicator while checking health
-        const showPulse = isProviderChanging && key === 'cloud'
+        // Show spinner only on the tier whose model is being re-checked
+        const showPulse = changingTier === key
 
         return (
           <div

@@ -171,7 +171,10 @@ async def proxy_chat_completions(request: Request):
     # If a user explicitly requests a larger max_tokens, we use their value.
     # vLLM will return an error if input + max_tokens > context_window.
     # =========================================================================
-    lakeshore_limits = MODEL_CONTEXT_LIMITS.get("lakeshore-qwen", {})
+    # Look up context limits for the specific model, fall back to generic lakeshore-qwen
+    lakeshore_limits = MODEL_CONTEXT_LIMITS.get(
+        model, MODEL_CONTEXT_LIMITS.get("lakeshore-qwen", {})
+    )
     default_max_tokens = lakeshore_limits.get("reserve_output", 2048)
     max_tokens = body.get("max_tokens", default_max_tokens)
 

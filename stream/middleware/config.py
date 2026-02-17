@@ -97,8 +97,110 @@ GLOBUS_COMPUTE_ENDPOINT_ID = os.getenv(
     "GLOBUS_COMPUTE_ENDPOINT_ID"
 )  # Globus endpoint ID for Lakeshore
 VLLM_SERVER_URL = os.getenv(
-    "VLLM_SERVER_URL", "http://ga-001:8000"
+    "VLLM_SERVER_URL", "http://ga-002:8000"
 )  # vLLM URL on Lakeshore (for Globus remote execution)
+
+# =============================================================================
+# LAKESHORE MODELS
+# =============================================================================
+# Each Lakeshore model runs as a separate vLLM instance on a different port.
+# The Globus Compute client uses this mapping to route to the correct vLLM URL.
+#
+# GPU: Each model gets a 3g.40gb MIG slice (39.5 GiB usable VRAM) on Lakeshore.
+#
+# CURRENT DEMO CONFIG: Using Qwen 1.5B for fast responses.
+# The Globus Compute round-trip adds ~5s overhead, so a small model (~100+ tok/s)
+# gives a much better demo experience than 32B models (~15 tok/s).
+# Only 1 SLURM job allowed per user (QOSMaxGRESPerUser), so all model keys
+# point to the same 1.5B instance on port 8000.
+#
+# PRODUCTION CONFIG (commented out below): 32B AWQ models, each on its own port.
+# To switch, uncomment the production entries, comment out the demo entries,
+# and get the HPC admin to increase the per-user GPU limit.
+# vLLM flags for 32B: --enforce-eager --max-model-len 16384 --quantization awq
+# See scripts/vllm-*-32b.sh for SLURM launch scripts.
+#
+# hf_name: The HuggingFace model ID that vLLM loads. This MUST match the model
+# name passed to `vllm serve` in the SLURM script, because vLLM's OpenAI-
+# compatible API uses this as the model identifier in chat completion requests.
+LAKESHORE_MODELS = {
+    # --- Demo config: 1.5B models for fast responses ---
+    # Each model runs as a separate vLLM instance on its own port.
+    # See scripts/vllm-*-1.5b.sh for the SLURM launch scripts.
+    # Only 1 SLURM job allowed per user (QOSMaxGRESPerUser), so for the demo
+    # only one model will actually be running. The others will show as unavailable.
+    #
+    # Port assignments (matching SLURM scripts):
+    #   8000 = Qwen 2.5 1.5B (general purpose)
+    #   8001 = Qwen 2.5 Coder 1.5B (coding specialist)
+    #   8002 = DeepSeek R1 Distill 1.5B (deep reasoning)
+    #   8003 = Qwen 2.5 1.5B stand-in for QwQ (no official 1.5B QwQ exists)
+    "lakeshore-qwen-32b": {
+        "hf_name": "Qwen/Qwen2.5-1.5B-Instruct",
+        "port": 8000,
+        "description": "General purpose (1.5B, fast demo)",
+    },
+    "lakeshore-coder-32b": {
+        "hf_name": "Qwen/Qwen2.5-Coder-1.5B-Instruct",
+        "port": 8001,
+        "description": "Coding specialist (1.5B, fast demo)",
+    },
+    "lakeshore-deepseek-r1": {
+        "hf_name": "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B",
+        "port": 8002,
+        "description": "Deep reasoning (1.5B, fast demo)",
+    },
+    "lakeshore-qwq": {
+        "hf_name": "Qwen/Qwen2.5-1.5B-Instruct",
+        "port": 8003,
+        "description": "Reasoning (1.5B, fast demo)",
+    },
+    # --- Production config: 32B AWQ models (1 per MIG slice, 1 per port) ---
+    # Requires multiple SLURM jobs or increased QOS GPU limit.
+    # "lakeshore-qwen-32b": {
+    #     "hf_name": "Qwen/Qwen2.5-32B-Instruct-AWQ",
+    #     "port": 8000,
+    #     "description": "General purpose (32B, high quality)",
+    # },
+    # "lakeshore-coder-32b": {
+    #     "hf_name": "Qwen/Qwen2.5-Coder-32B-Instruct-AWQ",
+    #     "port": 8001,
+    #     "description": "Coding specialist",
+    # },
+    # "lakeshore-deepseek-r1": {
+    #     # Community AWQ — official BF16 is 64 GiB, won't fit on 40GB MIG
+    #     "hf_name": "casperhansen/DeepSeek-R1-Distill-Qwen-32B-AWQ",
+    #     "port": 8002,
+    #     "description": "Deep reasoning (R1 chain-of-thought)",
+    # },
+    # "lakeshore-qwq": {
+    #     "hf_name": "Qwen/QwQ-32B-AWQ",
+    #     "port": 8003,
+    #     "description": "Reasoning (Qwen o1-style)",
+    # },
+    # Legacy model — kept for backwards compatibility during testing.
+    "lakeshore-qwen": {
+        "hf_name": "Qwen/Qwen2.5-1.5B-Instruct",
+        "port": 8000,
+        "description": "Qwen 2.5 1.5B (legacy)",
+    },
+}
+
+
+def get_lakeshore_vllm_url(model: str) -> str:
+    """Get the vLLM URL on Lakeshore for a given model name.
+
+    Constructs the URL from the base host in VLLM_SERVER_URL and the
+    per-model port from LAKESHORE_MODELS.
+    """
+    model_info = LAKESHORE_MODELS.get(model)
+    if not model_info:
+        # Fall back to the default VLLM_SERVER_URL for unknown models
+        return VLLM_SERVER_URL
+    # Extract host from VLLM_SERVER_URL (e.g., "http://ga-001:8000" → "http://ga-001")
+    base_url = VLLM_SERVER_URL.rsplit(":", 1)[0]
+    return f"{base_url}:{model_info['port']}"
+
 
 # =============================================================================
 # HEALTH CHECKS
@@ -209,7 +311,7 @@ DEFAULT_CLOUD_PROVIDER = os.getenv("DEFAULT_CLOUD_PROVIDER", "cloud-claude")
 
 DEFAULT_MODELS = {
     "local": "local-llama",
-    "lakeshore": "lakeshore-qwen",
+    "lakeshore": "lakeshore-qwen-32b",
     "cloud": DEFAULT_CLOUD_PROVIDER,  # Now configurable!
 }
 
@@ -276,9 +378,14 @@ MODEL_CONTEXT_LIMITS = {
     # Uncomment below to test context-limit-exceeded error dialog:
     # "local-llama": {"total": 500, "reserve_output": 100},
     "local-llama-quality": {"total": 4096, "reserve_output": 512},
-    # Lakeshore: 32K (runs on campus GPU, Qwen supports 32K natively)
-    # max_input = 32768 - 2048 = 30720 tokens (~120KB of text)
-    "lakeshore-qwen": {"total": 32768, "reserve_output": 2048},
+    # Lakeshore: 32K total context (vLLM --max-model-len=32768).
+    # Demo uses 1.5B model which fits easily with 32K context on 40GB MIG.
+    # For 32B production models, reduce to 16384 (--enforce-eager needed, less VRAM).
+    "lakeshore-qwen-32b": {"total": 32768, "reserve_output": 2048},
+    "lakeshore-coder-32b": {"total": 32768, "reserve_output": 2048},
+    "lakeshore-deepseek-r1": {"total": 32768, "reserve_output": 2048},
+    "lakeshore-qwq": {"total": 32768, "reserve_output": 2048},
+    "lakeshore-qwen": {"total": 32768, "reserve_output": 2048},  # Legacy
     # Cloud: Full native context limits
     # max_input = 200000 - 4000 = 196000 tokens (~780KB of text)
     "cloud-claude": {"total": 200000, "reserve_output": 4000},
