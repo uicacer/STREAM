@@ -83,7 +83,12 @@ export function Message({ message, isStreaming = false }: MessageProps) {
     if (model.includes('llama')) return 'Llama 3.2 3B'
     if (model.includes('claude')) return 'Claude Sonnet 4'
     if (model.includes('gpt-4')) return 'GPT-4 Turbo'
-    if (model.includes('qwen')) return 'Qwen vLLM'
+    if (model.includes('deepseek')) return 'DeepSeek R1 1.5B'
+    if (model.includes('qwq')) return 'QwQ 1.5B'
+    if (model.includes('coder') && model.includes('1.5b')) return 'Qwen 2.5 Coder 1.5B'
+    if (model.includes('qwen') && model.includes('32b')) return 'Qwen 2.5 32B'
+    if (model.includes('qwen') && model.includes('1.5b')) return 'Qwen 2.5 1.5B'
+    if (model.includes('qwen')) return 'Qwen 2.5'
     return model
   }
 
@@ -187,6 +192,8 @@ export function Message({ message, isStreaming = false }: MessageProps) {
             <span>💰</span>
             {tierKey === 'local' ? (
               <span className="text-green-600 dark:text-green-400 font-medium">FREE</span>
+            ) : tierKey === 'lakeshore' ? (
+              <span className="text-green-600 dark:text-green-400 font-medium">FREE (UIC)</span>
             ) : (() => {
               const cost = parseFloat(String(message.metadata.cost))
               const wasStopped = message.content.includes('[Generation stopped]')

@@ -92,7 +92,7 @@ export const useSettingsStore = create<SettingsState>()(
       temperature: 0.7,
       theme: 'dark',
       localModel: 'local-llama',          // Default local model (3B)
-      lakeshoreModel: 'lakeshore-qwen-32b',   // Default lakeshore model
+      lakeshoreModel: 'lakeshore-qwen-1.5b',   // Default lakeshore model
       cloudProvider: 'cloud-claude',      // Default cloud provider
       _initialized: false,
 
@@ -208,17 +208,17 @@ export const useSettingsStore = create<SettingsState>()(
           return {
             ...state,
             localModel: 'local-llama',
-            lakeshoreModel: 'lakeshore-qwen-32b',
+            lakeshoreModel: 'lakeshore-qwen-1.5b',
           }
         }
 
         if (version < 5) {
           // v4 → v5: Lakeshore multi-model upgrade.
-          // Migrate from legacy "lakeshore-qwen" to new default "lakeshore-qwen-32b".
+          // Migrate from legacy "lakeshore-qwen" to new default "lakeshore-qwen-1.5b".
           console.log('[Settings] Migration v5: upgrading lakeshore model default')
           return {
             ...state,
-            lakeshoreModel: 'lakeshore-qwen-32b',
+            lakeshoreModel: 'lakeshore-qwen-1.5b',
           }
         }
 

@@ -43,7 +43,7 @@ GLOBUS_ENDPOINT_ID = os.getenv("GLOBUS_COMPUTE_ENDPOINT_ID")
 VLLM_SERVER_URL = os.getenv("VLLM_SERVER_URL", "http://ga-001:8000")
 
 # Timeout for Globus Compute tasks (seconds)
-GLOBUS_TASK_TIMEOUT = int(os.getenv("GLOBUS_TASK_TIMEOUT", "120"))
+GLOBUS_TASK_TIMEOUT = int(os.getenv("GLOBUS_TASK_TIMEOUT", "240"))
 
 
 # =============================================================================
@@ -83,7 +83,7 @@ def remote_vllm_inference(vllm_url, model, messages, temperature, max_tokens, st
             "stream": stream,
         }
         try:
-            response = requests.post(endpoint, json=payload, timeout=60)
+            response = requests.post(endpoint, json=payload, timeout=180)
             if response.status_code >= 400:
                 try:
                     error_body = response.json()
@@ -498,7 +498,7 @@ class GlobusComputeClient:
             vllm_url = get_lakeshore_vllm_url(model)
 
             # Resolve the HuggingFace model name that vLLM expects.
-            # STREAM uses internal names like "lakeshore-qwen-32b", but the vLLM
+            # STREAM uses internal names like "lakeshore-qwen-1.5b", but the vLLM
             # instance is loaded with the HF name (e.g., "Qwen/Qwen2.5-32B-Instruct-AWQ").
             model_info = LAKESHORE_MODELS.get(model)
             hf_model = model_info["hf_name"] if model_info else model

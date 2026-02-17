@@ -83,7 +83,7 @@ def mark_tier_unavailable(tier: str, error: str) -> None:
         _tier_health[tier]["available"] = False
         _tier_health[tier]["error"] = error
         _tier_health[tier]["error_type"] = "connection"
-        _tier_health[tier]["last_check"] = datetime.now().isoformat()
+        _tier_health[tier]["last_check"] = datetime.now()
         logger.warning(f"[Health] Marked {tier} as unavailable: {error}")
 
 

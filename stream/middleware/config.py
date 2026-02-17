@@ -124,7 +124,7 @@ VLLM_SERVER_URL = os.getenv(
 # name passed to `vllm serve` in the SLURM script, because vLLM's OpenAI-
 # compatible API uses this as the model identifier in chat completion requests.
 LAKESHORE_MODELS = {
-    # --- Demo config: 1.5B models for fast responses ---
+    # --- 1.5B models (fast demo) ---
     # Each model runs as a separate vLLM instance on its own port.
     # See scripts/vllm-*-1.5b.sh for the SLURM launch scripts.
     # Only 1 SLURM job allowed per user (QOSMaxGRESPerUser), so for the demo
@@ -135,12 +135,13 @@ LAKESHORE_MODELS = {
     #   8001 = Qwen 2.5 Coder 1.5B (coding specialist)
     #   8002 = DeepSeek R1 Distill 1.5B (deep reasoning)
     #   8003 = Qwen 2.5 1.5B stand-in for QwQ (no official 1.5B QwQ exists)
-    "lakeshore-qwen-32b": {
+    #   8004 = Qwen 2.5 32B AWQ (high quality, needs --gpu-memory-utilization 0.75)
+    "lakeshore-qwen-1.5b": {
         "hf_name": "Qwen/Qwen2.5-1.5B-Instruct",
         "port": 8000,
         "description": "General purpose (1.5B, fast demo)",
     },
-    "lakeshore-coder-32b": {
+    "lakeshore-coder-1.5b": {
         "hf_name": "Qwen/Qwen2.5-Coder-1.5B-Instruct",
         "port": 8001,
         "description": "Coding specialist (1.5B, fast demo)",
@@ -154,6 +155,16 @@ LAKESHORE_MODELS = {
         "hf_name": "Qwen/Qwen2.5-1.5B-Instruct",
         "port": 8003,
         "description": "Reasoning (1.5B, fast demo)",
+    },
+    # --- 32B AWQ model (high quality, runs alongside 1.5B models) ---
+    # Requires its own 3g.40gb MIG slice. Uses CUDA graphs (no --enforce-eager)
+    # with --gpu-memory-utilization 0.75 to leave room for CUDA graphs + sampler.
+    # Context limited to 8K tokens due to reduced KV cache budget.
+    # See scripts/vllm-qwen-32b.sh for SLURM launch script.
+    "lakeshore-qwen-32b": {
+        "hf_name": "Qwen/Qwen2.5-32B-Instruct-AWQ",
+        "port": 8004,
+        "description": "General purpose (32B AWQ, high quality)",
     },
     # --- Production config: 32B AWQ models (1 per MIG slice, 1 per port) ---
     # Requires multiple SLURM jobs or increased QOS GPU limit.
@@ -311,7 +322,7 @@ DEFAULT_CLOUD_PROVIDER = os.getenv("DEFAULT_CLOUD_PROVIDER", "cloud-claude")
 
 DEFAULT_MODELS = {
     "local": "local-llama",
-    "lakeshore": "lakeshore-qwen-32b",
+    "lakeshore": "lakeshore-qwen-1.5b",
     "cloud": DEFAULT_CLOUD_PROVIDER,  # Now configurable!
 }
 
@@ -381,8 +392,9 @@ MODEL_CONTEXT_LIMITS = {
     # Lakeshore: 32K total context (vLLM --max-model-len=32768).
     # Demo uses 1.5B model which fits easily with 32K context on 40GB MIG.
     # For 32B production models, reduce to 16384 (--enforce-eager needed, less VRAM).
-    "lakeshore-qwen-32b": {"total": 32768, "reserve_output": 2048},
-    "lakeshore-coder-32b": {"total": 32768, "reserve_output": 2048},
+    "lakeshore-qwen-1.5b": {"total": 32768, "reserve_output": 2048},
+    "lakeshore-coder-1.5b": {"total": 32768, "reserve_output": 2048},
+    "lakeshore-qwen-32b": {"total": 8192, "reserve_output": 1024},
     "lakeshore-deepseek-r1": {"total": 32768, "reserve_output": 2048},
     "lakeshore-qwq": {"total": 32768, "reserve_output": 2048},
     "lakeshore-qwen": {"total": 32768, "reserve_output": 2048},  # Legacy

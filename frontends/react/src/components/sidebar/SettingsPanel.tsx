@@ -58,7 +58,7 @@ const TIER_CONFIG: Record<Tier, { icon: typeof Bot; label: string; shortLabel: s
     label: 'Auto (Smart Routing)',
     shortLabel: 'Auto',
     description: 'Let STREAM choose based on query complexity',
-    color: 'text-purple-500',
+    color: 'text-slate-400',
   },
   local: {
     icon: Laptop,
@@ -129,11 +129,15 @@ const LAKESHORE_MODEL_CONFIG: Record<LakeshoreModel, { label: string; descriptio
   // Demo config: all keys point to Qwen 1.5B on the backend (single SLURM job).
   // Labels reflect what's actually running. To switch to 32B production models,
   // update these labels AND the LAKESHORE_MODELS dict in config.py.
-  'lakeshore-qwen-32b': {
+  'lakeshore-qwen-1.5b': {
     label: 'Qwen 2.5 1.5B',
     description: 'General purpose',
   },
-  'lakeshore-coder-32b': {
+  'lakeshore-qwen-32b': {
+    label: 'Qwen 2.5 32B',
+    description: 'General purpose (AWQ)',
+  },
+  'lakeshore-coder-1.5b': {
     label: 'Qwen 2.5 Coder 1.5B',
     description: 'Coding specialist',
   },
@@ -434,7 +438,7 @@ export function SettingsPanel({ onExampleQuery }: SettingsPanelProps) {
         </button>
         {lakeshoreOpen && (
           <div className="px-3 pb-3 space-y-1">
-            {(Object.entries(LAKESHORE_MODEL_CONFIG) as [LakeshoreModel, typeof LAKESHORE_MODEL_CONFIG['lakeshore-qwen-32b']][]).map(
+            {(Object.entries(LAKESHORE_MODEL_CONFIG) as [LakeshoreModel, typeof LAKESHORE_MODEL_CONFIG['lakeshore-qwen-1.5b']][]).map(
               ([modelKey, config]) => {
                 const isSelected = lakeshoreModel === modelKey
                 return (

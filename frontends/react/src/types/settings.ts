@@ -60,8 +60,9 @@ export type LocalModel = 'local-llama-tiny' | 'local-llama' | 'local-llama-quali
  * All 32B models use AWQ 4-bit quantization for quality + efficiency.
  */
 export type LakeshoreModel =
+  | 'lakeshore-qwen-1.5b'
   | 'lakeshore-qwen-32b'
-  | 'lakeshore-coder-32b'
+  | 'lakeshore-coder-1.5b'
   | 'lakeshore-deepseek-r1'
   | 'lakeshore-qwq'
 
