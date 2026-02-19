@@ -682,6 +682,20 @@ def main():
     _cleanup()
     print("Goodbye!")
 
+    # -------------------------------------------------------------------------
+    # STEP 10: Force-exit to avoid hanging on lingering library threads
+    # -------------------------------------------------------------------------
+    # After graceful cleanup is complete, os._exit(0) terminates immediately.
+    # Without this, Python's interpreter shutdown calls threading._shutdown(),
+    # which tries to join ALL non-daemon threads. The Globus Compute SDK's
+    # AMQP connection spawns internal threads that linger after
+    # executor.shutdown(wait=False), causing the process to hang until the
+    # user presses Ctrl+C two more times.
+    #
+    # Since we've already shut down uvicorn, Globus, database, and Ollama,
+    # there's nothing useful left for those threads to do.
+    os._exit(0)
+
 
 # -------------------------------------------------------------------------
 # Standard Python entry point guard.

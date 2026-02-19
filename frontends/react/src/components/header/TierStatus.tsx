@@ -2,22 +2,26 @@
  * TierStatus.tsx - Tier Availability Indicator
  * =============================================
  *
- * Shows real-time availability status of all AI tiers in the header.
+ * Shows availability status of all AI tiers in the header.
  *
  * Status indicators:
  * - Green dot = Available (for Lakeshore: authenticated AND HPC available)
  * - Red dot = Unavailable (for Lakeshore: not authenticated or HPC down)
  *
+ * NO PERIODIC POLLING:
+ * Health is checked once on mount (Level 1 only — fast, no GPU jobs),
+ * then again only when the user changes tiers or models. This avoids
+ * overwhelming Lakeshore with health check jobs at scale.
+ *
  * Lakeshore authentication note:
  * Users must disable VPN before authenticating with Globus.
  * VPN can be reconnected after authentication is complete.
- *
- * Polls backend every 30 seconds and refreshes on window focus.
  */
 
 import { useEffect } from 'react'
 import { Loader2 } from 'lucide-react'
 import { useHealthStore, getTierDisplayInfo } from '../../stores/healthStore'
+import { useSettingsStore } from '../../stores/settingsStore'
 
 // Tier configuration
 const tiers = [
@@ -34,14 +38,18 @@ export function TierStatus() {
   const cloud = useHealthStore(state => state.cloud)
   const error = useHealthStore(state => state.error)
   const changingTier = useHealthStore(state => state.changingTier)
-  const startPolling = useHealthStore(state => state.startPolling)
-  const stopPolling = useHealthStore(state => state.stopPolling)
+  const fetchHealth = useHealthStore(state => state.fetchHealth)
 
-  // Start polling on mount
+  // One-time Level 1 health check on mount.
+  // Wait for settingsStore to hydrate from localStorage first so we don't
+  // use default settings before the user's saved preferences are loaded.
   useEffect(() => {
-    startPolling()
-    return () => stopPolling()
-  }, [startPolling, stopPolling])
+    if (useSettingsStore.persist.hasHydrated()) {
+      fetchHealth()
+    } else {
+      useSettingsStore.persist.onFinishHydration(() => fetchHealth())
+    }
+  }, [fetchHealth])
 
   // Get status for each tier using centralized logic
   const getStatus = (tierKey: TierKey) => {

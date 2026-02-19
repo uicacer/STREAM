@@ -2,13 +2,19 @@
  * healthStore.ts - Tier Health Status Store
  * ==========================================
  *
- * Manages real-time tier availability status with polling.
- * Updates every 30 seconds to show users which tiers are available.
+ * Manages tier availability status with ON-DEMAND checks only.
  *
- * POLLING APPROACH:
- * - Polls /health/tiers every 30 seconds
- * - Also refreshes on window focus (when user returns to tab)
- * - Scales better than persistent connections for many users
+ * NO PERIODIC POLLING:
+ * Health checks are expensive — especially Lakeshore, which submits a real
+ * 1-token inference job through Globus Compute to verify the GPU is running.
+ * With thousands of users, polling every 30 seconds would overwhelm Lakeshore
+ * with health check jobs that burn GPU time and Globus Compute quota.
+ *
+ * Instead, health is checked only when the user takes an action:
+ *   - App startup: one-time Level 1 check (fast, no GPU — just "is Globus
+ *     authenticated?", "is Ollama running?", "is the API key valid?")
+ *   - User changes tier: Level 2 check (verifies the specific model works)
+ *   - User changes model: Level 2 check for the new model
  *
  * ARCHITECTURE NOTE:
  * In Docker mode, the backend cannot check Globus auth status (tokens are on host),
@@ -21,8 +27,6 @@ import { create } from 'zustand'
 import { fetchTierHealth, refreshTierHealth, type TierStatus } from '../api/health'
 import { checkAuthStatus } from '../api/auth'
 import { useSettingsStore } from './settingsStore'
-
-const POLL_INTERVAL = 30000 // 30 seconds
 
 interface HealthState {
   // Tier status
@@ -40,11 +44,8 @@ interface HealthState {
   fetchHealth: () => Promise<void>
   fetchHealthForModelChange: (tier: string) => Promise<void>
   forceRefresh: () => Promise<void>
-  startPolling: () => void
-  stopPolling: () => void
+  markTierFailed: (tier: string) => void
 }
-
-let pollInterval: ReturnType<typeof setInterval> | null = null
 
 // Request counter: newer requests override older ones instead of being skipped
 let currentRequestId = 0
@@ -59,16 +60,22 @@ export const useHealthStore = create<HealthState>((set, get) => ({
   changingTier: null,
   error: null,
 
-  // Fetch current health status (background poll - no spinner)
+  // Fetch health status — Level 1 only (no model-specific GPU checks).
+  // This is called once on app startup to populate the tier status dots.
+  // It does NOT send model parameters, so the backend skips the expensive
+  // Level 2 checks (no 1-token inference to Lakeshore, no Ollama model
+  // pull verification, no cloud API key test with a real request).
+  // Level 1 checks are fast (~100ms): "is Globus configured?",
+  // "is Ollama reachable?", "is the API key present?"
   fetchHealth: async () => {
     const requestId = ++currentRequestId
 
     try {
       set({ isLoading: true, error: null })
 
-      const { cloudProvider, localModel, lakeshoreModel } = useSettingsStore.getState()
+      // No model params → Level 1 only (fast, no GPU jobs)
       const [healthData, authData] = await Promise.all([
-        fetchTierHealth(cloudProvider, localModel, lakeshoreModel),
+        fetchTierHealth(),
         checkAuthStatus().catch(() => null),
       ])
 
@@ -170,12 +177,14 @@ export const useHealthStore = create<HealthState>((set, get) => ({
     }
   },
 
-  // Force refresh (bypasses backend cache)
+  // Force refresh (bypasses backend cache, then re-fetches)
+  // Used when user explicitly wants to re-check all tiers (e.g., after
+  // authenticating with Globus or starting Ollama).
   forceRefresh: async () => {
     try {
       set({ isLoading: true, error: null })
       await refreshTierHealth()
-      // After refresh, fetch the new status
+      // After cache invalidation, fetch fresh Level 1 status
       await get().fetchHealth()
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to refresh'
@@ -183,54 +192,17 @@ export const useHealthStore = create<HealthState>((set, get) => ({
     }
   },
 
-  // Start polling
-  startPolling: () => {
-    const beginPolling = () => {
-      // Fetch immediately
-      get().fetchHealth()
-
-      // Stop any existing interval
-      if (pollInterval) {
-        clearInterval(pollInterval)
-      }
-
-      // Start new interval
-      pollInterval = setInterval(() => {
-        get().fetchHealth()
-      }, POLL_INTERVAL)
-
-      // Also refresh on window focus
-      const handleFocus = () => {
-        get().fetchHealth()
-      }
-      window.addEventListener('focus', handleFocus)
-
-      // Store cleanup function
-      ;(window as unknown as { _healthCleanup?: () => void })._healthCleanup = () => {
-        window.removeEventListener('focus', handleFocus)
-      }
-    }
-
-    // Wait for settingsStore to hydrate from localStorage before the first poll.
-    // Without this, the first poll uses the default cloudProvider ('cloud-claude')
-    // instead of the user's saved selection (e.g., 'cloud-gpt'), causing the
-    // backend to test the wrong provider and report a false auth error.
-    if (useSettingsStore.persist.hasHydrated()) {
-      beginPolling()
-    } else {
-      useSettingsStore.persist.onFinishHydration(beginPolling)
-    }
-  },
-
-  // Stop polling
-  stopPolling: () => {
-    if (pollInterval) {
-      clearInterval(pollInterval)
-      pollInterval = null
-    }
-    const cleanup = (window as unknown as { _healthCleanup?: () => void })._healthCleanup
-    if (cleanup) {
-      cleanup()
+  // Mark a tier as unavailable immediately (no network request).
+  // Called when the SSE stream reports a runtime fallback — meaning the
+  // backend tried this tier, inference failed, and it fell back to another.
+  // The backend already called mark_tier_unavailable() in streaming.py;
+  // this mirrors that on the frontend so the health dot turns red instantly
+  // without waiting for the next health poll.
+  markTierFailed: (tier: string) => {
+    const key = tier as 'local' | 'lakeshore' | 'cloud'
+    const current = get()[key]
+    if (current) {
+      set({ [key]: { ...current, available: false, error: 'Inference failed' } })
     }
   },
 }))

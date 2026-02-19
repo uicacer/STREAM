@@ -81,8 +81,8 @@ def mark_tier_unavailable(
     Mark a tier as unavailable after a real query failure.
 
     Called by the streaming code when a request to a tier fails at runtime.
-    The next periodic health poll will re-check and restore the indicator
-    if the tier recovers.
+    The next on-demand health check (e.g., user changes tier or model in
+    settings) will re-check and restore the indicator if the tier recovers.
 
     For Lakeshore, each model runs on a separate vLLM port on the HPC cluster
     (e.g., qwen-1.5b on :8000, coder-1.5b on :8001, qwen-32b on :8004).
@@ -450,15 +450,14 @@ def _determine_error_type(error: str | None) -> str | None:
 
 def update_tier_health(tier: str):
     """
-    Update health status for a tier (used by background monitor and startup).
+    Update health status for a tier (used by startup and on-demand checks).
 
-    For cloud tier: uses the user's active cloud provider after startup.
+    For cloud tier: uses the user's active cloud provider if set.
     At startup (before any frontend request), _active_cloud_provider is None
     so it falls back to the default. Once the user's selection arrives via
     a health poll or chat request, all subsequent checks use their provider.
     """
     # For cloud tier, use the user's active provider (not always the default).
-    # This ensures the background monitor tests GPT if the user selected GPT.
     cloud_provider = _active_cloud_provider if tier == "cloud" else None
     is_available, error = check_tier_health(tier, cloud_provider=cloud_provider)
     error_type = _determine_error_type(error)
@@ -476,13 +475,12 @@ def update_tier_health(tier: str):
         "error_type": error_type,
     }
 
-    status = "✅" if is_available else "❌"
     model = cloud_provider or DEFAULT_MODELS.get(tier, "unknown")
 
     if is_available:
-        print(f"{status} {tier.upper()} ({model}) is available")
+        logger.info(f"  ✓ {tier.upper():12s} {model}")
     else:
-        print(f"{status} {tier.upper()} ({model}) is UNAVAILABLE: {error}")
+        logger.warning(f"  {tier.upper():12s} {model} — {error}")
 
 
 def is_tier_available(
@@ -497,7 +495,6 @@ def is_tier_available(
 
     Uses cached status if available and fresh (within TTL).
     If cache expired, runs a fresh check_tier_health() call.
-    The background monitor also keeps the cache fresh every 5 minutes.
 
     Args:
         tier: The tier to check ("local", "lakeshore", or "cloud")
@@ -643,21 +640,11 @@ def get_tier_error(
 
 def check_all_tiers():
     """Check health of all tiers (run on startup)"""
-    print("\n🔍 Checking health of all AI tiers...")
-    print("=" * 60)
-
     for tier in ["local", "lakeshore", "cloud"]:
         update_tier_health(tier)
 
-    print("=" * 60)
-
     available = get_available_tiers()
     if not available:
-        print("❌ WARNING: NO AI TIERS ARE AVAILABLE!")
-        print("   Check that Docker services are running:")
-        print("   - Ollama (local)")
-        print("   - LiteLLM gateway")
-        print("   - Cloud API keys configured")
+        logger.warning("No tiers available! Check Ollama, Globus, and API keys.")
     else:
-        print(f"✅ {len(available)}/3 tiers available: {', '.join(available).upper()}")
-    print()
+        logger.info(f"{len(available)}/3 tiers ready")

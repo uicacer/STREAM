@@ -64,12 +64,8 @@ def authenticate_with_browser_callback() -> tuple[bool, str]:
         Tuple of (success: bool, message: str)
     """
     try:
-        logger.info("=" * 60)
-        logger.info("🔐 Starting Zero-Friction Globus Authentication")
-        logger.info("=" * 60)
-        logger.info("Opening browser for authentication...")
-        logger.info("→ Please authenticate in the browser window that will open")
-        logger.info("")
+        logger.info("Starting Globus authentication (browser-based)")
+        logger.info("Please authenticate in the browser window that will open")
 
         # Get the base GlobusApp - this is the shared app instance
         app = get_globus_app()
@@ -88,10 +84,7 @@ def authenticate_with_browser_callback() -> tuple[bool, str]:
         # Note: We don't need to use the client directly - creating it triggers the auth flow
         Client(app=app)
 
-        logger.info("")
-        logger.info("=" * 60)
-        logger.info("✅ Authentication Complete!")
-        logger.info("=" * 60)
+        logger.info("Globus authentication complete")
 
         return True, "✅ Authentication successful!"
 
@@ -101,16 +94,12 @@ def authenticate_with_browser_callback() -> tuple[bool, str]:
 
         # Check if it's a browser/environment issue
         if "browser" in error_message.lower() or "display" in error_message.lower():
-            logger.error("=" * 60)
-            logger.error("Cannot open browser automatically (SSH/headless environment)")
-            logger.error("=" * 60)
-            logger.error("Please authenticate manually:")
             logger.error(
-                "  1. Run: python -c 'from globus_compute_sdk.sdk.auth.globus_app import get_globus_app; get_globus_app().login()'"
+                "Cannot open browser (SSH/headless). Authenticate manually:\n"
+                "  1. Run: python -c 'from globus_compute_sdk.sdk.auth.globus_app import get_globus_app; get_globus_app().login()'\n"
+                "  2. Follow the authentication prompts\n"
+                "  3. Restart STREAM services"
             )
-            logger.error("  2. Follow the authentication prompts")
-            logger.error("  3. Restart STREAM services")
-            logger.error("=" * 60)
             return False, (
                 "❌ Automatic browser authentication not available.\n"
                 "Please authenticate manually (see logs for instructions)."

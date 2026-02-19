@@ -24,9 +24,9 @@ class OllamaModelManager:
         self.use_http = not self._is_ollama_cli_available()
 
         if self.use_http:
-            logger.info(f"🐳 Using Ollama HTTP API at {self.ollama_url}")
+            logger.info(f"Using Ollama HTTP API at {self.ollama_url}")
         else:
-            logger.info("💻 Using Ollama CLI")
+            logger.info("Using Ollama CLI")
 
         self.available_models = self._get_available_models()
 
@@ -59,7 +59,7 @@ class OllamaModelManager:
                     models.add(model_name)
             return models
         except Exception as e:
-            logger.warning(f"⚠️  Warning: Could not check Ollama models: {e}")
+            logger.warning(f"Could not check Ollama models: {e}")
             return set()
 
     def _get_available_models_http(self) -> set:
@@ -73,10 +73,10 @@ class OllamaModelManager:
                     models.add(model["name"])
                 return models
             else:
-                logger.warning(f"⚠️  Ollama API returned status {response.status_code}")
+                logger.warning(f"Ollama API returned status {response.status_code}")
                 return set()
         except Exception as e:
-            logger.warning(f"⚠️  Could not connect to Ollama: {e}")
+            logger.warning(f"Could not connect to Ollama: {e}")
             return set()
 
     def is_model_available(self, model_name: str) -> bool:

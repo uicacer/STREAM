@@ -4,11 +4,6 @@ STREAM Middleware - Main Application
 FastAPI service for intelligent AI model routing.
 """
 
-from stream.middleware.utils.visuals import PreImportSpinner
-
-spinner = PreImportSpinner()
-spinner.start()
-
 import logging
 import os
 import uuid
@@ -51,8 +46,6 @@ from stream.middleware.utils.logging_config import configure_logging
 from stream.proxy.app import (
     router as lakeshore_router,  # Lakeshore proxy routes (mounted at /lakeshore in desktop mode)
 )
-
-spinner.stop()
 
 console = Console()
 

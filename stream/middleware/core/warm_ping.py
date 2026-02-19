@@ -1,23 +1,20 @@
 """
-Warm ping for AI tiers.
+Warm ping for AI tiers (SERVER MODE ONLY).
 
-This module sends small test requests to each tier on startup to:
-1. Pre-load models into memory (especially Ollama)
-2. Detect actual availability (not just proxy health)
-3. Establish connections early
-4. Reduce first-request latency for users
+In server mode, sends a small test request to Local (Ollama) and Cloud
+on startup to pre-load models into memory and reduce first-request latency.
+
+In DESKTOP mode, warm pings are skipped entirely because the judge warmup
+in lifecycle.py already pre-loads the local Ollama model into memory.
+Lakeshore is always skipped (too expensive — requires a Globus Compute job).
 
 WHY WARM PING?
 --------------
-Without warm ping:
+Without warm ping (server mode):
   User sends "hi" → Ollama loads model (5-10s) → Response (slow!)
 
 With warm ping:
   Startup → Ollama pre-loads model → User sends "hi" → Response (fast!)
-
-The warm ping also detects real availability issues:
-- Lakeshore proxy may be "healthy" but HPC workers are dead
-- Warm ping reveals this early (before users hit it)
 """
 
 import asyncio
@@ -33,7 +30,6 @@ from stream.middleware.config import (
     LITELLM_BASE_URL,
     OLLAMA_BASE_URL,
     OLLAMA_MODELS,
-    STREAM_MODE,
 )
 from stream.middleware.core.tier_health import _determine_error_type, _tier_health
 
@@ -196,49 +192,40 @@ async def warm_ping_cloud() -> tuple[bool, float, str | None]:
 
 async def warm_up_all_tiers():
     """
-    Warm up all tiers in parallel.
+    Warm up tiers in parallel (SERVER MODE ONLY).
 
-    Sends a small test request to each tier to:
-    - Pre-load models (especially Ollama — first inference loads model into GPU)
+    Called from lifecycle.py only when STREAM_MODE != "desktop".
+    In desktop mode, the judge warmup already pre-loads the local Ollama model.
+
+    Sends a small "Say hi" request to Local and Cloud to:
+    - Pre-load models (Ollama loads model into GPU on first inference)
     - Test real availability (proxy "healthy" ≠ inference working)
     - Establish connections early
 
-    NOTE: Cloud is skipped in desktop mode because there's no LiteLLM HTTP
-    gateway — cloud calls go through litellm as a library. The warm ping would
-    always fail and overwrite the real health status from check_all_tiers().
+    Lakeshore is always skipped — its warm ping would submit a real Globus
+    Compute job to the HPC, which is expensive and wasteful at scale.
     """
-    print("\n🔥 Warming up inference tiers...")
-    print("=" * 60)
-
-    # In desktop mode, only warm up LOCAL (Ollama). Lakeshore and Cloud warm pings
-    # both route through LITELLM_BASE_URL (port 4000) which doesn't exist in desktop
-    # mode — the app uses litellm as a library instead. Their health was already
-    # checked by check_all_tiers() which uses the correct desktop-mode paths.
-    if STREAM_MODE == "desktop":
-        warm_pings = [warm_ping_local()]
-        tier_names = ["local"]
-        print("⏭️  LAKESHORE, CLOUD: Skipped (desktop mode — no HTTP gateway)")
-    else:
-        warm_pings = [warm_ping_local(), warm_ping_lakeshore(), warm_ping_cloud()]
-        tier_names = ["local", "lakeshore", "cloud"]
+    # Warm up LOCAL (Ollama) and CLOUD. Lakeshore is always skipped because
+    # its warm ping submits a real inference job through Globus Compute to the HPC,
+    # which is expensive (~10-30s) and wasteful if the user never uses Lakeshore.
+    warm_pings = [warm_ping_local(), warm_ping_cloud()]
+    tier_names = ["local", "cloud"]
 
     results = await asyncio.gather(*warm_pings, return_exceptions=True)
 
     for tier, result in zip(tier_names, results, strict=False):
         if isinstance(result, Exception):
-            print(f"❌ {tier.upper()}: Exception - {result}")
+            logger.warning(f"  {tier.upper():12s} {result}")
             _update_tier_health(tier, False, str(result))
         else:
             success, latency_ms, error = result
 
             if success:
-                print(f"✅ {tier.upper()}: Warm ({latency_ms:.0f}ms)")
+                logger.info(f"  ✓ {tier.upper():12s} warm ({latency_ms:.0f}ms)")
                 _update_tier_health(tier, True, None)
             else:
-                print(f"❌ {tier.upper()}: Failed - {error}")
+                logger.warning(f"  {tier.upper():12s} {error}")
                 _update_tier_health(tier, False, error)
-
-    print("=" * 60)
 
 
 def _update_tier_health(tier: str, available: bool, error: str | None):

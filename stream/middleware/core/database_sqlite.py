@@ -93,12 +93,12 @@ def initialize_sqlite() -> bool:
         """)
         _conn.commit()
 
-        logger.info(f"✅ SQLite database initialized at {_db_path}")
+        logger.info(f"SQLite database initialized at {_db_path}")
         return True
 
     except Exception as e:
-        logger.error(f"❌ SQLite initialization failed: {e}", exc_info=True)
-        logger.warning("⚠️  Cost tracking will be disabled")
+        logger.error(f"SQLite initialization failed: {e}", exc_info=True)
+        logger.warning("Cost tracking will be disabled")
         _conn = None
         return False
 
@@ -230,5 +230,5 @@ def close_sqlite() -> None:
 
     if _conn:
         _conn.close()
-        logger.info(f"✅ SQLite database closed ({_db_path})")
+        logger.info(f"SQLite database closed ({_db_path})")
         _conn = None

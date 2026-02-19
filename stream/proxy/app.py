@@ -37,7 +37,7 @@ from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from globus_sdk import GlobusAPIError
 
-from stream.middleware.config import MODEL_CONTEXT_LIMITS
+from stream.middleware.config import MODEL_CONTEXT_LIMITS, RELAY_URL
 from stream.middleware.core.globus_compute_client import GlobusComputeClient
 
 # =========================================================================
@@ -54,7 +54,6 @@ GLOBUS_COMPUTE_ENDPOINT_ID = os.getenv("GLOBUS_COMPUTE_ENDPOINT_ID")
 VLLM_SERVER_URL = os.getenv("VLLM_SERVER_URL", "http://ga-001:8000")
 LAKESHORE_VLLM_ENDPOINT = os.getenv("LAKESHORE_VLLM_ENDPOINT", "http://host.docker.internal:8000")
 
-logging.basicConfig(level=LOG_LEVEL, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 # =========================================================================
@@ -192,10 +191,23 @@ async def _route_via_globus_compute(model, messages, temperature, max_tokens, st
     if not globus_client or not globus_client.is_available():
         raise HTTPException(status_code=503, detail="Globus Compute not configured")
 
-    if stream:
-        logger.warning(
-            "Streaming not yet supported via Globus Compute, converting non-streaming response to SSE format"
-        )
+    # =====================================================================
+    # TRUE STREAMING via WebSocket relay (when RELAY_URL is configured)
+    # =====================================================================
+    # When the relay is available, we stream tokens in real-time from Lakeshore.
+    # If the relay connection fails, we fall back to batch mode below.
+    if stream and RELAY_URL:
+        try:
+            return await _route_via_globus_compute_streaming(
+                model, messages, temperature, max_tokens
+            )
+        except Exception as e:
+            logger.warning(f"Relay streaming failed, falling back to batch mode: {e}")
+            # Fall through to batch mode below
+
+    # =====================================================================
+    # BATCH MODE (fallback when relay is unavailable or not configured)
+    # =====================================================================
 
     try:
         logger.info(f"Submitting to Globus endpoint: {GLOBUS_COMPUTE_ENDPOINT_ID}")
@@ -207,7 +219,6 @@ async def _route_via_globus_compute(model, messages, temperature, max_tokens, st
             error_msg = result.get("error", "Unknown error")
             error_type = result.get("error_type", "UnknownError")
 
-            # Use HTTP 401 for authentication errors, 503 for other service errors
             if error_type == "AuthenticationError":
                 raise HTTPException(
                     status_code=401, detail=f"Globus Compute authentication required: {error_msg}"
@@ -226,7 +237,6 @@ async def _route_via_globus_compute(model, messages, temperature, max_tokens, st
     except HTTPException:
         raise
     except GlobusAPIError as e:
-        # Handle Globus API errors specifically
         if e.http_status in (401, 403):
             raise HTTPException(
                 status_code=401, detail=f"Globus authentication required: {str(e)}"
@@ -236,6 +246,81 @@ async def _route_via_globus_compute(model, messages, temperature, max_tokens, st
     except Exception as e:
         logger.error(f"Globus Compute routing error: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Internal proxy error: {str(e)}") from e
+
+
+async def _route_via_globus_compute_streaming(model, messages, temperature, max_tokens):
+    """
+    TRUE streaming from Lakeshore via the WebSocket relay (server/Docker mode).
+
+    Same approach as _forward_lakeshore_streaming() in litellm_direct.py:
+      1. Submit streaming job to Globus (returns channel_id)
+      2. Connect to relay as consumer
+      3. Receive tokens and convert to SSE format
+
+    Returns a StreamingResponse that FastAPI sends to the LiteLLM gateway,
+    which forwards it to the middleware, which forwards it to the frontend.
+    """
+    from websockets.asyncio.client import connect as ws_connect
+
+    # Submit the streaming job to Globus Compute
+    result = await globus_client.submit_streaming_inference(
+        messages=messages,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        model=model,
+        relay_url=RELAY_URL,
+    )
+
+    if "error" in result:
+        error_msg = result.get("error", "Unknown error")
+        error_type = result.get("error_type", "UnknownError")
+        if error_type == "AuthenticationError":
+            raise HTTPException(
+                status_code=401, detail=f"Globus Compute authentication required: {error_msg}"
+            )
+        raise HTTPException(status_code=503, detail=f"Lakeshore streaming failed: {error_msg}")
+
+    channel_id = result["channel_id"]
+    logger.info(f"Connecting to relay as consumer (channel={channel_id[:8]}, relay={RELAY_URL})")
+
+    async def sse_generator():
+        """Connect to relay and yield SSE events as tokens arrive."""
+        try:
+            async with ws_connect(f"{RELAY_URL}/consume/{channel_id}") as ws:
+                async for msg_str in ws:
+                    msg = json.loads(msg_str)
+
+                    if msg["type"] == "token":
+                        chunk = {
+                            "choices": [{"index": 0, "delta": {"content": msg["content"]}}],
+                        }
+                        yield f"data: {json.dumps(chunk)}\n\n"
+
+                    elif msg["type"] == "done":
+                        usage = msg.get("usage", {})
+                        if usage:
+                            final_chunk = {
+                                "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                                "usage": usage,
+                            }
+                            yield f"data: {json.dumps(final_chunk)}\n\n"
+                        yield "data: [DONE]\n\n"
+                        break
+
+                    elif msg["type"] == "error":
+                        logger.error(
+                            f"Relay error on channel {channel_id[:8]}: {msg.get('message')}"
+                        )
+
+        except Exception as e:
+            logger.error(f"Relay connection failed: {e}", exc_info=True)
+            error_chunk = {
+                "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+            }
+            yield f"data: {json.dumps(error_chunk)}\n\n"
+            yield "data: [DONE]\n\n"
+
+    return StreamingResponse(sse_generator(), media_type="text/event-stream")
 
 
 async def _route_via_ssh(model, messages, temperature, max_tokens, stream):

@@ -17,6 +17,7 @@ import asyncio
 import logging
 import os
 import time
+import warnings
 from typing import Any
 
 from globus_compute_sdk import Executor
@@ -25,9 +26,21 @@ from globus_compute_sdk.serialize import AllCodeStrategies, ComputeSerializer
 from globus_sdk import GlobusAPIError
 from globus_sdk.login_flows.command_line_login_flow_manager import CommandLineLoginFlowEOFError
 
-from stream.middleware.config import LAKESHORE_MODELS, MODEL_CONTEXT_LIMITS, get_lakeshore_vllm_url
+from stream.middleware.config import (
+    LAKESHORE_MODELS,
+    MODEL_CONTEXT_LIMITS,
+    get_lakeshore_vllm_url,
+)
 
 logger = logging.getLogger(__name__)
+
+# Suppress the Globus SDK's noisy "Environment differences detected" warning.
+# This fires when the local Python version (e.g., 3.12.12) differs slightly from
+# the endpoint workers (e.g., 3.12.3). Minor version differences are harmless —
+# serialization works fine across patch versions with the same dill version.
+warnings.filterwarnings(
+    "ignore", message=r"[\s\S]*Environment differences detected", category=UserWarning
+)
 
 # =============================================================================
 # CONFIGURATION
@@ -124,6 +137,152 @@ def remote_vllm_inference(vllm_url, model, messages, temperature, max_tokens, st
 _ns = {}
 exec(compile(_REMOTE_FN_SOURCE, "<remote_vllm_inference>", "exec"), _ns)
 remote_vllm_inference = _ns["remote_vllm_inference"]
+
+
+# =============================================================================
+# REMOTE STREAMING FUNCTION (Executes on Lakeshore — streams tokens via relay)
+# =============================================================================
+#
+# This is the streaming counterpart of remote_vllm_inference. Instead of
+# collecting the full response and returning it via Globus Compute's result
+# channel (which is batch-only), this function streams ALL data — tokens,
+# usage stats, errors — through the WebSocket relay in real-time:
+#
+#   1. Connects to the WebSocket relay as a PRODUCER
+#   2. Calls vLLM with stream=True (so vLLM returns tokens one at a time)
+#   3. Reads each token from vLLM's SSE stream
+#   4. Forwards it through the relay to the waiting consumer
+#   5. Sends final "done" message with usage stats through the relay
+#
+# Everything the consumer needs flows through the RELAY (data plane).
+# The Globus Compute return value is just a technical requirement — every
+# Globus function must return something, but we don't wait for it or use it.
+# The consumer reads tokens from the relay and is done before Globus even
+# delivers the return value.
+#
+# Same exec() pattern as above — see comments on _REMOTE_FN_SOURCE for why.
+
+_REMOTE_STREAMING_FN_SOURCE = """\
+def remote_vllm_streaming(vllm_url, model, messages, temperature, max_tokens, relay_url, channel_id):
+    import json
+    import requests
+    from websockets.sync.client import connect as ws_connect
+
+    ws = None
+
+    try:
+        # ---- Step 1: Connect to the relay as a PRODUCER ----
+        # The relay is a public WebSocket server that both sides connect to.
+        # We're the PRODUCER — we'll send tokens. The consumer (STREAM's proxy
+        # or litellm_direct) is already connected and waiting on the other end.
+        ws_url = f"{relay_url}/produce/{channel_id}"
+        ws = ws_connect(ws_url)
+
+        # ---- Step 2: Make a STREAMING request to vLLM ----
+        # stream=True tells vLLM to return tokens as Server-Sent Events (SSE)
+        # as the GPU generates them, instead of waiting for the full response.
+        #
+        # requests stream=True tells the requests library to not download the
+        # full response body immediately, but to give us an iterator we can
+        # read line by line.
+        response = requests.post(
+            f"{vllm_url}/v1/chat/completions",
+            json={
+                "model": model,
+                "messages": messages,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "stream": True,
+            },
+            stream=True,
+            timeout=180,
+        )
+
+        if response.status_code >= 400:
+            error_msg = f"vLLM HTTP {response.status_code}"
+            try:
+                error_msg += f": {response.text[:300]}"
+            except Exception:
+                pass
+            ws.send(json.dumps({"type": "error", "message": error_msg}))
+            ws.send(json.dumps({"type": "done"}))
+            return {"error": error_msg}
+
+        # ---- Step 3: Read SSE chunks from vLLM and forward via relay ----
+        # vLLM's SSE format (one event per line):
+        #   data: {"choices":[{"delta":{"content":"Hello"}}]}
+        #   data: {"choices":[{"delta":{"content":" world"}}]}
+        #   data: [DONE]
+        #
+        # We parse each line, extract the token text from delta.content,
+        # and send it through the WebSocket relay to the consumer.
+        usage = {}
+        tokens_sent = 0
+        for line in response.iter_lines(decode_unicode=True):
+            # Skip empty lines (SSE uses blank lines as event separators)
+            if not line or not line.startswith("data: "):
+                continue
+
+            # Strip the "data: " prefix to get the JSON payload
+            payload = line[6:]
+
+            # "[DONE]" signals the end of the SSE stream
+            if payload.strip() == "[DONE]":
+                break
+
+            try:
+                chunk = json.loads(payload)
+            except json.JSONDecodeError:
+                continue
+
+            choices = chunk.get("choices", [])
+            if not choices:
+                continue
+
+            delta = choices[0].get("delta", {})
+            content = delta.get("content")
+
+            # Forward the token to the relay (and thus to the consumer)
+            if content:
+                ws.send(json.dumps({"type": "token", "content": content}))
+                tokens_sent += 1
+
+            # Capture usage stats from the final chunk (vLLM includes them
+            # in the last SSE event with finish_reason="stop")
+            if chunk.get("usage"):
+                usage = chunk["usage"]
+
+        # ---- Step 4: Signal completion through the relay ----
+        # Everything the consumer needs is sent here: the "done" signal
+        # plus usage stats (prompt_tokens, completion_tokens, total_tokens).
+        # The consumer reads this and knows the stream is complete.
+        ws.send(json.dumps({"type": "done", "usage": usage}))
+
+    except Exception as e:
+        # Best-effort: try to notify the consumer about the error via relay
+        if ws:
+            try:
+                ws.send(json.dumps({"type": "error", "message": str(e)}))
+                ws.send(json.dumps({"type": "done"}))
+            except Exception:
+                pass
+        return {"error": f"{type(e).__name__}: {e}"}
+
+    finally:
+        if ws:
+            try:
+                ws.close()
+            except Exception:
+                pass
+
+    # Globus Compute requires a return value, but the consumer doesn't use it.
+    # All data (tokens, usage, errors) was already sent through the relay.
+    return {"ok": True, "tokens_sent": tokens_sent}
+"""
+
+_ns2 = {}
+exec(compile(_REMOTE_STREAMING_FN_SOURCE, "<remote_vllm_streaming>", "exec"), _ns2)
+remote_vllm_streaming = _ns2["remote_vllm_streaming"]
 
 
 # =============================================================================
@@ -338,7 +497,7 @@ class GlobusComputeClient:
             Tuple of (success, message)
         """
         try:
-            logger.info("🔄 Reloading Globus credentials...")
+            logger.info("Reloading Globus credentials...")
 
             # Clear our cached reference
             self._globus_app = None
@@ -369,7 +528,7 @@ class GlobusComputeClient:
                 logger.warning("Still not authenticated after reload")
                 return False, "Credentials not found. Please authenticate first."
             else:
-                logger.info("✅ Credentials reloaded successfully!")
+                logger.info("Credentials reloaded successfully")
                 return True, "Credentials reloaded successfully"
 
         except Exception as e:
@@ -394,7 +553,7 @@ class GlobusComputeClient:
             app = self._get_globus_app(force_refresh=force_refresh)
 
             if app.login_required():
-                logger.warning("🔐 Globus Compute authentication required")
+                logger.warning("Globus Compute authentication required")
 
                 # We're running in Docker - can't open browser automatically
                 # Return instructions for the user to authenticate via the Streamlit frontend
@@ -617,12 +776,34 @@ class GlobusComputeClient:
             }
 
         except (DeserializationError, TaskExecutionFailed) as e:
-            # TaskExecutionFailed wraps DeserializationError when the SDK can't
-            # decode the result from the endpoint. Most common cause: Python
-            # version mismatch (e.g., local 3.12.12 vs endpoint 3.12.3).
-            # Switching to AllCodeStrategies usually fixes this.
-            # Don't reset the executor — the connection is fine, just the
-            # serialization format is wrong.
+            # TaskExecutionFailed wraps different remote errors:
+            #   - ManagerLost: HPC compute node crashed or SLURM job expired
+            #   - DeserializationError: Python version mismatch between local/remote
+            #   - Other remote execution failures
+            #
+            # We inspect the error message to give the user an accurate diagnosis.
+            error_str = str(e)
+            error_lower = error_str.lower()
+
+            if "managerlost" in error_lower or "loss of manager" in error_lower:
+                # The HPC compute node's worker manager crashed. Common causes:
+                # - SLURM job timed out and was killed
+                # - Node ran out of memory
+                # - Endpoint was restarted
+                # Extract just the final error line (skip the huge remote traceback)
+                last_line = error_str.strip().split("\n")[-1].strip().rstrip("-")
+                logger.error(f"Lakeshore compute node lost: {last_line.strip()}")
+                return {
+                    "error": (
+                        "Lakeshore HPC compute node is unavailable "
+                        "(worker manager lost on the cluster). "
+                        "The SLURM job may have expired or the node crashed. "
+                        "Check: ssh lakeshore 'squeue -u $USER' to verify jobs are running."
+                    ),
+                    "error_type": "ManagerLost",
+                }
+
+            # Actual deserialization error (Python version mismatch)
             logger.error(
                 f"Globus result deserialization failed: {e}",
                 exc_info=True,
@@ -685,6 +866,152 @@ class GlobusComputeClient:
                     model=model,
                     _retry=True,
                 )
+
+            return {
+                "error": str(e),
+                "error_type": type(e).__name__,
+            }
+
+    # =========================================================================
+    # STREAMING INFERENCE (via WebSocket relay)
+    # =========================================================================
+    #
+    # Unlike submit_inference() which waits for the complete result via Globus,
+    # submit_streaming_inference() just SUBMITS the job and returns immediately.
+    # The actual tokens flow through the WebSocket relay — the consumer connects
+    # to the relay and receives tokens in real-time as the GPU generates them.
+    #
+    # The caller's workflow:
+    #   1. result = await client.submit_streaming_inference(...)
+    #   2. channel_id = result["channel_id"]
+    #   3. Connect to relay as consumer: wss://relay-url/consume/{channel_id}
+    #   4. Receive tokens in real-time from the relay
+    #
+    # Meanwhile on Lakeshore (the Globus job):
+    #   1. The remote function runs on a GPU compute node (e.g., a-001)
+    #   2. It makes an OUTBOUND WebSocket connection to the relay's public URL
+    #      (e.g., wss://abc.ngrok-free.app/produce/{channel_id})
+    #      This works because the compute node can make outbound HTTPS connections
+    #      (we verified this in test_compute_node_connectivity.py)
+    #   3. It calls vLLM with stream=True to get tokens one at a time
+    #   4. It forwards each token through the WebSocket relay to the consumer
+    #   5. All data (tokens, usage stats, errors) flows through the relay
+    #
+    # Two channels carry information back:
+    #   DATA PLANE (relay):   tokens + usage stats + done signal → used by consumer
+    #   CONTROL PLANE (Globus): job status (ok/error + token count) → confirmation
+    #
+    # We don't wait for the Globus result — the relay's "done" message tells
+    # the consumer everything it needs. Globus delivers the job status later,
+    # which could be checked for monitoring/debugging if needed.
+
+    async def submit_streaming_inference(
+        self,
+        messages: list[dict],
+        temperature: float = 0.7,
+        max_tokens: int | None = None,
+        model: str = "",
+        relay_url: str = "",
+    ) -> dict[str, Any]:
+        """
+        Submit a streaming inference task to Lakeshore via Globus Compute.
+
+        This is the streaming counterpart of submit_inference(). Instead of
+        waiting for the full result, it:
+          1. Generates a unique channel_id (UUID)
+          2. Submits the remote_vllm_streaming function to Globus
+          3. Returns the channel_id immediately
+
+        The caller then connects to the relay as a consumer using the
+        channel_id to receive tokens in real-time.
+
+        Args:
+            messages: Chat messages in OpenAI format
+            temperature: Sampling temperature
+            max_tokens: Maximum tokens to generate
+            model: STREAM model key (e.g., "lakeshore-qwen-1.5b", "lakeshore-qwen-32b").
+                   Resolved to the HuggingFace model name internally.
+            relay_url: WebSocket URL of the relay server (e.g., wss://abc.ngrok-free.app)
+
+        Returns:
+            {"channel_id": "uuid-string"} on success
+            {"error": "message", ...} on failure
+        """
+        import uuid
+
+        if max_tokens is None:
+            lakeshore_limits = MODEL_CONTEXT_LIMITS.get(model, {})
+            max_tokens = lakeshore_limits.get("reserve_output", 2048)
+
+        if not self.is_available():
+            return {"error": "Globus Compute not configured", "error_type": "ConfigError"}
+
+        if not relay_url:
+            return {"error": "RELAY_URL not configured", "error_type": "ConfigError"}
+
+        # Ensure authentication before attempting submission
+        is_authenticated, auth_message = self.ensure_authenticated()
+        if not is_authenticated:
+            return {
+                "error": auth_message or "Globus Compute authentication required",
+                "error_type": "AuthenticationError",
+                "auth_required": True,
+            }
+
+        # Generate a unique channel ID for this streaming session.
+        # Both the producer (Lakeshore) and consumer (our app) use this
+        # to connect to the same relay channel.
+        channel_id = str(uuid.uuid4())
+
+        try:
+            gce = self._get_executor()
+
+            # Resolve the vLLM URL for this model (each model runs on its own port)
+            vllm_url = get_lakeshore_vllm_url(model)
+
+            # Resolve the HuggingFace model name that vLLM expects in API calls
+            model_info = LAKESHORE_MODELS.get(model)
+            hf_model = model_info["hf_name"] if model_info else model
+
+            logger.info(
+                f"Submitting STREAMING inference to Globus endpoint {self.endpoint_id} "
+                f"(model={model} → {hf_model}, channel={channel_id[:8]}, relay={relay_url})"
+            )
+
+            # Submit the streaming function — this is fast (~100ms).
+            # It serializes the function + args and sends them to Globus via AMQP.
+            # The function will run on Lakeshore, connect OUTBOUND to the relay,
+            # and stream tokens through the WebSocket connection.
+            #
+            # We don't call future.result() here. The consumer reads tokens from
+            # the relay in real-time. Globus delivers the job status (ok/error)
+            # later via the Future, but we don't need to wait for it.
+            gce.submit(
+                remote_vllm_streaming,
+                vllm_url,
+                hf_model,
+                messages,
+                temperature,
+                max_tokens,
+                relay_url,
+                channel_id,
+            )
+
+            logger.info(f"Streaming job submitted (channel={channel_id[:8]})")
+
+            return {"channel_id": channel_id}
+
+        except Exception as e:
+            logger.error(f"Failed to submit streaming inference: {e}", exc_info=True)
+
+            error_str = str(e).lower()
+            if "unable to open database file" in error_str or "login_required" in error_str:
+                self._reset_executor()
+                return {
+                    "error": "Globus Compute authentication required.",
+                    "error_type": "AuthenticationError",
+                    "auth_required": True,
+                }
 
             return {
                 "error": str(e),
@@ -816,7 +1143,7 @@ class GlobusComputeClient:
                 return False, f"Model not responding: {error_msg[:150]}"
 
             # Success — the model generated at least 1 token
-            logger.info(f"[Health] Model {model} is available ✓")
+            logger.info(f"[Health] Model {model} is available")
             return True, None
 
         except TimeoutError:

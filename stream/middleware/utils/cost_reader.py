@@ -39,7 +39,7 @@ def load_model_pricing() -> dict:
         config_path = Path(__file__).parent.parent.parent / "gateway" / "litellm_config.yaml"
 
         if not config_path.exists():
-            logger.error(f"❌ LiteLLM config not found at: {config_path}")
+            logger.error(f"LiteLLM config not found at: {config_path}")
             return {}
 
         # Read and parse YAML
@@ -59,11 +59,11 @@ def load_model_pricing() -> dict:
                 }
 
         _MODEL_PRICING = pricing
-        logger.info(f"✅ Loaded pricing for {len(pricing)} models from LiteLLM config")
+        logger.info(f"Loaded pricing for {len(pricing)} models")
         return pricing
 
     except Exception as e:
-        logger.error(f"❌ Failed to load pricing from LiteLLM config: {e}", exc_info=True)
+        logger.error(f"Failed to load model pricing: {e}", exc_info=True)
         return {}
 
 

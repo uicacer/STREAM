@@ -104,7 +104,7 @@ def judge_complexity_with_llm(
     # Check cache first (cache is strategy-agnostic for same queries)
     cached = get_cached_judgment(query)
     if cached:
-        logger.debug("🔍 Using cached complexity result")
+        logger.debug("Using cached complexity result")
         return cached, None, 0.0, None  # Cached = no cost
 
     # Build judge prompt

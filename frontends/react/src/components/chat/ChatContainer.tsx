@@ -228,6 +228,23 @@ export function ChatContainer() {
         },
         onMetadata: (meta) => {
           setMetadata(meta)
+
+          // When a runtime fallback occurs (tier failed during inference),
+          // immediately flip the failed tier's health dot to red.
+          // The backend already called mark_tier_unavailable() — this mirrors
+          // it on the frontend so the user sees the red dot without waiting
+          // for the next health poll.
+          if (meta.fallback && meta.original_tier) {
+            useHealthStore.getState().markTierFailed(meta.original_tier)
+          }
+
+          // Pre-routing fallback: the router found some tiers unavailable
+          // before even trying inference. Mark those red too.
+          if (meta.unavailable_tiers) {
+            for (const t of meta.unavailable_tiers) {
+              useHealthStore.getState().markTierFailed(t)
+            }
+          }
         },
         onThinking: (thought) => {
           appendThinking(thought)

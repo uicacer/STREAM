@@ -19,8 +19,9 @@
 11. [Performance Analysis and Latency Breakdown](#11-performance-analysis-and-latency-breakdown)
 12. [Persistent Executor Optimization](#12-persistent-executor-optimization)
 13. [Error Handling and Resilience](#13-error-handling-and-resilience)
-14. [Code Reference Map](#14-code-reference-map)
-15. [Future Work: Hybrid Approaches to Reduce Lakeshore Latency](#15-future-work-hybrid-approaches-to-reduce-lakeshore-latency)
+14. [Per-Model Health Checks](#14-per-model-health-checks)
+15. [Code Reference Map](#15-code-reference-map)
+16. [Future Work: Hybrid Approaches to Reduce Lakeshore Latency](#16-future-work-hybrid-approaches-to-reduce-lakeshore-latency)
 
 ---
 
@@ -31,7 +32,7 @@ STREAM (Smart Tiered Routing Engine for AI Models) is a middleware system that r
 | Tier | Backend | Use Case | Cost |
 |------|---------|----------|------|
 | **Local** | Ollama (Llama 3.2:3b on Apple Silicon) | Simple queries (greetings, definitions) | Free |
-| **Lakeshore** | vLLM (Qwen 2.5-1.5B on UIC HPC GPUs) | Medium queries (explanations, comparisons) | Free (university GPU) |
+| **Lakeshore** | vLLM (multiple models on UIC HPC GPUs) | Medium queries (explanations, comparisons) | Free (university GPU) |
 | **Cloud** | Claude Sonnet 4 / GPT-4 Turbo | Complex queries (design, analysis, research) | Pay-per-token |
 
 The Lakeshore tier is the most architecturally interesting because it connects a user's laptop to a remote HPC cluster behind a university firewall. This connection works through **Globus Compute**, a Function-as-a-Service (FaaS) platform for research computing.
@@ -48,12 +49,25 @@ Both modes use the same Globus Compute client code to reach Lakeshore, but the r
 
 Lakeshore is UIC's HPC cluster operated by ACER. For STREAM, it provides:
 
-- **GPU node:** `ga-001` with NVIDIA A100 (MIG 3g.40gb partition)
-- **Model server:** vLLM serving `Qwen/Qwen2.5-1.5B-Instruct`
-- **vLLM configuration:** Started via SLURM job script with `--max-model-len 32768` (32K token context window)
+- **GPU node:** `ga-002` with NVIDIA A100 (MIG 3g.40gb partitions — one per model)
+- **Model servers:** Five vLLM instances, each serving a different model on its own port
 - **Access:** Behind UIC's campus firewall — not directly reachable from the internet
 
-The vLLM server runs as a SLURM job on Lakeshore and exposes an OpenAI-compatible REST API at `http://ga-001:8000`. This API is **only accessible from within the Lakeshore cluster network** — not from a user's laptop, Docker container, or the public internet. This is why we need Globus Compute.
+### Multi-Model Architecture
+
+STREAM runs five models on Lakeshore, each as a separate vLLM instance on a dedicated MIG slice (3g.40gb, 39.5 GiB usable VRAM):
+
+| Model Key | HuggingFace Model | Port | Context Window | Description |
+|-----------|------------------|------|---------------|-------------|
+| `lakeshore-qwen-1.5b` | `Qwen/Qwen2.5-1.5B-Instruct` | 8000 | 32K tokens | General purpose (fast) |
+| `lakeshore-coder-1.5b` | `Qwen/Qwen2.5-Coder-1.5B-Instruct` | 8001 | 32K tokens | Coding specialist |
+| `lakeshore-deepseek-r1` | `deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B` | 8002 | 32K tokens | Deep reasoning |
+| `lakeshore-qwq` | `Qwen/Qwen2.5-1.5B-Instruct` | 8003 | 32K tokens | Reasoning |
+| `lakeshore-qwen-32b` | `Qwen/Qwen2.5-32B-Instruct-AWQ` | 8004 | 8K tokens | High quality (32B AWQ) |
+
+Each vLLM instance is started via a SLURM job script and exposes an OpenAI-compatible REST API at `http://ga-002:<port>`. The model configuration is centralized in [`config.py`](stream/middleware/config.py) as `LAKESHORE_MODELS`, which maps each model key to its HuggingFace name, port, and description. The `get_lakeshore_vllm_url()` function dynamically constructs the correct URL by extracting the host from `VLLM_SERVER_URL` (default `http://ga-002:8000`) and replacing the port based on the selected model.
+
+These APIs are **only accessible from within the Lakeshore cluster network** — not from a user's laptop, Docker container, or the public internet. This is why we need Globus Compute.
 
 ---
 
@@ -118,14 +132,16 @@ When `gce.submit()` is called ([`globus_compute_client.py:502-510`](stream/middl
 ```python
 future = gce.submit(
     remote_vllm_inference,   # The function to run remotely
-    self.vllm_url,           # "http://ga-001:8000"
-    model,                   # "Qwen/Qwen2.5-1.5B-Instruct"
+    vllm_url,                # e.g., "http://ga-002:8004" (port varies per model)
+    hf_model,                # e.g., "Qwen/Qwen2.5-32B-Instruct-AWQ"
     messages,                # The chat conversation
     temperature,             # 0.7
-    max_tokens,              # 2048 (from MODEL_CONTEXT_LIMITS)
+    max_tokens,              # From MODEL_CONTEXT_LIMITS (varies per model)
     False,                   # stream=False
 )
 ```
+
+The `vllm_url` is dynamically constructed from the model key. For example, `lakeshore-qwen-32b` maps to port 8004, so the URL becomes `http://ga-002:8004`. The HuggingFace model name is resolved from `LAKESHORE_MODELS` in `config.py`.
 
 The following sequence occurs:
 
@@ -147,7 +163,7 @@ Once the AMQP broker receives the serialized task:
    - Spawns a worker process (or reuses one from its pool)
    - Executes the function
 
-3. **Remote Execution:** The deserialized `remote_vllm_inference` function runs on a Lakeshore compute node. Because the function runs **inside** the Lakeshore network, it can directly reach the vLLM server at `http://ga-001:8000`.
+3. **Remote Execution:** The deserialized `remote_vllm_inference` function runs on a Lakeshore compute node. Because the function runs **inside** the Lakeshore network, it can directly reach the vLLM servers at `http://ga-002:<port>` (port determined by the selected model).
 
 ### 4.4 Result Return: Lakeshore Back to STREAM
 
@@ -186,7 +202,7 @@ User's Machine (STREAM)                 AWS (Globus Cloud)              Lakeshor
 3. Future returned immediately                                         Deserializes fn
    (task still in transit)                                             Executes fn:
                                                                          → HTTP POST to
-                                                                           ga-001:8000/v1
+                                                                           ga-002:<port>/v1
                                                                            /chat/completions
                                                                          → vLLM generates
                                                                            response
@@ -242,7 +258,8 @@ In server mode, STREAM runs as five Docker containers communicating over an isol
                                                               │
                                                      ┌────────┴────────┐
                                                      │  Lakeshore HPC  │
-                                                     │  vLLM :8000     │
+                                                     │  vLLM :8000-    │
+                                                     │        :8004    │
                                                      └─────────────────┘
 ```
 
@@ -250,21 +267,21 @@ In server mode, STREAM runs as five Docker containers communicating over an isol
 
 The code path for a Lakeshore request in server mode:
 
-1. **React frontend** sends `POST /v1/chat/completions` to the middleware on port 5000.
+1. **React frontend** sends `POST /v1/chat/completions` to the middleware on port 5000, including the selected `lakeshore_model` (e.g., `lakeshore-qwen-32b`).
 
 2. **Middleware** ([`routes/chat.py:141`](stream/middleware/routes/chat.py#L141)) receives the request, judges complexity, and routes to the Lakeshore tier.
 
-3. **Streaming orchestrator** ([`core/streaming.py:213`](stream/middleware/core/streaming.py#L213)) calls `forward_to_litellm()` with model `"lakeshore-qwen"`.
+3. **Streaming orchestrator** ([`core/streaming.py:213`](stream/middleware/core/streaming.py#L213)) calls `forward_to_litellm()` with the selected Lakeshore model name.
 
 4. **LiteLLM HTTP client** ([`core/litellm_client.py:69`](stream/middleware/core/litellm_client.py#L69)) sends an HTTP POST to the LiteLLM gateway server on port 4000.
 
-5. **LiteLLM gateway** (running in its own container) reads `litellm_config.yaml` ([`gateway/litellm_config.yaml:97-106`](stream/gateway/litellm_config.yaml#L97-L106)), sees `lakeshore-qwen` maps to `api_base: http://lakeshore-proxy:8001/v1`, and forwards the request via HTTP to the Lakeshore proxy container.
+5. **LiteLLM gateway** (running in its own container) reads `litellm_config.yaml` ([`gateway/litellm_config.yaml`](stream/gateway/litellm_config.yaml)), sees the Lakeshore model maps to `api_base: http://lakeshore-proxy:8001/v1`, and forwards the request via HTTP to the Lakeshore proxy container.
 
 6. **Lakeshore Proxy** ([`proxy/app.py:117`](stream/proxy/app.py#L117)) receives the OpenAI-compatible request and routes it through `_route_via_globus_compute()`.
 
-7. **Globus Compute Client** ([`core/globus_compute_client.py:421`](stream/middleware/core/globus_compute_client.py#L421)) serializes and submits the inference function to Lakeshore.
+7. **Globus Compute Client** ([`core/globus_compute_client.py:421`](stream/middleware/core/globus_compute_client.py#L421)) resolves the model key to the correct vLLM URL (e.g., `lakeshore-qwen-32b` → `http://ga-002:8004`) and HuggingFace model name (e.g., `Qwen/Qwen2.5-32B-Instruct-AWQ`), then serializes and submits the inference function to Lakeshore.
 
-8. The remote function executes on Lakeshore, calls vLLM at `http://ga-001:8000`, and returns the result.
+8. The remote function executes on Lakeshore, calls the appropriate vLLM instance at `http://ga-002:<port>`, and returns the result.
 
 9. The result flows back: Proxy → LiteLLM → Middleware → React UI (as SSE chunks).
 
@@ -317,7 +334,8 @@ In desktop mode, everything runs in a single process — no Docker, no separate 
                                          │
                                 ┌────────┴────────┐
                                 │  Lakeshore HPC  │
-                                │  vLLM :8000     │
+                                │  vLLM :8000-    │
+                                │        :8004    │
                                 └─────────────────┘
 ```
 
@@ -474,17 +492,22 @@ The `reload_credentials()` method ([`globus_compute_client.py:329`](stream/middl
 
 ## 9. Context Window Management
 
-Context window management for Lakeshore is centralized in [`config.py:267-286`](stream/middleware/config.py#L267-L286) as a single source of truth:
+Context window management for Lakeshore is centralized in [`config.py`](stream/middleware/config.py) as a single source of truth:
 
 ```python
 MODEL_CONTEXT_LIMITS = {
-    "lakeshore-qwen": {"total": 32768, "reserve_output": 2048},
-    # ... other models ...
+    "lakeshore-qwen-1.5b":  {"total": 32768, "reserve_output": 2048},
+    "lakeshore-coder-1.5b": {"total": 32768, "reserve_output": 2048},
+    "lakeshore-deepseek-r1": {"total": 32768, "reserve_output": 2048},
+    "lakeshore-qwq":        {"total": 32768, "reserve_output": 2048},
+    "lakeshore-qwen-32b":   {"total": 8192,  "reserve_output": 1024},
+    "lakeshore-qwen":       {"total": 32768, "reserve_output": 2048},  # Legacy alias
+    # ... local and cloud models ...
 }
 ```
 
-- **`total` (32768):** Must match vLLM's `--max-model-len` on Lakeshore.
-- **`reserve_output` (2048):** Reserved for the model's response. Used as the `max_tokens` parameter.
+- **`total`:** Must match vLLM's `--max-model-len` on Lakeshore. The 1.5B models use 32K tokens; the 32B AWQ model is limited to 8K due to KV cache memory constraints on the 40GB MIG slice.
+- **`reserve_output`:** Reserved for the model's response. Used as the `max_tokens` parameter. The 32B model reserves 1024 tokens (shorter responses trade for more input context).
 
 This configuration is consumed in three places:
 
@@ -692,13 +715,53 @@ The fallback is transparent to the user — the UI shows "Lakeshore unavailable 
 
 ---
 
-## 14. Code Reference Map
+## 14. Per-Model Health Checks
+
+With five models running on separate vLLM instances, STREAM needs to verify that each individual model is operational — not just that Globus Compute authentication works. A model's vLLM instance may be down (SLURM job ended, GPU error, OOM) while others remain healthy.
+
+### The Problem with Authentication-Only Health Checks
+
+Previously, the Lakeshore health check only verified Globus authentication status. If the user's Globus tokens were valid, the tier showed as "available" — even if the actual vLLM instance serving the selected model had crashed. This led to confusing failures: the health indicator was green, but inference requests failed with connection errors.
+
+### Real Inference Health Checks
+
+STREAM now performs **real 1-token inference tests** through the full Globus Compute path to verify each model is actually running. The `check_model_health()` method ([`globus_compute_client.py`](stream/middleware/core/globus_compute_client.py)) sends a minimal request through Globus Compute to the specific model's vLLM instance:
+
+```python
+# Minimal test: send "hi", request 1 token, deterministic (temperature=0)
+messages = [{"role": "user", "content": "hi"}]
+result = submit_inference(messages, temperature=0.0, max_tokens=1, model=model_key)
+```
+
+This test traverses the entire inference path: AMQP → Globus Cloud → Lakeshore endpoint → vLLM on the correct port → response back. If any part of the chain is broken for that specific model, the health check catches it.
+
+### Per-Model Cache Keys
+
+Health check results are cached to avoid hammering Globus Compute on every frontend poll. The cache uses per-model keys ([`routes/health.py`](stream/middleware/routes/health.py)):
+
+```python
+# Without model parameter: only checks Globus auth (fast, but incomplete)
+cache_key = "lakeshore"
+
+# With model parameter: real inference test for that specific model
+cache_key = "lakeshore:lakeshore-qwen-32b"
+```
+
+The frontend passes the currently selected Lakeshore model in the health check request (`GET /health/tiers?lakeshore_model=lakeshore-qwen-32b`), so the health indicator reflects whether **that specific model** is available.
+
+### Timeout Configuration
+
+Per-model health checks use a 20-second timeout (configurable via `LAKESHORE_HEALTH_TIMEOUT`). This is generous because the full Globus Compute round-trip for even a 1-token request takes ~5 seconds, and the 32B model's initial prompt processing can add several more seconds on a cold start.
+
+---
+
+## 15. Code Reference Map
 
 ### Core Lakeshore Files
 
 | File | Purpose | Key Functions |
 |------|---------|--------------|
-| [`stream/middleware/core/globus_compute_client.py`](stream/middleware/core/globus_compute_client.py) | Globus Compute SDK integration | `submit_inference()`, `_get_executor()`, `_reset_executor()`, `shutdown()` |
+| [`stream/middleware/core/globus_compute_client.py`](stream/middleware/core/globus_compute_client.py) | Globus Compute SDK integration | `submit_inference()`, `check_model_health()`, `_get_executor()`, `_reset_executor()`, `shutdown()` |
 | [`stream/proxy/app.py`](stream/proxy/app.py) | Lakeshore proxy (standalone + embedded routes) | `proxy_chat_completions()`, `_route_via_globus_compute()`, `_convert_json_to_sse_stream()` |
 | [`stream/middleware/core/litellm_direct.py`](stream/middleware/core/litellm_direct.py) | Desktop-mode direct calls (bypasses HTTP) | `_forward_lakeshore()`, `forward_direct()` |
 | [`stream/middleware/core/litellm_client.py`](stream/middleware/core/litellm_client.py) | LiteLLM HTTP client (mode dispatcher) | `forward_to_litellm()` |
@@ -707,9 +770,9 @@ The fallback is transparent to the user — the UI shows "Lakeshore unavailable 
 
 | File | Purpose |
 |------|---------|
-| [`stream/middleware/config.py`](stream/middleware/config.py) | Central config: `MODEL_CONTEXT_LIMITS`, `LAKESHORE_PROXY_URL`, `USE_GLOBUS_COMPUTE` |
+| [`stream/middleware/config.py`](stream/middleware/config.py) | Central config: `LAKESHORE_MODELS`, `MODEL_CONTEXT_LIMITS`, `LAKESHORE_PROXY_URL`, `get_lakeshore_vllm_url()` |
 | [`stream/desktop/config.py`](stream/desktop/config.py) | Desktop env vars: `LAKESHORE_PROXY_URL=http://127.0.0.1:5000/lakeshore` |
-| [`stream/gateway/litellm_config.yaml`](stream/gateway/litellm_config.yaml) | Model mappings: `lakeshore-qwen → openai/Qwen/Qwen2.5-1.5B-Instruct` |
+| [`stream/gateway/litellm_config.yaml`](stream/gateway/litellm_config.yaml) | Model mappings: Lakeshore models → `openai/<HF_name>` with proxy base URL |
 | [`docker-compose.yml`](docker-compose.yml) | Container definitions: proxy on port 8001, credential volume mount |
 
 ### Supporting Files
@@ -721,16 +784,17 @@ The fallback is transparent to the user — the UI shows "Lakeshore unavailable 
 | [`stream/middleware/utils/context_window.py`](stream/middleware/utils/context_window.py) | Context window validation using `MODEL_CONTEXT_LIMITS` |
 | [`stream/middleware/routes/chat.py`](stream/middleware/routes/chat.py) | Main chat endpoint: complexity routing, tier selection |
 | [`stream/middleware/core/query_router.py`](stream/middleware/core/query_router.py) | Tier routing with fallback chains |
+| [`stream/middleware/routes/health.py`](stream/middleware/routes/health.py) | Health check endpoints: per-model Lakeshore health via 1-token inference |
 | [`stream/middleware/core/tier_health.py`](stream/middleware/core/tier_health.py) | Health checks for all tiers including Lakeshore proxy |
 | [`stream/desktop/main.py`](stream/desktop/main.py) | Desktop app entry point: startup sequence, PyWebView |
 
 ---
 
-## 15. Future Work: Hybrid Approaches to Reduce Lakeshore Latency
+## 16. Future Work: Hybrid Approaches to Reduce Lakeshore Latency
 
 The current Globus Compute approach adds approximately 2–3 seconds of overhead per request on top of the actual vLLM inference time (~2–3 seconds). This section explores two hybrid approaches that could significantly reduce this latency while retaining the security and firewall-transparency benefits of Globus Compute.
 
-### 15.1 The Latency Problem Recap
+### 16.1 The Latency Problem Recap
 
 To understand where improvement is possible, recall the measured latency breakdown:
 
@@ -753,7 +817,7 @@ If we could send requests **directly** to vLLM (bypassing the Globus round-trip)
 
 The key insight is: **Globus Compute is excellent at solving the authentication and firewall problem, but it doesn't have to be the transport layer for every single request.** We can use Globus for the hard part (establishing access) and then switch to a faster channel for the data-intensive part (streaming inference).
 
-### 15.2 Approach 1: SSH Tunnel with Globus Compute as Universal Fallback
+### 16.2 Approach 1: SSH Tunnel with Globus Compute as Universal Fallback
 
 #### The Two Authentication Systems
 
@@ -775,7 +839,7 @@ An SSH tunnel creates a direct, encrypted pipe from your machine to the vLLM ser
 Your machine                    Lakeshore login node              GPU node
 ============                    ====================              ========
                     SSH tunnel
-localhost:8000 ←================→ login.lakeshore.uic.edu ------→ ga-001:8000
+localhost:8000 ←================→ login.lakeshore.uic.edu ------→ ga-002:8000
      ↑               (encrypted)                                      ↑
      │                                                                │
   STREAM sends                                              vLLM listens here
@@ -784,12 +848,12 @@ localhost:8000 ←================→ login.lakeshore.uic.edu ------→ ga-001:8
 
 The command to create this tunnel:
 ```bash
-ssh -L 8000:ga-001:8000 user@lakeshore.uic.edu -N -f
+ssh -L 8000:ga-002:8000 user@lakeshore.uic.edu -N -f
 ```
 
 Breakdown:
-- `-L 8000:ga-001:8000`: Forward local port 8000 to `ga-001:8000` through the SSH connection
-- `user@lakeshore.uic.edu`: SSH into the Lakeshore login node (which CAN reach `ga-001`)
+- `-L 8000:ga-002:8000`: Forward local port 8000 to `ga-002:8000` through the SSH connection
+- `user@lakeshore.uic.edu`: SSH into the Lakeshore login node (which CAN reach `ga-002`)
 - `-N`: Don't run any remote command (just tunnel)
 - `-f`: Run in background
 
@@ -839,7 +903,7 @@ STARTUP:
 ════════
 
 1. Try to establish SSH tunnel to Lakeshore
-   ssh -L 8000:ga-001:8000 user@lakeshore.uic.edu -N -f
+   ssh -L 8000:ga-002:8000 user@lakeshore.uic.edu -N -f
 
 2a. SUCCESS → Use SSH tunnel for all requests (~2-3s per request)
     Set LAKESHORE_VLLM_ENDPOINT=http://localhost:8000
@@ -883,12 +947,12 @@ def discover_vllm_endpoint():
 
     return {
         "status": status.lower(),
-        "node": node,           # e.g., "ga-001"
+        "node": node,           # e.g., "ga-002"
         "port": 8000,           # vLLM's configured port
     }
 ```
 
-This costs ~5 seconds (one Globus round-trip) but only needs to run once per session, or when the tunnel breaks. For fixed deployments where the node and port are known in advance (as is currently the case with `ga-001:8000`), this discovery step is unnecessary — the tunnel target can be configured statically.
+This costs ~5 seconds (one Globus round-trip) but only needs to run once per session, or when the tunnel breaks. For fixed deployments where the node is known in advance (as is currently the case with `ga-002`), this discovery step is unnecessary — the tunnel targets can be configured statically (one tunnel per port, or a range).
 
 #### Implementation in the Existing Codebase
 
@@ -917,7 +981,7 @@ async def _route_lakeshore(model, messages, temperature, max_tokens, stream):
         )
 ```
 
-### 15.3 Approach 2: AMQP-Based Token Streaming (Streaming Through the Existing Channel)
+### 16.3 Approach 2: AMQP-Based Token Streaming (Streaming Through the Existing Channel)
 
 #### The Core Idea
 
@@ -1222,12 +1286,12 @@ Login nodes are **shared resources** — dozens or hundreds of users are logged 
 
 So the naive approach — "start the relay on the login node and leave it running" — is not appropriate. You should not be running persistent services on the login node.
 
-**Compute nodes** (`ga-001`, etc.) are where actual work runs, managed by SLURM:
+**Compute nodes** (`ga-002`, etc.) are where actual work runs, managed by SLURM:
 - Users submit jobs, SLURM allocates resources
 - Jobs run in isolation with dedicated CPU/memory/GPU
 - When the job finishes, the resources are released
 
-The GPU node `ga-001` where vLLM runs is a compute node. But compute nodes are only reachable from within Lakeshore's internal network — they don't have public IP addresses and the firewall doesn't expose them. So running the relay on a compute node has the same firewall problem, plus the relay would die when the SLURM job ends.
+The GPU node `ga-002` where vLLM runs is a compute node. But compute nodes are only reachable from within Lakeshore's internal network — they don't have public IP addresses and the firewall doesn't expose them. So running the relay on a compute node has the same firewall problem, plus the relay would die when the SLURM job ends.
 
 ##### Deployment Options for ACER Discussion
 
@@ -1568,7 +1632,7 @@ The pattern of separating the control plane (Globus Compute for auth/submission)
 
 The control plane / data plane separation could also be proposed as a design pattern to the Globus team at the University of Chicago and Argonne National Laboratory, potentially motivating native streaming support in future SDK versions.
 
-### 15.4 Recommended Roadmap
+### 16.4 Recommended Roadmap
 
 Based on feasibility, user impact, and the goal of seamless UX:
 
@@ -1598,8 +1662,12 @@ STREAM's Lakeshore connectivity demonstrates how a research middleware system ca
 
 4. **`exec()`-based remote functions** — solve the PyInstaller serialization incompatibility that would otherwise prevent desktop deployment.
 
-5. **Simulated streaming** — converts Globus Compute's batch-style responses into SSE streams, providing a consistent ChatGPT-like experience across all tiers.
+5. **Multi-model architecture** — five models on separate vLLM instances (ports 8000–8004) with per-model URL resolution, context limits, and health checks, all configured through `LAKESHORE_MODELS` in `config.py`.
 
-6. **Centralized context window configuration** — `MODEL_CONTEXT_LIMITS` in `config.py` serves as the single source of truth for token limits across proxy, desktop direct calls, and context validation.
+6. **Per-model health checks** — real 1-token inference tests through Globus Compute verify each model's vLLM instance is operational, not just that authentication works.
 
-The irreducible ~5-second latency for Lakeshore requests is inherent to the Globus Compute FaaS architecture (multi-hop AMQP routing through cloud infrastructure) and represents the trade-off for secure, firewall-transparent HPC access without SSH or VPN infrastructure. The proposed WebSocket relay approach (Section 15) offers a practical path to true streaming with ~3-second first-token latency while preserving the seamless, zero-setup user experience that Globus Compute provides.
+7. **Simulated streaming** — converts Globus Compute's batch-style responses into SSE streams, providing a consistent ChatGPT-like experience across all tiers.
+
+8. **Centralized configuration** — `LAKESHORE_MODELS` and `MODEL_CONTEXT_LIMITS` in `config.py` serve as the single source of truth for model mappings, port assignments, and token limits across proxy, desktop direct calls, and context validation.
+
+The irreducible ~5-second latency for Lakeshore requests is inherent to the Globus Compute FaaS architecture (multi-hop AMQP routing through cloud infrastructure) and represents the trade-off for secure, firewall-transparent HPC access without SSH or VPN infrastructure. The proposed WebSocket relay approach (Section 16) offers a practical path to true streaming with ~3-second first-token latency while preserving the seamless, zero-setup user experience that Globus Compute provides.

@@ -101,7 +101,7 @@ def _initialize_postgres():
         )
 
         logger.info(
-            "✅ Database connection pool initialized",
+            "PostgreSQL connection pool initialized",
             extra={
                 "host": required_vars["POSTGRES_HOST"],
                 "database": required_vars["POSTGRES_DB"],
@@ -113,14 +113,14 @@ def _initialize_postgres():
         return True
 
     except ValueError as e:
-        logger.critical(f"❌ Database configuration error: {e}")
-        logger.warning("⚠️  Cost tracking will be disabled")
+        logger.critical(f"Database configuration error: {e}")
+        logger.warning("Cost tracking will be disabled")
         _db_pool = None
         return False
 
     except Exception as e:
-        logger.critical(f"❌ Database connection failed: {e}", exc_info=True)
-        logger.warning("⚠️  Cost tracking will be disabled")
+        logger.critical(f"Database connection failed: {e}", exc_info=True)
+        logger.warning("Cost tracking will be disabled")
         _db_pool = None
         return False
 
@@ -165,7 +165,7 @@ def close_database_pool():
 
     if _db_pool:
         _db_pool.closeall()
-        logger.info("✅ Database connection pool closed")
+        logger.info("Database connection pool closed")
         _db_pool = None
     else:
         logger.debug("Database pool already closed or never initialized")

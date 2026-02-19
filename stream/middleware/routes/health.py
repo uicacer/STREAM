@@ -50,7 +50,7 @@ async def get_tier_health(
     Get current health status of all AI tiers.
 
     Returns availability, last check time, and any error messages.
-    Frontend polls this every 30 seconds to show tier status indicators.
+    Frontend fetches this on startup and when the user changes tier/model.
 
     Args:
         cloud_provider: Optional. Checks health for this specific cloud provider.

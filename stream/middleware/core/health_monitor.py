@@ -1,72 +1,43 @@
 """
 Background health monitor for AI service tiers.
 
-This module runs health checks in a background thread to keep the
-tier health cache fresh, preventing blocking during user requests.
+DISABLED: This module previously ran health checks every 5 minutes in a
+background thread. This was removed because:
+
+  1. At scale (thousands of users), periodic health checks overwhelm
+     Lakeshore — each check submits a real 1-token inference job through
+     Globus Compute, consuming GPU time and Globus API quota.
+
+  2. Health checks are now ON-DEMAND only — triggered by user actions
+     (selecting a tier, changing a model) instead of a timer.
+
+  3. The frontend no longer polls every 30 seconds either. Combined with
+     this change, STREAM only checks health when the user actually needs
+     to know, keeping Lakeshore free for real inference work.
+
+The HealthMonitor class is kept as a no-op stub so existing imports
+(lifecycle.py) don't break. start() and stop() do nothing.
 """
 
 import logging
-import threading
-
-from stream.middleware.core.tier_health import _tier_health, update_tier_health
 
 logger = logging.getLogger(__name__)
 
 
 class HealthMonitor:
-    """Background thread that keeps tier health cache fresh."""
+    """Stub — background health polling has been removed (on-demand only now)."""
 
-    def __init__(self, check_interval: int = 300):  # 5 minutes
-        self.check_interval = check_interval
-        self._thread = None
-        self._stop_event = threading.Event()
-        # Track previous status to only log changes
-        self._previous_status = {}
+    def __init__(self, check_interval: int = 300):
+        pass
 
     def start(self):
-        """Start the background health check thread."""
-        self._stop_event.clear()
-        self._thread = threading.Thread(target=self._run_checks, daemon=True)
-        self._thread.start()
-        logger.info(f"Health monitor started (interval: {self.check_interval}s)")
+        """No-op. Health checks are now on-demand only."""
+        logger.info("Health monitor disabled (on-demand health checks only)")
 
     def stop(self):
-        """Stop the background health check thread."""
-        self._stop_event.set()
-        if self._thread:
-            self._thread.join(timeout=5)
-        logger.info("Health monitor stopped")
-
-    def _run_checks(self):
-        """Main loop: check all tiers periodically."""
-        tiers = ["local", "lakeshore", "cloud"]
-
-        while not self._stop_event.is_set():
-            for tier in tiers:
-                if self._stop_event.is_set():
-                    break
-                try:
-                    # Update health (includes retries in check_tier_health)
-                    update_tier_health(tier)
-
-                    # Only log if status changed
-                    current_status = _tier_health[tier]["available"]
-                    previous = self._previous_status.get(tier)
-
-                    if previous is not None and current_status != previous:
-                        if current_status:
-                            logger.info(f"Tier {tier.upper()} is now AVAILABLE")
-                        else:
-                            logger.warning(f"Tier {tier.upper()} is now UNAVAILABLE")
-
-                    self._previous_status[tier] = current_status
-
-                except Exception as e:
-                    logger.error(f"Health check failed for {tier}: {e}")
-
-            # Wait for next check interval (interruptible)
-            self._stop_event.wait(self.check_interval)
+        """No-op."""
+        pass
 
 
-# Singleton instance
-health_monitor = HealthMonitor(check_interval=300)  # 5 minutes
+# Singleton instance (kept for import compatibility)
+health_monitor = HealthMonitor()

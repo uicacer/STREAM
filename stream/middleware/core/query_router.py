@@ -35,18 +35,21 @@ def get_tier_with_fallback(
     preferred_tier: str,
     complexity: str,
     cloud_provider: str | None = None,
-    lakeshore_model: str | None = None,
 ) -> tuple[str, str, list[str]]:
     """
     Get tier with intelligent fallback.
+
+    Only Level 1 health checks are used during routing (fast, no GPU jobs).
+    lakeshore_model is intentionally NOT accepted here — passing it would
+    trigger a Level 2 check (1-token inference via Globus Compute, ~10-30s)
+    that blocks the user's query. Cloud provider IS passed because cloud
+    Level 2 checks are fast (~1s HTTP call).
 
     Args:
         preferred_tier: The tier to try first
         complexity: Query complexity (low/medium/high)
         cloud_provider: For cloud tier, the specific provider (e.g., "cloud-gpt")
                        Passed to health check so we test the right provider.
-        lakeshore_model: For lakeshore tier, the specific model (e.g., "lakeshore-qwen-32b")
-                        Passed to health check so we test the right model's vLLM port.
 
     Returns:
         Tuple of (tier, message, unavailable_tiers)
@@ -71,16 +74,24 @@ def get_tier_with_fallback(
     unavailable_tiers = []
 
     for tier in fallback_chain:
-        # Pass per-tier model overrides so we check the RIGHT model's health.
-        # e.g., GPT might be healthy while Claude has billing issues,
-        # or lakeshore-qwen-1.5b might be up while lakeshore-qwen-32b is down.
+        # During routing, we only check Level 1 health (fast, no GPU jobs):
+        #   - Local: is Ollama reachable?
+        #   - Lakeshore: is Globus authenticated and configured?
+        #   - Cloud: is the API key valid?
+        #
+        # We intentionally DON'T pass lakeshore_model here because that
+        # triggers a Level 2 check (1-token inference via Globus Compute,
+        # ~10-30s) which blocks the user's query. If Lakeshore is configured
+        # and authenticated, we trust it and try the inference directly.
+        # If it fails, the streaming/batch fallback handles it gracefully.
+        #
+        # Cloud provider IS passed because cloud Level 2 checks are fast
+        # (~1s HTTP call) and catch real issues like expired API keys.
         tier_cloud_provider = cloud_provider if tier == "cloud" else None
-        tier_lakeshore_model = lakeshore_model if tier == "lakeshore" else None
 
         if is_tier_available(
             tier,
             cloud_provider=tier_cloud_provider,
-            lakeshore_model=tier_lakeshore_model,
         ):
             if tier == preferred_tier:
                 return tier, f"{complexity.upper()} → {tier.upper()}", []
@@ -93,13 +104,12 @@ def get_tier_with_fallback(
                     unavailable_tiers,
                 )
         else:
-            # Check if this is an auth error - DON'T fall back, show error to user
-            # IMPORTANT: Pass model-specific params to get the CORRECT error from cache.
-            # Without it, we'd look up the wrong cache key and get stale errors!
+            # Check if this is an auth error - DON'T fall back, show error to user.
+            # Only pass cloud_provider (fast check). Lakeshore_model is NOT passed
+            # for the same reason as above — it would trigger a Level 2 GPU job.
             error_msg, error_type = get_tier_error(
                 tier,
                 cloud_provider=tier_cloud_provider,
-                lakeshore_model=tier_lakeshore_model,
             )
             if error_type == "auth":
                 raise AuthError(tier, error_msg)
@@ -156,12 +166,16 @@ def get_tier_for_query(
     """
     # If user explicitly chose a tier, respect it strictly (no silent fallback)
     if user_preference in ["local", "lakeshore", "cloud"]:
-        # Pass per-tier model overrides so we test the ACTUAL model the user wants
-        # (e.g., GPT not Claude, or lakeshore-qwen-32b not the default 1.5b)
+        # Only Level 1 health check during routing (fast, no GPU jobs).
+        # For Lakeshore, we DON'T pass lakeshore_model — that triggers a
+        # Level 2 check (1-token inference via Globus Compute, ~10-30s)
+        # which blocks the user's query. Instead, trust Globus auth status
+        # and try the inference directly. If it fails, streaming/batch
+        # fallback handles it gracefully.
+        # Cloud provider IS passed because cloud checks are fast (~1s).
         if is_tier_available(
             user_preference,
-            cloud_provider=cloud_provider,
-            lakeshore_model=lakeshore_model if user_preference == "lakeshore" else None,
+            cloud_provider=cloud_provider if user_preference == "cloud" else None,
         ):
             return RoutingResult(
                 tier=user_preference,
@@ -171,12 +185,11 @@ def get_tier_for_query(
             )
         else:
             # User explicitly selected this tier - don't silently fallback
-            # Raise an error so the user knows their selection couldn't be honored
-            # IMPORTANT: Pass model-specific params to get the CORRECT cached error
+            # Raise an error so the user knows their selection couldn't be honored.
+            # Same rule: no lakeshore_model to avoid Level 2 GPU jobs.
             error_msg, error_type = get_tier_error(
                 user_preference,
-                cloud_provider=cloud_provider,
-                lakeshore_model=lakeshore_model if user_preference == "lakeshore" else None,
+                cloud_provider=cloud_provider if user_preference == "cloud" else None,
             )
 
             # Provide specific error messages based on error type
@@ -223,14 +236,13 @@ def get_tier_for_query(
     else:  # high
         preferred_tier = "cloud"
 
-    # Get tier with intelligent fallback (raises AuthError if auth issue)
-    # Pass model-specific params so Auto mode checks the user's selected models
-    # (not default Claude / default lakeshore-qwen-1.5b)
+    # Get tier with intelligent fallback (raises AuthError if auth issue).
+    # cloud_provider is passed so cloud health checks test the right API key.
+    # lakeshore_model is NOT passed — only Level 1 checks run during routing.
     tier, fallback_reason, unavailable_tiers = get_tier_with_fallback(
         preferred_tier,
         complexity,
         cloud_provider=cloud_provider,
-        lakeshore_model=lakeshore_model,
     )
 
     # If no tier available, raise error

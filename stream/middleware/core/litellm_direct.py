@@ -46,6 +46,7 @@ from stream.middleware.config import (
     LAKESHORE_PROXY_URL,
     MODEL_CONTEXT_LIMITS,
     OLLAMA_BASE_URL,
+    RELAY_URL,
 )
 
 logger = logging.getLogger(__name__)
@@ -194,6 +195,16 @@ async def _forward_lakeshore(
     """
     Call the Lakeshore Globus Compute client directly (desktop mode only).
 
+    Two modes depending on whether RELAY_URL is configured:
+
+    1. WITH RELAY (true streaming):
+       Submits the job to Globus, then connects to the relay as a consumer.
+       Tokens flow in real-time:  Lakeshore GPU → relay → here → frontend
+
+    2. WITHOUT RELAY (fake streaming — original behavior):
+       Waits for the full response via Globus, then splits it into word-by-word
+       chunks with delays to simulate a typing effect.
+
     WHY NOT USE litellm.acompletion() FOR LAKESHORE?
     -------------------------------------------------
     In desktop mode, litellm.acompletion() for lakeshore would make an HTTP
@@ -215,15 +226,6 @@ async def _forward_lakeshore(
     SOLUTION: Skip HTTP entirely. Call the Globus Compute client directly
     (it's already loaded in the same process), then convert the response
     to the same SSE format that streaming.py expects.
-
-      forward_direct → globus_client.submit_inference() → Globus Compute
-                            ↓
-                    vLLM response (JSON) → convert to SSE chunks
-                            ↓
-                    streaming.py processes normally
-
-    The response format is identical either way — streaming.py doesn't
-    know or care whether the data came from HTTP or a direct call.
     """
     gc = _proxy_app.globus_client
     if not gc or not gc.is_available():
@@ -234,18 +236,51 @@ async def _forward_lakeshore(
     hf_name = model_info["hf_name"] if model_info else model
 
     logger.info(
-        f"[{correlation_id}] Lakeshore direct call: {model} → {hf_name}",
+        f"[{correlation_id}] Lakeshore direct call: {model} → {hf_name}"
+        f"{' (STREAMING via relay)' if RELAY_URL else ' (batch mode)'}",
         extra={"correlation_id": correlation_id, "model": model},
     )
 
-    # Call Globus Compute directly — no HTTP, no self-connection.
-    # submit_inference handles vLLM URL routing and HF name resolution
-    # internally using LAKESHORE_MODELS config.
-    #
-    # max_tokens = how many tokens the model is allowed to generate.
-    # We read this from MODEL_CONTEXT_LIMITS (defined in config.py) where
-    # each model has a "reserve_output" field — that's the number of tokens
-    # reserved for the model's response.
+    # =====================================================================
+    # PATH 1: TRUE STREAMING via WebSocket relay
+    # =====================================================================
+    # When RELAY_URL is configured, we use the relay for real-time token
+    # streaming. Tokens appear in the browser as the GPU generates them.
+    # If the relay connection fails (tunnel died, relay crashed), we fall
+    # back to PATH 2 (batch mode) so the user still gets a response.
+    if RELAY_URL:
+        try:
+            async for line in _forward_lakeshore_streaming(
+                gc, model, messages, temperature, correlation_id
+            ):
+                yield line
+            return
+        except Exception as e:
+            error_str = str(e)
+            if "did not receive a valid HTTP response" in error_str:
+                reason = "relay not reachable"
+            elif "Connect call failed" in error_str or "ConnectionRefused" in error_str:
+                reason = "relay server not running"
+            elif "timed out" in error_str.lower():
+                reason = "connection timed out"
+            else:
+                reason = error_str
+            logger.warning(
+                f"Falling back to BATCH MODE ({reason}). "
+                f"Response will arrive all at once instead of streaming.",
+                extra={"correlation_id": correlation_id},
+            )
+            # Fall through to PATH 2 below
+
+    # =====================================================================
+    # PATH 2: BATCH MODE (fallback when relay is unavailable)
+    # =====================================================================
+    # Waits for the full response via Globus Compute's control plane,
+    # then returns the complete response as a single SSE burst.
+    # This happens when:
+    #   - RELAY_URL is not configured (relay not set up)
+    #   - The relay connection failed (tunnel died, relay crashed)
+
     model_limits = MODEL_CONTEXT_LIMITS.get(model, {})
     max_tokens = model_limits.get("reserve_output", 2048)
 
@@ -256,9 +291,9 @@ async def _forward_lakeshore(
         max_tokens=max_tokens,
     )
 
-    # Log the raw result for debugging (truncated to avoid flooding logs)
+    # Log the raw result at DEBUG level (truncated to avoid flooding logs)
     result_preview = str(result)[:500] if result else "None"
-    logger.info(
+    logger.debug(
         f"[{correlation_id}] Lakeshore raw result: {result_preview}",
         extra={"correlation_id": correlation_id},
     )
@@ -272,12 +307,6 @@ async def _forward_lakeshore(
         raise HTTPException(status_code=503, detail=f"Lakeshore inference failed: {error_msg}")
 
     # Convert the complete vLLM response to SSE chunks.
-    # vLLM returns a standard OpenAI chat completion response:
-    #   {"choices": [{"message": {"content": "the response text"}}], "usage": {...}}
-    #
-    # We split the content into word-by-word SSE events — the same format
-    # that litellm streaming would produce. This way streaming.py handles
-    # it identically to any other tier.
     choices = result.get("choices", []) if isinstance(result, dict) else []
     if not choices:
         logger.warning(
@@ -295,25 +324,29 @@ async def _forward_lakeshore(
         extra={"correlation_id": correlation_id},
     )
 
-    # Yield content word by word as SSE delta chunks.
-    # We add a small delay between chunks to simulate streaming — the same
-    # approach as _convert_json_to_sse_stream() in proxy/app.py (server mode).
-    # Without this delay, all words yield in a single event loop tick and
-    # FastAPI sends them as one block — the frontend sees the whole response
-    # appear at once instead of progressively.
-    words_per_chunk = 2  # Match server mode: 2 words per chunk
-    delay_between_chunks = 0.05  # 50ms — comfortable reading pace
-
+    # Yield the complete response as a single SSE chunk (no artificial delays).
+    # For real token-by-token streaming, configure RELAY_URL (PATH 1 above).
     if content:
-        words = content.split(" ")
-        for i in range(0, len(words), words_per_chunk):
-            word_group = words[i : i + words_per_chunk]
-            text = " ".join(word_group) if i == 0 else " " + " ".join(word_group)
-            chunk = {
-                "choices": [{"index": 0, "delta": {"content": text}}],
-            }
-            yield f"data: {json.dumps(chunk)}"
-            await asyncio.sleep(delay_between_chunks)
+        chunk = {
+            "choices": [{"index": 0, "delta": {"content": content}}],
+        }
+        yield f"data: {json.dumps(chunk)}"
+
+    # FAKE STREAMING (commented out — kept in case we want to re-enable it).
+    # This splits the batch response into word-by-word chunks with delays
+    # to simulate a typing effect. Replaced by the single burst above.
+    # words_per_chunk = 2
+    # delay_between_chunks = 0.05  # 50ms — comfortable reading pace
+    # if content:
+    #     words = content.split(" ")
+    #     for i in range(0, len(words), words_per_chunk):
+    #         word_group = words[i : i + words_per_chunk]
+    #         text = " ".join(word_group) if i == 0 else " " + " ".join(word_group)
+    #         chunk = {
+    #             "choices": [{"index": 0, "delta": {"content": text}}],
+    #         }
+    #         yield f"data: {json.dumps(chunk)}"
+    #         await asyncio.sleep(delay_between_chunks)
 
     # Yield usage info in the final chunk (streaming.py reads this for cost)
     if usage:
@@ -324,6 +357,164 @@ async def _forward_lakeshore(
         yield f"data: {json.dumps(final_chunk)}"
 
     yield "data: [DONE]"
+
+
+async def _check_relay_reachable(relay_url: str, timeout: float = 3.0) -> bool:
+    """
+    Quick check if the WebSocket relay is reachable.
+
+    Connects to the relay's /health endpoint and reads the response.
+    Returns True if the relay responds, False otherwise.
+
+    This prevents submitting expensive Globus Compute jobs when the relay
+    is down (SSH tunnel expired, relay server stopped, etc.).
+    """
+    from websockets.asyncio.client import connect as ws_connect
+
+    try:
+        async with ws_connect(f"{relay_url}/health", open_timeout=timeout) as ws:
+            await asyncio.wait_for(ws.recv(), timeout=timeout)
+            return True
+    except Exception:
+        return False
+
+
+async def _forward_lakeshore_streaming(
+    gc,
+    model: str,
+    messages: list[dict],
+    temperature: float,
+    correlation_id: str,
+) -> AsyncGenerator[str, None]:
+    """
+    TRUE streaming from Lakeshore via the WebSocket relay.
+
+    How it works:
+      1. Check relay connectivity (prevents wasted Globus jobs)
+      2. Submit the streaming job to Globus Compute (fast — just sends the job)
+      3. Connect to the relay as a CONSUMER on the returned channel_id
+      4. Receive tokens in real-time as the GPU generates them on Lakeshore
+      5. Convert each token to SSE format and yield it to the streaming pipeline
+
+    The data flow:
+      Lakeshore GPU → vLLM (stream=True) → relay PRODUCER → relay → CONSUMER (us)
+                                                                       ↓
+      Frontend ← streaming.py ← SSE chunks ← this function ←─────────┘
+
+    The SSE output format is identical to fake streaming — streaming.py
+    doesn't know or care whether the tokens came from a relay or were
+    split from a batch response.
+    """
+    from websockets.asyncio.client import connect as ws_connect
+
+    model_limits = MODEL_CONTEXT_LIMITS.get(model, {})
+    max_tokens = model_limits.get("reserve_output", 2048)
+
+    # Step 1: Check relay connectivity BEFORE submitting the Globus job.
+    # Without this check, we'd submit a Globus job (which runs on HPC for
+    # ~10-30s), then discover the relay is down when we try to connect as
+    # consumer. That wastes a Globus job and delays the user by 10+ seconds.
+    if not await _check_relay_reachable(RELAY_URL):
+        raise ConnectionError("Relay not reachable — did not receive a valid HTTP response")
+
+    # Step 2: Submit the streaming job to Globus Compute.
+    # This returns immediately with a channel_id. The actual inference
+    # hasn't started yet — Globus needs a few seconds to route the job
+    # to Lakeshore.
+    result = await gc.submit_streaming_inference(
+        messages=messages,
+        temperature=temperature,
+        model=model,
+        max_tokens=max_tokens,
+        relay_url=RELAY_URL,
+    )
+
+    # Check for submission errors (auth, config, etc.)
+    if "error" in result:
+        error_msg = result.get("error", "Unknown error")
+        error_type = result.get("error_type", "")
+        if error_type == "AuthenticationError":
+            raise HTTPException(status_code=401, detail=error_msg)
+        raise HTTPException(status_code=503, detail=f"Lakeshore streaming failed: {error_msg}")
+
+    channel_id = result["channel_id"]
+    logger.info(
+        f"[{correlation_id}] Connecting to relay as consumer "
+        f"(channel={channel_id[:8]}, relay={RELAY_URL})",
+        extra={"correlation_id": correlation_id},
+    )
+
+    # Step 3: Connect to the relay as a CONSUMER.
+    # We connect immediately after submitting the job. The relay will hold
+    # our connection until the producer (Lakeshore) connects and starts
+    # sending tokens. If the producer sent tokens before we connected,
+    # the relay buffered them and flushes them to us now.
+    try:
+        async with ws_connect(f"{RELAY_URL}/consume/{channel_id}") as ws:
+            # Step 4: Receive tokens and convert to SSE format.
+            # Each message from the relay is a JSON object:
+            #   {"type": "token", "content": "Hello"}  — a generated token
+            #   {"type": "done", "usage": {...}}        — stream complete
+            #   {"type": "error", "message": "..."}     — something went wrong
+            async for msg_str in ws:
+                msg = json.loads(msg_str)
+
+                if msg["type"] == "token":
+                    # Convert to the same SSE delta format that streaming.py expects.
+                    # This is identical to what litellm streaming produces.
+                    chunk = {
+                        "choices": [{"index": 0, "delta": {"content": msg["content"]}}],
+                    }
+                    yield f"data: {json.dumps(chunk)}"
+
+                elif msg["type"] == "done":
+                    # Stream complete. Include usage stats if available.
+                    usage = msg.get("usage", {})
+                    if usage:
+                        final_chunk = {
+                            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                            "usage": usage,
+                        }
+                        yield f"data: {json.dumps(final_chunk)}"
+                    yield "data: [DONE]"
+                    break
+
+                elif msg["type"] == "error":
+                    error_msg = msg.get("message", "Unknown streaming error")
+                    logger.error(
+                        f"[{correlation_id}] Relay error: {error_msg}",
+                        extra={"correlation_id": correlation_id},
+                    )
+                    # Don't break — the producer will send "done" after the error
+
+    except Exception as e:
+        error_str = str(e)
+
+        # Translate cryptic WebSocket errors into actionable messages
+        if "did not receive a valid HTTP response" in error_str:
+            cause = "SSH tunnel expired"
+            fix = "ssh -4 -R 80:localhost:8765 nokey@localhost.run  then update RELAY_URL in .env"
+        elif "Connect call failed" in error_str or "ConnectionRefused" in error_str:
+            cause = "Relay server not running"
+            fix = "python -m stream.relay.server"
+        elif "timed out" in error_str.lower():
+            cause = "Connection timed out"
+            fix = "Check that the relay server and SSH tunnel are both running"
+        else:
+            cause = "Unexpected error"
+            fix = error_str
+
+        logger.error(
+            f"\n{'=' * 60}\n"
+            f"  RELAY CONNECTION FAILED\n"
+            f"  Cause: {cause}\n"
+            f"  Fix:   {fix}\n"
+            f"  Raw:   {error_str}\n"
+            f"{'=' * 60}",
+            extra={"correlation_id": correlation_id},
+        )
+        # Re-raise so _forward_lakeshore() can catch it and fall back to batch mode
+        raise
 
 
 async def forward_direct(

@@ -119,14 +119,17 @@ export function TypingIndicator({
   const mountTimeRef = useRef(Date.now())
   const transitionsStartedRef = useRef(false)
 
-  // Gradually decreasing timing - first messages are educational, later ones are fast
-  // Each entry: [analyzeMinDisplay, routeDisplayTime, generateDisplayTime]
+  // First message: full educational pauses so the user sees the entire pipeline.
+  // Every message after: near-instant transitions (just a brief flash so the
+  // badges still animate, but no artificial waiting). The user already
+  // understands Analyze → Route → Generate from the first message.
+  const FIRST_MSG_TIMING: [number, number, number] = [2200, 1600, 1200]
+  const FAST_TIMING: [number, number, number] = [400, 250, 0]
+
   const STAGE_TIMING: Record<number, [number, number, number]> = {
-    1: [2200, 1600, 1200],  // First message: user learns the full pipeline
-    2: [1800, 1200, 800],   // Second: reinforcement
-    3: [1400, 900, 600],    // Third: getting familiar
+    1: FIRST_MSG_TIMING,
   }
-  const DEFAULT_TIMING: [number, number, number] = [600, 350, 0]  // Message 4+: quick flash
+  const DEFAULT_TIMING = FAST_TIMING
 
   const [ANALYZE_MIN_DISPLAY, ROUTE_DISPLAY_TIME, GENERATE_DISPLAY_TIME] =
     STAGE_TIMING[userMessageCount] ?? DEFAULT_TIMING

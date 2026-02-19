@@ -101,6 +101,29 @@ VLLM_SERVER_URL = os.getenv(
 )  # vLLM URL on Lakeshore (for Globus remote execution)
 
 # =============================================================================
+# WEBSOCKET RELAY (True Token Streaming from Lakeshore)
+# =============================================================================
+# When set, enables REAL token streaming from Lakeshore via a WebSocket relay.
+# Without this, Lakeshore uses "fake streaming" — we wait for the full response
+# from Globus Compute, then split it into word-by-word chunks to simulate typing.
+#
+# With the relay, tokens flow directly from vLLM → relay → browser as the GPU
+# generates them. The relay is a lightweight forwarding server (see stream/relay/).
+#
+# URL formats:
+#   Development (ngrok):  wss://abc123.ngrok-free.app  (or https:// — auto-converted)
+#   Production:           wss://relay.your-domain.com
+#
+# Both the producer (Lakeshore) and consumer (your app) use the same URL.
+# You can paste the ngrok HTTPS URL directly — it's auto-converted to wss://.
+_raw_relay_url = os.getenv("RELAY_URL", "")
+if _raw_relay_url.startswith("https://"):
+    _raw_relay_url = "wss://" + _raw_relay_url[8:]
+elif _raw_relay_url.startswith("http://"):
+    _raw_relay_url = "ws://" + _raw_relay_url[7:]
+RELAY_URL = _raw_relay_url
+
+# =============================================================================
 # LAKESHORE MODELS
 # =============================================================================
 # Each Lakeshore model runs as a separate vLLM instance on a different port.

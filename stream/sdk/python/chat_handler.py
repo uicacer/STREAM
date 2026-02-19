@@ -290,7 +290,7 @@ class ChatHandler:
                             fallback_used = True
                             original_tier = metadata.get("original_tier")
                             tier = metadata.get("current_tier", tier)
-                            logger.warning(f"⚠️ Fallback detected: {original_tier} → {tier}")
+                            logger.warning(f"Fallback detected: {original_tier} → {tier}")
 
                         # Update tier/model/complexity
                         tier = metadata.get("tier", tier)
