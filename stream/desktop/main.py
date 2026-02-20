@@ -98,43 +98,75 @@ console = Console()
 
 def check_and_download_ollama_models():
     """
-    Check required Ollama models and offer to download missing ones.
+    Check all Ollama models and offer to download any that are missing.
 
     This runs on the MAIN THREAD before the FastAPI server starts, so
     interactive prompts and long downloads don't block the server lifecycle.
     Uses Ollama's HTTP API with streaming to show a real progress bar.
+
+    Shows status for every model so the user can see what's checked:
+      ✓ llama3.2:1b (installed)
+      ✓ llama3.2:3b (installed)
+      ✗ llama3.1:8b (not installed)
+    Then prompts to download any missing models.
     """
     manager = OllamaModelManager()
 
-    for _alias, ollama_model in OLLAMA_MODELS.items():
+    # Phase 1: Check all models and show status
+    console.print("\nChecking local AI models...")
+    missing = []
+    for alias, ollama_model in OLLAMA_MODELS.items():
         if manager.is_model_available(ollama_model):
-            continue
+            console.print(f"  [green]✓[/green] {ollama_model}")
+        else:
+            console.print(f"  [red]✗[/red] {ollama_model} [dim](not installed)[/dim]")
+            missing.append((alias, ollama_model))
 
+    if not missing:
+        console.print("[green]All local models ready[/green]\n")
+        return
+
+    # Phase 2: Prompt to download missing models
+    console.print(f"\n[yellow]{len(missing)} model(s) not installed.[/yellow]")
+    for alias, ollama_model in missing:
         size_estimate = manager.get_model_size_estimate(ollama_model)
-        console.print(f"\nModel [bold]{ollama_model}[/bold] not found.")
-        console.print(f"Size: [bold]{size_estimate}[/bold]")
+        console.print(f"\nModel [bold]{ollama_model}[/bold] ({alias})")
+        console.print(f"  Size: {size_estimate}")
         response = (
-            console.input("Download now? ([bold green]y[/bold green]/[bold red]n[/bold red]): ")
+            console.input("  Download? ([bold green]y[/bold green]/[bold red]n[/bold red]): ")
             .strip()
             .lower()
         )
 
         if response not in ["y", "yes"]:
-            console.print(f"  Skipping {ollama_model} — local tier may be limited")
+            console.print(f"  Skipping {ollama_model}")
             continue
 
         # Download using Ollama HTTP API with streaming progress
-        _download_model_with_progress(manager.ollama_url, ollama_model)
-        # Refresh the manager's model list so subsequent checks see it
-        manager.available_models = manager._get_available_models()
+        success, error_msg = _download_model_with_progress(manager.ollama_url, ollama_model)
+
+        # If download failed due to IPv6, auto-retry with IPv4
+        if not success and error_msg and _is_ipv6_error(error_msg):
+            console.print("[yellow]IPv6 connection failed. Retrying with IPv4...[/yellow]")
+            success = _retry_download_with_ipv4(manager.ollama_url, ollama_model)
+
+        # Verify the download actually worked (don't trust the pull response alone)
+        if success and not manager.is_model_available(ollama_model):
+            console.print(
+                f"[red]Warning: {ollama_model} download reported success but model is not available[/red]"
+            )
+            console.print(f"[yellow]Try manually: ollama pull {ollama_model}[/yellow]")
 
 
-def _download_model_with_progress(ollama_url: str, model_name: str):
+def _download_model_with_progress(ollama_url: str, model_name: str) -> tuple[bool, str | None]:
     """
     Download an Ollama model with a Rich progress bar.
 
     Uses the /api/pull endpoint with streaming, which returns NDJSON lines
     containing 'total' and 'completed' byte counts per layer.
+
+    Returns:
+        Tuple of (success, error_message). error_message is None on success.
     """
     import json
 
@@ -146,8 +178,11 @@ def _download_model_with_progress(ollama_url: str, model_name: str):
             timeout=None,  # No timeout — large models can take a while
         ) as resp:
             if resp.status_code != 200:
-                console.print(f"[red]Failed to start download: HTTP {resp.status_code}[/red]")
-                return
+                msg = f"Failed to start download: HTTP {resp.status_code}"
+                console.print(f"[red]{msg}[/red]")
+                return False, msg
+
+            got_success = False
 
             with Progress(
                 SpinnerColumn(),
@@ -169,6 +204,13 @@ def _download_model_with_progress(ollama_url: str, model_name: str):
                     except json.JSONDecodeError:
                         continue
 
+                    # Check for error responses from Ollama
+                    error = data.get("error")
+                    if error:
+                        progress.update(task, description="[red]Error[/red]")
+                        console.print(f"[red]Download failed: {error}[/red]")
+                        return False, error
+
                     status = data.get("status", "")
                     total = data.get("total")
                     completed = data.get("completed", 0)
@@ -188,16 +230,224 @@ def _download_model_with_progress(ollama_url: str, model_name: str):
                         progress.update(task, description=status)
 
                     if status == "success":
+                        got_success = True
                         progress.update(task, description=f"[green]Downloaded {model_name}[/green]")
 
-        console.print(f"[green]✓ {model_name} ready[/green]")
+        if got_success:
+            console.print(f"[green]✓ {model_name} ready[/green]")
+            return True, None
+        else:
+            msg = f"Download did not complete for {model_name}"
+            console.print(f"[red]{msg}[/red]")
+            return False, msg
 
-    except httpx.ConnectError:
-        console.print(f"[red]Cannot connect to Ollama at {ollama_url} — is it running?[/red]")
+    except httpx.ConnectError as e:
+        msg = f"Cannot connect to Ollama at {ollama_url} — is it running?"
+        console.print(f"[red]{msg}[/red]")
+        return False, str(e)
     except KeyboardInterrupt:
         console.print("\n[yellow]Download cancelled[/yellow]")
+        return False, "cancelled"
     except Exception as e:
-        console.print(f"[red]Download failed: {e}[/red]")
+        msg = str(e)
+        console.print(f"[red]Download failed: {msg}[/red]")
+        return False, msg
+
+
+def _is_ipv6_error(error_msg: str) -> bool:
+    """Detect IPv6-related network errors in Ollama pull responses."""
+    # IPv6 errors contain "socket is not connected" with IPv6 addresses (contain "::")
+    # or explicit "network is unreachable" on IPv6 addresses
+    return "socket is not connected" in error_msg or (
+        "network is unreachable" in error_msg and "::" in error_msg
+    )
+
+
+def _get_active_network_service() -> str | None:
+    """
+    Get the name of the active macOS network service (e.g., "Wi-Fi", "Ethernet").
+
+    Uses `route get default` to find the default interface (e.g., en0),
+    then maps it to a network service name via `networksetup`.
+    """
+    import platform
+    import re
+
+    if platform.system() != "Darwin":
+        return None
+
+    try:
+        # Get default network interface (e.g., "en0")
+        result = subprocess.run(
+            ["route", "get", "default"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        match = re.search(r"interface:\s*(\S+)", result.stdout)
+        if not match:
+            return None
+        interface = match.group(1)  # e.g., "en0"
+
+        # Map interface to network service name (e.g., "en0" → "Wi-Fi")
+        result = subprocess.run(
+            ["networksetup", "-listallhardwareports"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        # Parse output: "Hardware Port: Wi-Fi\nDevice: en0\n..."
+        lines = result.stdout.splitlines()
+        for i, line in enumerate(lines):
+            if f"Device: {interface}" in line and i > 0:
+                port_match = re.search(r"Hardware Port:\s*(.+)", lines[i - 1])
+                if port_match:
+                    return port_match.group(1)
+
+    except Exception:
+        pass
+
+    return None
+
+
+def _retry_download_with_ipv4(ollama_url: str, model_name: str) -> bool:
+    """
+    Retry a failed download after temporarily disabling IPv6 on macOS.
+
+    On some networks, IPv6 routing is broken but IPv4 works fine. Ollama
+    (a Go binary) tries IPv6 first per the Happy Eyeballs algorithm, fails,
+    and doesn't fall back to IPv4 gracefully. Temporarily disabling IPv6
+    on the active network interface forces all connections through IPv4.
+
+    Uses a single `osascript` call that runs a shell script to both disable
+    AND re-enable IPv6, so the user only enters their admin password ONCE.
+    The script writes a flag file after disabling IPv6; our Python waits for
+    that file, does the download, then writes a second flag file to tell the
+    script it's safe to re-enable IPv6.
+
+    Returns:
+        True if the download succeeded after the IPv4 fix, False otherwise.
+    """
+    import platform
+    import tempfile
+
+    if platform.system() != "Darwin":
+        console.print("[yellow]Automatic IPv6 fix is only available on macOS[/yellow]")
+        console.print(f"[yellow]Try: ollama pull {model_name}[/yellow]")
+        return False
+
+    service = _get_active_network_service()
+    if not service:
+        console.print("[yellow]Could not detect active network interface[/yellow]")
+        return False
+
+    console.print(f"  Temporarily disabling IPv6 on [bold]{service}[/bold]...")
+    console.print("  (macOS will ask for your password once)")
+
+    # Create flag files for coordination between the shell script and Python.
+    # The shell script runs with admin privileges in the background:
+    #   1. Disables IPv6 → writes "disabled" flag
+    #   2. Waits for "done" flag (Python writes this after download)
+    #   3. Re-enables IPv6
+    # This way, both operations happen under ONE admin password prompt.
+    tmp_dir = tempfile.mkdtemp(prefix="stream_ipv6_")
+    disabled_flag = os.path.join(tmp_dir, "disabled")
+    done_flag = os.path.join(tmp_dir, "done")
+
+    # Shell script that runs entirely under one `with administrator privileges`.
+    # It disables IPv6, signals Python, waits for Python to finish downloading,
+    # then re-enables IPv6 — all in one elevated session.
+    shell_script = (
+        f"networksetup -setv6off '{service}' && "
+        f"touch '{disabled_flag}' && "
+        # Poll for the "done" flag (Python creates it after download).
+        # Timeout after 600s (10 min) to avoid hanging forever on huge models.
+        f"for i in $(seq 1 600); do "
+        f"  if [ -f '{done_flag}' ]; then break; fi; "
+        f"  sleep 1; "
+        f"done; "
+        f"networksetup -setv6automatic '{service}'"
+    )
+    apple_script = f'do shell script "{shell_script}" with administrator privileges'
+
+    try:
+        # Launch the elevated script in the background so Python can do the
+        # download while the script waits for the "done" flag.
+        proc = subprocess.Popen(
+            ["osascript", "-e", apple_script],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+        # Wait for the script to disable IPv6 (it writes the "disabled" flag).
+        waited = 0.0
+        while waited < 60:
+            if os.path.exists(disabled_flag):
+                break
+            # If osascript exited early (user cancelled password dialog), stop waiting
+            if proc.poll() is not None:
+                break
+            time.sleep(0.5)
+            waited += 0.5
+
+        if not os.path.exists(disabled_flag):
+            # User cancelled the password dialog or script failed
+            stderr = proc.stderr.read().decode() if proc.poll() is not None else ""
+            console.print(
+                f"[yellow]Could not disable IPv6{': ' + stderr.strip() if stderr.strip() else ''}[/yellow]"
+            )
+            return False
+
+        # Brief pause to let the network stack settle
+        time.sleep(1)
+
+        # Retry the download (IPv6 is now disabled)
+        console.print("  Retrying download over IPv4...")
+        success, _ = _download_model_with_progress(ollama_url, model_name)
+        return success
+
+    except Exception as e:
+        console.print(f"[yellow]IPv4 retry failed: {e}[/yellow]")
+        return False
+    finally:
+        # Signal the background script to re-enable IPv6 and clean up.
+        try:
+            # Write the "done" flag so the shell script proceeds to re-enable IPv6
+            with open(done_flag, "w") as f:
+                f.write("done")
+
+            # Wait for the script to finish re-enabling IPv6
+            if proc.poll() is None:
+                try:
+                    proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+
+            if proc.returncode == 0:
+                console.print(f"  IPv6 re-enabled on {service}")
+            else:
+                stderr = proc.stderr.read().decode().strip() if proc.stderr else ""
+                console.print(
+                    f"[yellow]Warning: IPv6 re-enable may have failed on {service}[/yellow]"
+                )
+                if stderr:
+                    console.print(f"[yellow]  {stderr}[/yellow]")
+                console.print(
+                    f"[yellow]Run manually if needed: sudo networksetup -setv6automatic '{service}'[/yellow]"
+                )
+        except Exception:
+            console.print(f"[yellow]Warning: Could not re-enable IPv6 on {service}[/yellow]")
+            console.print(
+                f"[yellow]Run manually: sudo networksetup -setv6automatic '{service}'[/yellow]"
+            )
+
+        # Clean up temp files
+        try:
+            import shutil
+
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+        except Exception:
+            pass
 
 
 def is_port_in_use(host: str, port: int) -> bool:

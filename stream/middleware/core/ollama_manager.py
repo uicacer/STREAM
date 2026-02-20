@@ -80,16 +80,22 @@ class OllamaModelManager:
             return set()
 
     def is_model_available(self, model_name: str) -> bool:
-        """Check if model is available locally"""
-        if ":" in model_name:
-            # User specified a specific tag - require exact match
-            return model_name in self.available_models
-        else:
-            # User didn't specify tag - check if any version exists
-            # Example: "llama3.2" matches "llama3.2:1b" or "llama3.2:3b"
-            return any(
-                m.startswith(model_name + ":") or m == model_name for m in self.available_models
+        """
+        Check if model is available locally using Ollama's /api/show endpoint.
+
+        This is more reliable than checking /api/tags + name matching because
+        Ollama resolves model aliases itself. If /api/show returns 200, the
+        model is usable for inference. If it returns an error, it's not.
+        """
+        try:
+            response = httpx.post(
+                f"{self.ollama_url}/api/show",
+                json={"name": model_name},
+                timeout=5.0,
             )
+            return response.status_code == 200
+        except Exception:
+            return False
 
     def get_model_size_estimate(self, model_name: str) -> str:
         """

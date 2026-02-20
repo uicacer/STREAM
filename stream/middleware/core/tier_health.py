@@ -155,23 +155,21 @@ def check_tier_health(
         # LOCAL: Check Ollama directly
         if tier == "local":
             with httpx.Client(timeout=5.0) as client:
-                # OLLAMA_BASE_URL resolves to:
-                #   Docker mode:  http://ollama:11434  (container DNS)
-                #   Desktop mode: http://localhost:11434  (native)
-                response = client.get(f"{OLLAMA_BASE_URL}/api/tags")
-                if response.status_code != 200:
-                    return False, f"Ollama not responding (HTTP {response.status_code})"
-
-                # Verify the specific model exists
-                data = response.json()
-                installed_models = [m["name"] for m in data.get("models", [])]
-
                 # Get the Ollama model name for this tier
                 ollama_model = OLLAMA_MODELS.get(model)
                 if not ollama_model:
                     return False, f"No Ollama model mapping for {model}"
 
-                if ollama_model not in installed_models:
+                # Use /api/show to verify the model exists AND is usable.
+                # This is more reliable than /api/tags + name matching because:
+                #   1. Ollama resolves aliases itself (same logic as /api/chat)
+                #   2. No prefix matching needed — if /api/show succeeds, inference will too
+                #   3. Catches corrupted/incomplete models that /api/tags still lists
+                response = client.post(
+                    f"{OLLAMA_BASE_URL}/api/show",
+                    json={"name": ollama_model},
+                )
+                if response.status_code != 200:
                     return False, f"Model {ollama_model} not installed in Ollama"
 
                 return True, None

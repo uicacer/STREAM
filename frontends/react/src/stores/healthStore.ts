@@ -11,8 +11,9 @@
  * with health check jobs that burn GPU time and Globus Compute quota.
  *
  * Instead, health is checked only when the user takes an action:
- *   - App startup: one-time Level 1 check (fast, no GPU — just "is Globus
- *     authenticated?", "is Ollama running?", "is the API key valid?")
+ *   - App startup: checks Local and Cloud with the user's selected models
+ *     (e.g., verifies "llama3.1:8b" is in Ollama, not just the default 3B).
+ *     Lakeshore stays Level 1 (auth check only — no GPU job).
  *   - User changes tier: Level 2 check (verifies the specific model works)
  *   - User changes model: Level 2 check for the new model
  *
@@ -60,22 +61,25 @@ export const useHealthStore = create<HealthState>((set, get) => ({
   changingTier: null,
   error: null,
 
-  // Fetch health status — Level 1 only (no model-specific GPU checks).
-  // This is called once on app startup to populate the tier status dots.
-  // It does NOT send model parameters, so the backend skips the expensive
-  // Level 2 checks (no 1-token inference to Lakeshore, no Ollama model
-  // pull verification, no cloud API key test with a real request).
-  // Level 1 checks are fast (~100ms): "is Globus configured?",
-  // "is Ollama reachable?", "is the API key present?"
+  // Fetch health status on app startup.
+  // Sends local model and cloud provider so the backend checks the actual
+  // models the user has selected (e.g., verifies "llama3.1:8b" is in Ollama,
+  // not just the default 3B). Lakeshore model is NOT sent — that would
+  // trigger an expensive Level 2 check (1-token GPU job via Globus Compute).
+  // Local and Cloud Level 2 checks are fast (~100ms and ~1s respectively).
   fetchHealth: async () => {
     const requestId = ++currentRequestId
 
     try {
       set({ isLoading: true, error: null })
 
-      // No model params → Level 1 only (fast, no GPU jobs)
+      // Send local model + cloud provider so the backend verifies the
+      // user's actual selections. Do NOT send lakeshore model — that
+      // triggers a 10-30s GPU job via Globus Compute.
+      const { cloudProvider, localModel } = useSettingsStore.getState()
+
       const [healthData, authData] = await Promise.all([
-        fetchTierHealth(),
+        fetchTierHealth(cloudProvider, localModel, undefined),
         checkAuthStatus().catch(() => null),
       ])
 
@@ -124,11 +128,18 @@ export const useHealthStore = create<HealthState>((set, get) => ({
     try {
       set({ isLoading: true, changingTier: tier, error: null })
 
+      // Only send the model param for the tier that changed.
+      // Sending ALL model params triggers expensive Level 2 checks for every tier
+      // (e.g., changing the local model would trigger a 20s Lakeshore GPU job).
       const { cloudProvider, localModel, lakeshoreModel } = useSettingsStore.getState()
-      console.log(`[healthStore] Model change: checking health`)
+      console.log(`[healthStore] Model change on ${tier}: checking health`)
 
       const [healthData, authData] = await Promise.all([
-        fetchTierHealth(cloudProvider, localModel, lakeshoreModel),
+        fetchTierHealth(
+          tier === 'cloud' ? cloudProvider : undefined,
+          tier === 'local' ? localModel : undefined,
+          tier === 'lakeshore' ? lakeshoreModel : undefined,
+        ),
         checkAuthStatus().catch(() => null),
       ])
 
