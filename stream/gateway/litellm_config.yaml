@@ -135,6 +135,26 @@ model_list:
       input_cost_per_token: 0.0
       output_cost_per_token: 0.0
 
+  # 32B FP16 model (high quality, runs on H100 NVL — no quantization)
+  - model_name: lakeshore-qwen-32b-fp16
+    litellm_params:
+      model: openai/Qwen/Qwen2.5-32B-Instruct
+      api_base: http://lakeshore-proxy:8001/v1
+      api_key: dummy
+    model_info:
+      input_cost_per_token: 0.0
+      output_cost_per_token: 0.0
+
+  # 72B AWQ model (flagship, runs on H100 NVL)
+  - model_name: lakeshore-qwen-72b
+    litellm_params:
+      model: openai/Qwen/Qwen2.5-72B-Instruct-AWQ
+      api_base: http://lakeshore-proxy:8001/v1
+      api_key: dummy
+    model_info:
+      input_cost_per_token: 0.0
+      output_cost_per_token: 0.0
+
   # 32B AWQ model (high quality)
   - model_name: lakeshore-qwen-32b
     litellm_params:
@@ -166,6 +186,8 @@ router_settings:
     local-llama-quality: 120
     lakeshore-qwen: 120
     lakeshore-qwen-1.5b: 120
+    lakeshore-qwen-32b-fp16: 120
+    lakeshore-qwen-72b: 180
     lakeshore-qwen-32b: 120
     lakeshore-coder-1.5b: 120
     lakeshore-deepseek-r1: 120

@@ -35,11 +35,13 @@ echo "=========================================="
 module load apptainer
 
 # Container
-CONTAINER="/home/nassar/STREAM/containers/vllm-openai_v0.13.0.sif"
+# Container stored in ACER project space (10 TiB quota) instead of home (100 GiB quota)
+CONTAINER="/projects/acer_hpc_admin/nassar/containers/vllm-0.15.1"
 
 # Set GPU (for MIG workaround if needed)
 export CUDA_VISIBLE_DEVICES=0
-
+# Redirect HuggingFace cache to project space (home dir too small for LLM weights)
+export HF_HOME=/projects/acer_hpc_admin/nassar/huggingface
 # Get node IP
 NODE_IP=$(hostname -I | awk '{print $1}')
 echo "Service will be available at: http://${NODE_IP}:${PORT}"

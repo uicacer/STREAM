@@ -133,6 +133,14 @@ const LAKESHORE_MODEL_CONFIG: Record<LakeshoreModel, { label: string; descriptio
     label: 'Qwen 2.5 1.5B',
     description: 'General purpose',
   },
+  'lakeshore-qwen-32b-fp16': {
+    label: 'Qwen 2.5 32B',
+    description: 'High quality (FP16, H100)',
+  },
+  'lakeshore-qwen-72b': {
+    label: 'Qwen 2.5 72B',
+    description: 'Flagship quality (AWQ)',
+  },
   'lakeshore-qwen-32b': {
     label: 'Qwen 2.5 32B',
     description: 'General purpose (AWQ)',
@@ -393,7 +401,7 @@ export function SettingsPanel({ onExampleQuery }: SettingsPanelProps) {
           {localOpen ? <ChevronUp className="w-3.5 h-3.5 text-muted-foreground" /> : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />}
         </button>
         {localOpen && (
-          <div className="px-3 pb-3 space-y-1">
+          <div className="px-3 pb-3 space-y-1 max-h-48 overflow-y-auto">
             {(Object.entries(LOCAL_MODEL_CONFIG) as [LocalModel, typeof LOCAL_MODEL_CONFIG['local-llama']][]).map(
               ([modelKey, config]) => {
                 const isSelected = localModel === modelKey
@@ -437,7 +445,7 @@ export function SettingsPanel({ onExampleQuery }: SettingsPanelProps) {
           {lakeshoreOpen ? <ChevronUp className="w-3.5 h-3.5 text-muted-foreground" /> : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />}
         </button>
         {lakeshoreOpen && (
-          <div className="px-3 pb-3 space-y-1">
+          <div className="px-3 pb-3 space-y-1 max-h-48 overflow-y-auto">
             {(Object.entries(LAKESHORE_MODEL_CONFIG) as [LakeshoreModel, typeof LAKESHORE_MODEL_CONFIG['lakeshore-qwen-1.5b']][]).map(
               ([modelKey, config]) => {
                 const isSelected = lakeshoreModel === modelKey
@@ -481,7 +489,7 @@ export function SettingsPanel({ onExampleQuery }: SettingsPanelProps) {
           {cloudOpen ? <ChevronUp className="w-3.5 h-3.5 text-muted-foreground" /> : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />}
         </button>
         {cloudOpen && (
-          <div className="px-3 pb-3 space-y-1">
+          <div className="px-3 pb-3 space-y-1 max-h-48 overflow-y-auto">
             {(Object.entries(CLOUD_PROVIDER_CONFIG) as [CloudProvider, typeof CLOUD_PROVIDER_CONFIG['cloud-claude']][]).map(
               ([providerKey, config]) => {
                 const isSelected = cloudProvider === providerKey

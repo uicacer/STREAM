@@ -179,6 +179,27 @@ LAKESHORE_MODELS = {
         "port": 8003,
         "description": "Reasoning (1.5B, fast demo)",
     },
+    # --- H100 models (ghi2-002 in batch_gpu2 partition) ---
+    # These run on the full H100 NVL GPU (96 GiB VRAM), NOT on ga-002 (A100 MIG).
+    # The "host" field overrides the default VLLM_SERVER_URL host for these models.
+    # Only one can run at a time (same port on same node).
+    #
+    # 32B FP16: Full precision, no quantization. Fast (~40-60 tok/s).
+    #   See scripts/vllm-qwen-32b-fp16.sh for SLURM launch script.
+    "lakeshore-qwen-32b-fp16": {
+        "hf_name": "Qwen/Qwen2.5-32B-Instruct",
+        "host": "ghi2-002",
+        "port": 8000,
+        "description": "General purpose (32B FP16, high quality)",
+    },
+    # 72B AWQ: Flagship quality. Requires CUDA driver 545+ for fast Marlin kernels.
+    #   See scripts/vllm-qwen-72b.sh for SLURM launch script.
+    "lakeshore-qwen-72b": {
+        "hf_name": "Qwen/Qwen2.5-72B-Instruct-AWQ",
+        "host": "ghi2-002",
+        "port": 8000,
+        "description": "General purpose (72B AWQ, flagship quality)",
+    },
     # --- 32B AWQ model (high quality, runs alongside 1.5B models) ---
     # Requires its own 3g.40gb MIG slice. Uses CUDA graphs (no --enforce-eager)
     # with --gpu-memory-utilization 0.75 to leave room for CUDA graphs + sampler.
@@ -224,14 +245,26 @@ LAKESHORE_MODELS = {
 def get_lakeshore_vllm_url(model: str) -> str:
     """Get the vLLM URL on Lakeshore for a given model name.
 
-    Constructs the URL from the base host in VLLM_SERVER_URL and the
-    per-model port from LAKESHORE_MODELS.
+    Each model can run on a different node. If the model entry has a "host"
+    field, use that host directly. Otherwise, fall back to the default host
+    from VLLM_SERVER_URL.
+
+    Examples:
+        lakeshore-qwen-1.5b (no host) → http://ga-002:8000  (from VLLM_SERVER_URL)
+        lakeshore-qwen-72b  (host=ghi2-002) → http://ghi2-002:8000
     """
     model_info = LAKESHORE_MODELS.get(model)
     if not model_info:
         # Fall back to the default VLLM_SERVER_URL for unknown models
         return VLLM_SERVER_URL
-    # Extract host from VLLM_SERVER_URL (e.g., "http://ga-001:8000" → "http://ga-001")
+
+    # If the model specifies its own host (e.g., on a different GPU node),
+    # use it directly instead of the default from VLLM_SERVER_URL.
+    if "host" in model_info:
+        return f"http://{model_info['host']}:{model_info['port']}"
+
+    # Otherwise, use the default host from VLLM_SERVER_URL with the model's port.
+    # Extract host from VLLM_SERVER_URL (e.g., "http://ga-002:8000" → "http://ga-002")
     base_url = VLLM_SERVER_URL.rsplit(":", 1)[0]
     return f"{base_url}:{model_info['port']}"
 
@@ -432,6 +465,8 @@ MODEL_CONTEXT_LIMITS = {
     # For 32B production models, reduce to 16384 (--enforce-eager needed, less VRAM).
     "lakeshore-qwen-1.5b": {"total": 32768, "reserve_output": 2048},
     "lakeshore-coder-1.5b": {"total": 32768, "reserve_output": 2048},
+    "lakeshore-qwen-32b-fp16": {"total": 32768, "reserve_output": 2048},
+    "lakeshore-qwen-72b": {"total": 32768, "reserve_output": 2048},
     "lakeshore-qwen-32b": {"total": 8192, "reserve_output": 1024},
     "lakeshore-deepseek-r1": {"total": 32768, "reserve_output": 2048},
     "lakeshore-qwq": {"total": 32768, "reserve_output": 2048},

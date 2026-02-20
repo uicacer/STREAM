@@ -375,7 +375,10 @@ async def _check_relay_reachable(relay_url: str, timeout: float = 3.0) -> bool:
         async with ws_connect(f"{relay_url}/health", open_timeout=timeout) as ws:
             await asyncio.wait_for(ws.recv(), timeout=timeout)
             return True
-    except Exception:
+    except Exception as e:
+        logger.warning(
+            f"Relay health check failed: {type(e).__name__}: {e} " f"(url={relay_url}/health)"
+        )
         return False
 
 

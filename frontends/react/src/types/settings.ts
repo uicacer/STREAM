@@ -61,6 +61,8 @@ export type LocalModel = 'local-llama-tiny' | 'local-llama' | 'local-llama-quali
  */
 export type LakeshoreModel =
   | 'lakeshore-qwen-1.5b'
+  | 'lakeshore-qwen-32b-fp16'
+  | 'lakeshore-qwen-72b'
   | 'lakeshore-qwen-32b'
   | 'lakeshore-coder-1.5b'
   | 'lakeshore-deepseek-r1'
