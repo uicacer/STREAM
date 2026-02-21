@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "stream"
 version = "1.0.0"
 description = "STREAM - Smart Tiered Routing Engine for AI Models"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 authors = [
     {name = "Anas Nassar", email = "nassar@uic.edu"}
 ]
@@ -84,8 +84,8 @@ Repository = "https://github.com/uicacer/STREAM"
 # Same as Black's line length
 line-length = 100
 
-# Target Python 3.11 (matches your requires-python)
-target-version = "py311"
+# Target Python 3.12 (matches your requires-python and Lakeshore HPC endpoint)
+target-version = "py312"
 
 # Exclude directories and files that aren't regular Python code.
 # .spec files are PyInstaller build configs — they use built-in names

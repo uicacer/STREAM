@@ -105,9 +105,8 @@ def check_and_download_ollama_models():
     Uses Ollama's HTTP API with streaming to show a real progress bar.
 
     Shows status for every model so the user can see what's checked:
-      ✓ llama3.2:1b (installed)
       ✓ llama3.2:3b (installed)
-      ✗ llama3.1:8b (not installed)
+      ✓ gemma3:4b (installed)
     Then prompts to download any missing models.
     """
     manager = OllamaModelManager()
@@ -319,17 +318,21 @@ def _retry_download_with_ipv4(ollama_url: str, model_name: str) -> bool:
     and doesn't fall back to IPv4 gracefully. Temporarily disabling IPv6
     on the active network interface forces all connections through IPv4.
 
-    Uses a single `osascript` call that runs a shell script to both disable
-    AND re-enable IPv6, so the user only enters their admin password ONCE.
-    The script writes a flag file after disabling IPv6; our Python waits for
-    that file, does the download, then writes a second flag file to tell the
-    script it's safe to re-enable IPv6.
+    Two approaches depending on terminal availability:
+
+    TERMINAL MODE (dev mode, CLI):
+        Uses `sudo networksetup` directly in the terminal. The user sees
+        a normal password prompt inline — no pop-up dialogs, no temp files.
+        Simpler and more reliable than the GUI approach.
+
+    GUI MODE (bundled .app, no terminal):
+        Uses `osascript` to show a macOS admin password dialog. More complex
+        (uses temp files for coordination) but works without a terminal.
 
     Returns:
         True if the download succeeded after the IPv4 fix, False otherwise.
     """
     import platform
-    import tempfile
 
     if platform.system() != "Darwin":
         console.print("[yellow]Automatic IPv6 fix is only available on macOS[/yellow]")
@@ -341,27 +344,86 @@ def _retry_download_with_ipv4(ollama_url: str, model_name: str) -> bool:
         console.print("[yellow]Could not detect active network interface[/yellow]")
         return False
 
+    if sys.stdin.isatty():
+        return _retry_ipv4_terminal(ollama_url, model_name, service)
+    else:
+        return _retry_ipv4_osascript(ollama_url, model_name, service)
+
+
+def _retry_ipv4_terminal(ollama_url: str, model_name: str, service: str) -> bool:
+    """
+    Terminal-based IPv4 retry using sudo (for dev mode / CLI usage).
+
+    Since we have an interactive terminal, we can use `sudo` directly.
+    The password prompt appears inline in the terminal — clean and simple.
+    macOS caches sudo credentials for 5 minutes, so re-enabling IPv6
+    at the end won't require a second password entry.
+    """
+    console.print(f"\n  Need to temporarily disable IPv6 on [bold]{service}[/bold]")
+    console.print("  (your terminal will ask for your admin password)")
+    console.print()
+
+    try:
+        result = subprocess.run(
+            ["sudo", "networksetup", "-setv6off", service],
+            timeout=60,
+        )
+        if result.returncode != 0:
+            console.print("[yellow]Could not disable IPv6[/yellow]")
+            return False
+
+        time.sleep(1)
+
+        console.print("  Retrying download over IPv4...")
+        success, _ = _download_model_with_progress(ollama_url, model_name)
+        return success
+
+    except subprocess.TimeoutExpired:
+        console.print("[yellow]Timed out waiting for password[/yellow]")
+        return False
+    except Exception as e:
+        console.print(f"[yellow]IPv4 retry failed: {e}[/yellow]")
+        return False
+    finally:
+        try:
+            subprocess.run(
+                ["sudo", "networksetup", "-setv6automatic", service],
+                timeout=10,
+                capture_output=True,
+            )
+            console.print(f"  IPv6 re-enabled on {service}")
+        except Exception:
+            console.print(f"[yellow]Warning: Could not re-enable IPv6 on {service}[/yellow]")
+            console.print(
+                f"[yellow]Run manually: sudo networksetup -setv6automatic '{service}'[/yellow]"
+            )
+
+
+def _retry_ipv4_osascript(ollama_url: str, model_name: str, service: str) -> bool:
+    """
+    GUI-based IPv4 retry using osascript (for bundled .app without terminal).
+
+    Uses a single osascript call with administrator privileges to disable
+    IPv6, wait for the download, then re-enable IPv6. The user only enters
+    their admin password once via the macOS system dialog.
+
+    Coordination between Python and the shell script uses flag files:
+      1. Shell disables IPv6 → writes "disabled" flag
+      2. Python sees flag → does the download
+      3. Python writes "done" flag → shell re-enables IPv6
+    """
+    import tempfile
+
     console.print(f"  Temporarily disabling IPv6 on [bold]{service}[/bold]...")
     console.print("  (macOS will ask for your password once)")
 
-    # Create flag files for coordination between the shell script and Python.
-    # The shell script runs with admin privileges in the background:
-    #   1. Disables IPv6 → writes "disabled" flag
-    #   2. Waits for "done" flag (Python writes this after download)
-    #   3. Re-enables IPv6
-    # This way, both operations happen under ONE admin password prompt.
     tmp_dir = tempfile.mkdtemp(prefix="stream_ipv6_")
     disabled_flag = os.path.join(tmp_dir, "disabled")
     done_flag = os.path.join(tmp_dir, "done")
 
-    # Shell script that runs entirely under one `with administrator privileges`.
-    # It disables IPv6, signals Python, waits for Python to finish downloading,
-    # then re-enables IPv6 — all in one elevated session.
     shell_script = (
         f"networksetup -setv6off '{service}' && "
         f"touch '{disabled_flag}' && "
-        # Poll for the "done" flag (Python creates it after download).
-        # Timeout after 600s (10 min) to avoid hanging forever on huge models.
         f"for i in $(seq 1 600); do "
         f"  if [ -f '{done_flag}' ]; then break; fi; "
         f"  sleep 1; "
@@ -371,37 +433,31 @@ def _retry_download_with_ipv4(ollama_url: str, model_name: str) -> bool:
     apple_script = f'do shell script "{shell_script}" with administrator privileges'
 
     try:
-        # Launch the elevated script in the background so Python can do the
-        # download while the script waits for the "done" flag.
         proc = subprocess.Popen(
             ["osascript", "-e", apple_script],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
 
-        # Wait for the script to disable IPv6 (it writes the "disabled" flag).
         waited = 0.0
         while waited < 60:
             if os.path.exists(disabled_flag):
                 break
-            # If osascript exited early (user cancelled password dialog), stop waiting
             if proc.poll() is not None:
                 break
             time.sleep(0.5)
             waited += 0.5
 
         if not os.path.exists(disabled_flag):
-            # User cancelled the password dialog or script failed
             stderr = proc.stderr.read().decode() if proc.poll() is not None else ""
             console.print(
-                f"[yellow]Could not disable IPv6{': ' + stderr.strip() if stderr.strip() else ''}[/yellow]"
+                f"[yellow]Could not disable IPv6"
+                f"{': ' + stderr.strip() if stderr.strip() else ''}[/yellow]"
             )
             return False
 
-        # Brief pause to let the network stack settle
         time.sleep(1)
 
-        # Retry the download (IPv6 is now disabled)
         console.print("  Retrying download over IPv4...")
         success, _ = _download_model_with_progress(ollama_url, model_name)
         return success
@@ -410,13 +466,10 @@ def _retry_download_with_ipv4(ollama_url: str, model_name: str) -> bool:
         console.print(f"[yellow]IPv4 retry failed: {e}[/yellow]")
         return False
     finally:
-        # Signal the background script to re-enable IPv6 and clean up.
         try:
-            # Write the "done" flag so the shell script proceeds to re-enable IPv6
             with open(done_flag, "w") as f:
                 f.write("done")
 
-            # Wait for the script to finish re-enabling IPv6
             if proc.poll() is None:
                 try:
                     proc.wait(timeout=10)
@@ -433,7 +486,8 @@ def _retry_download_with_ipv4(ollama_url: str, model_name: str) -> bool:
                 if stderr:
                     console.print(f"[yellow]  {stderr}[/yellow]")
                 console.print(
-                    f"[yellow]Run manually if needed: sudo networksetup -setv6automatic '{service}'[/yellow]"
+                    f"[yellow]Run manually if needed: "
+                    f"sudo networksetup -setv6automatic '{service}'[/yellow]"
                 )
         except Exception:
             console.print(f"[yellow]Warning: Could not re-enable IPv6 on {service}[/yellow]")
@@ -441,7 +495,6 @@ def _retry_download_with_ipv4(ollama_url: str, model_name: str) -> bool:
                 f"[yellow]Run manually: sudo networksetup -setv6automatic '{service}'[/yellow]"
             )
 
-        # Clean up temp files
         try:
             import shutil
 
@@ -889,6 +942,42 @@ def main():
         # "cache busting" — the unique timestamp makes WebKit think it's a new URL,
         # so it fetches fresh content instead of using its cache.
         cache_bust_url = f"{server_url}?_t={int(time.time())}"
+
+        # -----------------------------------------------------------------
+        # CAMERA SUPPORT: Enable getUserMedia in Qt/WebEngine renderer
+        # -----------------------------------------------------------------
+        # STREAM's CameraModal (in ImageUpload.tsx) uses the WebRTC API
+        # navigator.mediaDevices.getUserMedia() to open a live webcam preview.
+        # This works out-of-the-box in regular browsers, but PyWebView's
+        # native window renderers need extra configuration:
+        #
+        # Qt/WebEngine (used on some Linux distros, optional on macOS/Windows):
+        #   By default, Qt WebEngine shows a permission dialog that blocks
+        #   getUserMedia. Setting QTWEBENGINE_CHROMIUM_FLAGS with
+        #   --use-fake-ui-for-media-stream auto-grants camera permission
+        #   without showing the dialog. This is safe because:
+        #     1. STREAM only accesses the camera when the user explicitly
+        #        clicks the Camera button
+        #     2. The camera stream is stopped as soon as the modal closes
+        #     3. The app runs locally — no remote page can access the camera
+        #
+        # macOS (WKWebView):
+        #   Requires NSCameraUsageDescription in Info.plist (see stream.spec).
+        #   The OS shows a system-level permission dialog on first use.
+        #   This env var has no effect on WKWebView.
+        #
+        # Windows (WebView2):
+        #   WebView2 (Edge-based) natively supports getUserMedia and shows
+        #   a permission prompt automatically. This env var has no effect.
+        #
+        # If the camera still doesn't work in a particular renderer, the
+        # CameraModal's error handling catches it gracefully and suggests
+        # the user try the Upload button or open STREAM in their browser.
+        os.environ.setdefault(
+            "QTWEBENGINE_CHROMIUM_FLAGS",
+            "--use-fake-ui-for-media-stream",
+        )
+
         webview.create_window(
             title="STREAM",  # Window title bar text
             url=cache_bust_url,  # Load our React UI (cache-busted)

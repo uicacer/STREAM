@@ -21,6 +21,33 @@
  */
 
 /**
+ * ContentBlock - A single block in a multimodal message
+ *
+ * When a message contains images, the content is an ARRAY of these blocks
+ * instead of a plain string. This follows the OpenAI Vision format:
+ *
+ *   content: [
+ *     { type: "text", text: "What is in this image?" },
+ *     { type: "image_url", image_url: { url: "data:image/jpeg;base64,..." } }
+ *   ]
+ *
+ * Each block has a "type" that determines which other field is present:
+ *   - "text" → has a "text" field with the text content
+ *   - "image_url" → has an "image_url" field with a nested "url" field
+ */
+export interface TextBlock {
+  type: 'text'
+  text: string
+}
+
+export interface ImageBlock {
+  type: 'image_url'
+  image_url: { url: string }
+}
+
+export type ContentBlock = TextBlock | ImageBlock
+
+/**
  * Message - A single chat message (user or assistant)
  *
  * This represents one message in the conversation, whether it's
@@ -44,6 +71,19 @@ export interface Message {
    * The actual text content of the message
    */
   content: string
+
+  /**
+   * Optional: Base64-encoded images attached to this message.
+   *
+   * These are stored separately from "content" for two reasons:
+   *   1. DISPLAY: The UI renders them as image thumbnails below the text
+   *   2. API: When sending to the backend, we build the OpenAI vision format
+   *      (content: ContentBlock[]) from this array + the text content
+   *
+   * Each string is a full data URL: "data:image/jpeg;base64,/9j/4AAQ..."
+   * The frontend compresses images before storing (max 1024px, JPEG 85%).
+   */
+  images?: string[]
 
   /**
    * Optional: The "thinking" process for reasoning models

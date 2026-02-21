@@ -170,7 +170,7 @@ export const useSettingsStore = create<SettingsState>()(
       /**
        * Version for migrations - increment when storage format changes
        */
-      version: 5,
+      version: 6,
       /**
        * Migration: Runs automatically when storage version changes.
        * Each version upgrade fixes a specific issue with persisted state.
@@ -219,6 +219,25 @@ export const useSettingsStore = create<SettingsState>()(
           return {
             ...state,
             lakeshoreModel: 'lakeshore-qwen-1.5b',
+          }
+        }
+
+        if (version < 6) {
+          // v5 → v6: Multimodal support.
+          // Remove obsolete local models (llama3.2:1b and llama3.1:8b).
+          // Remove obsolete judge strategy (ollama-1b).
+          // If user had selected a removed model/strategy, reset to default.
+          console.log('[Settings] Migration v6: multimodal model cleanup')
+          const removedLocalModels = ['local-llama-tiny', 'local-llama-quality']
+          const removedJudgeStrategies = ['ollama-1b']
+          return {
+            ...state,
+            localModel: removedLocalModels.includes(state.localModel as string)
+              ? 'local-llama'
+              : state.localModel,
+            judgeStrategy: removedJudgeStrategies.includes(state.judgeStrategy as string)
+              ? 'ollama-3b'
+              : state.judgeStrategy,
           }
         }
 

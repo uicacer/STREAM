@@ -36,22 +36,22 @@ export type Tier = 'auto' | 'local' | 'lakeshore' | 'cloud'
  * When tier is "auto", STREAM needs to decide where to route.
  * A "judge" model quickly analyzes the query to determine complexity.
  *
- * - "ollama-1b" → Fastest, runs locally, good enough for most cases
- * - "ollama-3b" → Slower but more accurate classification
- * - "haiku"     → Claude Haiku via API (most accurate, but costs money)
+ * - "ollama-3b"     → Balanced accuracy, free (default)
+ * - "gemma-vision"  → Vision-capable judge, can analyze images, free
+ * - "haiku"         → Claude Haiku via API (most accurate, but costs money)
  *
  * Trade-off: Faster judges add less latency but may misclassify.
+ * The gemma-vision judge can see images but adds more latency (~2-3s).
  */
-export type JudgeStrategy = 'ollama-1b' | 'ollama-3b' | 'haiku'
+export type JudgeStrategy = 'ollama-3b' | 'gemma-vision' | 'haiku'
 
 /**
  * LocalModel - Available models for the Local tier (Ollama)
  *
- * - "local-llama-tiny"    → Llama 3.2 1B - Fastest, least capable
- * - "local-llama"         → Llama 3.2 3B - Balanced (default)
- * - "local-llama-quality" → Llama 3.1 8B - Best local quality, slower
+ * - "local-llama"  → Llama 3.2 3B - Balanced text-only model (default)
+ * - "local-vision" → Gemma 3 4B - Multimodal (text + images)
  */
-export type LocalModel = 'local-llama-tiny' | 'local-llama' | 'local-llama-quality'
+export type LocalModel = 'local-llama' | 'local-vision'
 
 /**
  * LakeshoreModel - Available models for the Lakeshore tier (Campus GPU)
@@ -63,6 +63,7 @@ export type LakeshoreModel =
   | 'lakeshore-qwen-1.5b'
   | 'lakeshore-qwen-32b-fp16'
   | 'lakeshore-qwen-72b'
+  | 'lakeshore-qwen-vl-72b'
   | 'lakeshore-qwen-32b'
   | 'lakeshore-coder-1.5b'
   | 'lakeshore-deepseek-r1'
@@ -75,8 +76,8 @@ export type LakeshoreModel =
  * Each has different capabilities and pricing.
  *
  * - "cloud-claude" → Claude Sonnet (Anthropic) - Best for reasoning/coding
- * - "cloud-gpt"    → GPT-4 Turbo (OpenAI) - Strong general-purpose
- * - "cloud-gpt-cheap" → GPT-3.5 Turbo (OpenAI) - Fast and affordable
+ * - "cloud-gpt"    → GPT-4o (OpenAI) - Strong general-purpose with vision
+ * - "cloud-gpt-cheap" → GPT-4o Mini (OpenAI) - Fast and affordable with vision
  */
 export type CloudProvider = 'cloud-claude' | 'cloud-gpt' | 'cloud-gpt-cheap'
 

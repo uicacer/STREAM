@@ -209,9 +209,8 @@ st.session_state.session_stats["total_cost"] += cost
 
 | Model | Input Cost (per token) | Output Cost (per token) | Tier |
 |-------|------------------------|-------------------------|------|
-| `local-llama-tiny` | $0.0 | $0.0 | Local |
 | `local-llama` | $0.0 | $0.0 | Local |
-| `local-llama-quality` | $0.0 | $0.0 | Local |
+| `local-vision` | $0.0 | $0.0 | Local |
 | `lakeshore-qwen` | $0.0000005 | $0.0000005 | Lakeshore |
 | `cloud-claude` | $0.000003 | $0.000015 | Cloud |
 | `cloud-gpt` | $0.00001 | $0.00003 | Cloud |

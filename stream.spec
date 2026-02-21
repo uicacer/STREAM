@@ -308,5 +308,27 @@ if platform.system() == "Darwin":
             # CFBundleIconFile tells macOS which file in Resources/ is the app icon.
             # PyInstaller copies icon.icns into Contents/Resources/ automatically.
             "CFBundleIconFile": "icon.icns",
+
+            # -----------------------------------------------------------------
+            # CAMERA PERMISSION (required for multimodal image capture)
+            # -----------------------------------------------------------------
+            # macOS requires EVERY app that accesses the camera to declare WHY
+            # it needs camera access. This string is shown to the user in the
+            # system permission dialog the first time the app requests the camera.
+            #
+            # Without this key, macOS will:
+            #   - Silently deny camera access (getUserMedia returns NotAllowedError)
+            #   - On newer macOS versions (14+), may crash the app entirely
+            #
+            # This affects the CameraModal in ImageUpload.tsx, which uses
+            # navigator.mediaDevices.getUserMedia() for live webcam preview.
+            #
+            # The description should be clear and specific about WHY the camera
+            # is needed (Apple's App Review guidelines require this).
+            "NSCameraUsageDescription": (
+                "STREAM uses the camera to capture photos for multimodal AI "
+                "analysis. Photos are compressed and sent to the selected AI "
+                "model for understanding."
+            ),
         },
     )

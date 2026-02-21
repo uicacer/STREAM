@@ -96,7 +96,7 @@ class ChatHandler:
             user_preference: "auto", "local", "lakeshore", or "cloud"
             stream: Enable streaming responses
             temperature: Response creativity (0.0-1.0)
-            judge_strategy: Complexity judge strategy ("ollama-1b", "ollama-3b", "haiku")
+            judge_strategy: Complexity judge strategy ("ollama-3b", "gemma-vision", "haiku")
 
         Returns:
             Dictionary with success, response, tier, model, cost, duration, error

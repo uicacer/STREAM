@@ -40,7 +40,7 @@ from stream.middleware.core.globus_auth import is_authenticated as globus_is_aut
 #   litellm kwargs  → The actual provider model IDs + connection details that
 #                     litellm needs to make API calls to the right provider
 #                     e.g., model="claude-sonnet-4-20250514" (Anthropic API)
-#                           model="gpt-4-turbo" (OpenAI API)
+#                           model="gpt-4o" (OpenAI API)
 #                           model="ollama/llama3.2:3b", api_base="http://localhost:11434"
 #
 # The mapping is defined in stream/gateway/litellm_config.yaml and loaded once
@@ -130,7 +130,7 @@ def check_tier_health(
         cloud_provider: For cloud tier, test a specific provider (e.g., "cloud-gpt")
                        instead of the default. Each provider has its own API key
                        and billing — Claude being down shouldn't block GPT.
-        local_model: For local tier, test a specific model (e.g., "local-llama-quality")
+        local_model: For local tier, test a specific model (e.g., "local-vision")
                     instead of the default. Verifies the model is installed in Ollama.
         lakeshore_model: For lakeshore tier, the specific model to test
                         (e.g., "lakeshore-qwen-32b"). We can't ping vLLM ports
@@ -500,7 +500,7 @@ def is_tier_available(
              or QUICK_CHECK_TTL (30 sec) for frontend polling.
         cloud_provider: For cloud tier, the specific provider to test (e.g., "cloud-gpt").
                        If None, uses DEFAULT_MODELS["cloud"].
-        local_model: For local tier, the specific model to test (e.g., "local-llama-quality").
+        local_model: For local tier, the specific model to test (e.g., "local-vision").
                     If None, uses DEFAULT_MODELS["local"].
         lakeshore_model: For lakeshore tier, the specific model to test
                         (e.g., "lakeshore-qwen-32b"). Each Lakeshore model runs on

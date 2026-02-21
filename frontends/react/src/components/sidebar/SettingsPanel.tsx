@@ -87,15 +87,15 @@ const TIER_CONFIG: Record<Tier, { icon: typeof Bot; label: string; shortLabel: s
  * Judge strategy configuration
  */
 const JUDGE_CONFIG: Record<JudgeStrategy, { model: string; label: string; description: string }> = {
-  'ollama-1b': {
-    model: 'llama',
-    label: 'Llama 1B',
-    description: 'Fastest, less accurate, free',
-  },
   'ollama-3b': {
     model: 'llama',
     label: 'Llama 3B',
     description: 'Balanced, free',
+  },
+  'gemma-vision': {
+    model: 'gemma',
+    label: 'Gemma Vision 4B',
+    description: 'Can analyze images, free',
   },
   haiku: {
     model: 'haiku',
@@ -111,17 +111,13 @@ const JUDGE_CONFIG: Record<JudgeStrategy, { model: string; label: string; descri
  * Each tier has its own set of available models.
  */
 const LOCAL_MODEL_CONFIG: Record<LocalModel, { label: string; description: string }> = {
-  'local-llama-tiny': {
-    label: 'Llama 3.2 1B',
-    description: 'Fastest, least capable',
-  },
   'local-llama': {
     label: 'Llama 3.2 3B',
-    description: 'Balanced speed & quality',
+    description: 'Text-only, balanced speed & quality',
   },
-  'local-llama-quality': {
-    label: 'Llama 3.1 8B',
-    description: 'Best local quality, slower',
+  'local-vision': {
+    label: 'Gemma 3 4B',
+    description: 'Vision + Text (handles images)',
   },
 }
 
@@ -140,6 +136,10 @@ const LAKESHORE_MODEL_CONFIG: Record<LakeshoreModel, { label: string; descriptio
   'lakeshore-qwen-72b': {
     label: 'Qwen 2.5 72B',
     description: 'Flagship quality (AWQ)',
+  },
+  'lakeshore-qwen-vl-72b': {
+    label: 'Qwen 2.5 VL 72B',
+    description: 'Vision + Text multimodal (AWQ)',
   },
   'lakeshore-qwen-32b': {
     label: 'Qwen 2.5 32B',
@@ -165,11 +165,11 @@ const CLOUD_PROVIDER_CONFIG: Record<CloudProvider, { label: string; provider: st
     provider: 'Anthropic',
   },
   'cloud-gpt': {
-    label: 'GPT-4 Turbo',
+    label: 'GPT-4o',
     provider: 'OpenAI',
   },
   'cloud-gpt-cheap': {
-    label: 'GPT-3.5 Turbo',
+    label: 'GPT-4o Mini',
     provider: 'OpenAI',
   },
 }
@@ -700,7 +700,7 @@ export function SettingsPanel({ onExampleQuery }: SettingsPanelProps) {
                 Complexity Judge {tier !== 'auto' && '(Auto mode only)'}
               </label>
               <div className="space-y-1">
-                {(Object.entries(JUDGE_CONFIG) as [JudgeStrategy, typeof JUDGE_CONFIG['ollama-1b']][]).map(
+                {(Object.entries(JUDGE_CONFIG) as [JudgeStrategy, typeof JUDGE_CONFIG['ollama-3b']][]).map(
                   ([strategyKey, config]) => {
                     const isSelected = judgeStrategy === strategyKey
                     const isDisabled = tier !== 'auto'

@@ -4,6 +4,56 @@ This guide walks through the complete end-to-end process of adding a new LLM to 
 
 ---
 
+## Table of Contents
+
+- [Overview](#overview)
+- [Step 1: Choose Your Model](#step-1-choose-your-model)
+  - [Where to find models](#where-to-find-models)
+  - [Estimating VRAM requirements](#estimating-vram-requirements)
+  - [Matching model to hardware](#matching-model-to-hardware)
+  - [Quantization considerations](#quantization-considerations)
+- [Step 2: Download the Model on Lakeshore](#step-2-download-the-model-on-lakeshore)
+  - [Storage location](#storage-location)
+  - [Method 1: Download inside the container](#method-1-download-inside-the-container-on-a-compute-node-preferred)
+  - [Method 2: Download from the login node](#method-2-download-from-the-login-node-using-python)
+  - [Tips for large downloads](#tips-for-large-downloads)
+  - [Verify the download](#verify-the-download)
+- [Step 3: Create the SBATCH Script](#step-3-create-the-sbatch-script)
+  - [Which template to copy](#which-template-to-copy)
+  - [Example: A100 MIG script](#example-a100-mig-script-for-a-32b-awq-model)
+  - [Key parameters explained](#key-parameters-explained)
+- [Step 4: Update Backend Configuration](#step-4-update-backend-configuration)
+  - [4a. Middleware Config](#4a-middleware-config) — [`config.py`](../stream/middleware/config.py)
+  - [4b. LiteLLM Gateway](#4b-litellm-gateway) — [`litellm_config.yaml`](../stream/gateway/litellm_config.yaml)
+  - [4c. Query Router](#4c-query-router) — [`query_router.py`](../stream/middleware/core/query_router.py)
+- [Step 5: Update Frontend](#step-5-update-frontend)
+  - [5a. TypeScript Types](#5a-typescript-types) — [`settings.ts`](../frontends/react/src/types/settings.ts)
+  - [5b. Settings Panel](#5b-settings-panel) — [`SettingsPanel.tsx`](../frontends/react/src/components/sidebar/SettingsPanel.tsx)
+- [Step 6: Test](#step-6-test)
+- [Quick Reference: Storage Layout](#quick-reference-storage-layout)
+- [Quick Reference: Checking Quotas](#quick-reference-checking-quotas)
+- [Quick Reference: Checklist](#quick-reference-checklist)
+- [Troubleshooting](#troubleshooting)
+  - [OOM on startup](#oom-on-startup)
+  - [Slow generation](#slow-generation-3-toks-when-you-expect-30)
+  - [Disk quota exceeded](#disk-quota-exceeded)
+  - [Model not found by vLLM](#model-not-found-by-vllm)
+  - [Model appears in UI but requests fail](#model-appears-in-ui-but-requests-fail)
+  - [vLLM starts but model name mismatch](#vllm-starts-but-model-name-mismatch)
+
+### Related Code Files
+
+| File | Purpose |
+|------|---------|
+| [`stream/middleware/config.py`](../stream/middleware/config.py) | `LAKESHORE_MODELS`, `MODEL_CONTEXT_LIMITS`, `OLLAMA_MODELS` dicts |
+| [`stream/gateway/litellm_config.yaml`](../stream/gateway/litellm_config.yaml) | LiteLLM model routing, timeouts, cost tracking |
+| [`stream/middleware/core/query_router.py`](../stream/middleware/core/query_router.py) | `get_model_for_tier()` — maps tier + selection to model name |
+| [`frontends/react/src/types/settings.ts`](../frontends/react/src/types/settings.ts) | `LakeshoreModel`, `LocalModel`, `CloudProvider` TypeScript types |
+| [`frontends/react/src/components/sidebar/SettingsPanel.tsx`](../frontends/react/src/components/sidebar/SettingsPanel.tsx) | `LAKESHORE_MODEL_CONFIG` — UI labels and descriptions |
+| [`scripts/`](../scripts/) | SBATCH scripts for each vLLM model on Lakeshore |
+
+---
+
 ## Overview
 
 STREAM's architecture has three layers that a new model must be registered in:
@@ -164,16 +214,17 @@ You should see a directory like `models--Qwen--Qwen2.5-32B-Instruct-AWQ/` contai
 
 ## Step 3: Create the SBATCH Script
 
-Each model needs a SLURM batch script that starts the vLLM server. Copy an existing script from `scripts/` and modify it.
+Each model needs a SLURM batch script that starts the vLLM server. Copy an existing script from [`scripts/`](../scripts/) and modify it.
 
 ### Which template to copy
 
 | Your model | Copy this template | Why |
 |------------|-------------------|-----|
-| Small model (<=7B) on A100 MIG | `scripts/vllm-qwen-1.5b.sh` | Minimal flags, no quantization, no enforce-eager |
-| 32B AWQ on A100 MIG | `scripts/vllm-qwen-32b.sh` | AWQ quantization, enforce-eager, 16K context |
-| 32B FP16 on H100 | `scripts/vllm-qwen-32b-fp16.sh` | No quantization, full precision, 32K context |
-| 70B+ AWQ on H100 | `scripts/vllm-qwen-72b.sh` | AWQ Marlin kernels, max-num-seqs tuning |
+| Small model (<=7B) on A100 MIG | [`scripts/vllm-qwen-1.5b.sh`](../scripts/vllm-qwen-1.5b.sh) | Minimal flags, no quantization, no enforce-eager |
+| 32B AWQ on A100 MIG | [`scripts/vllm-qwen-32b.sh`](../scripts/vllm-qwen-32b.sh) | AWQ quantization, enforce-eager, 16K context |
+| 32B FP16 on H100 | [`scripts/vllm-qwen-32b-fp16.sh`](../scripts/vllm-qwen-32b-fp16.sh) | No quantization, full precision, 32K context |
+| 70B+ AWQ on H100 | [`scripts/vllm-qwen-72b.sh`](../scripts/vllm-qwen-72b.sh) | AWQ Marlin kernels, max-num-seqs tuning |
+| 70B+ VL (multimodal) on H100 | [`scripts/vllm-qwen-vl-72b.sh`](../scripts/vllm-qwen-vl-72b.sh) | Vision-Language, --limit-mm-per-prompt |
 
 ### Example: A100 MIG script for a 32B AWQ model
 
@@ -284,7 +335,7 @@ Three files need changes. All three must agree on the model's identifier string 
 
 ### 4a. Middleware Config
 
-**File:** `stream/middleware/config.py`
+**File:** [`stream/middleware/config.py`](../stream/middleware/config.py)
 
 #### Add to `LAKESHORE_MODELS`
 
@@ -333,7 +384,7 @@ MODEL_CONTEXT_LIMITS = {
 
 ### 4b. LiteLLM Gateway
 
-**File:** `stream/gateway/litellm_config.yaml`
+**File:** [`stream/gateway/litellm_config.yaml`](../stream/gateway/litellm_config.yaml)
 
 LiteLLM is the gateway that normalizes different model APIs into a single OpenAI-compatible interface. Even though Lakeshore models go through the proxy (not directly through LiteLLM in the current architecture), they are registered here for cost tracking and timeout configuration.
 
@@ -367,7 +418,7 @@ router_settings:
 
 ### 4c. Query Router
 
-**File:** `stream/middleware/core/query_router.py`
+**File:** [`stream/middleware/core/query_router.py`](../stream/middleware/core/query_router.py)
 
 The `get_model_for_tier()` function maps the user's tier + model selection to an actual model name. **You usually do not need to change this file.** It works generically:
 
@@ -380,7 +431,7 @@ def get_model_for_tier(tier, cloud_provider=None, local_model=None, lakeshore_mo
 
 The router just passes through the model name selected in the frontend. As long as that name matches a key in `LAKESHORE_MODELS`, the proxy will find it.
 
-**When you DO need to change this:** If your model should be the new default for the Lakeshore tier, update `DEFAULT_MODELS` in `config.py`:
+**When you DO need to change this:** If your model should be the new default for the Lakeshore tier, update `DEFAULT_MODELS` in [`config.py`](../stream/middleware/config.py):
 
 ```python
 DEFAULT_MODELS = {
@@ -398,7 +449,7 @@ Two files need changes so the model appears in the UI dropdown.
 
 ### 5a. TypeScript Types
 
-**File:** `frontends/react/src/types/settings.ts`
+**File:** [`frontends/react/src/types/settings.ts`](../frontends/react/src/types/settings.ts)
 
 Add your model ID to the `LakeshoreModel` union type. This gives compile-time safety -- TypeScript will catch typos.
 
@@ -416,7 +467,7 @@ export type LakeshoreModel =
 
 ### 5b. Settings Panel
 
-**File:** `frontends/react/src/components/sidebar/SettingsPanel.tsx`
+**File:** [`frontends/react/src/components/sidebar/SettingsPanel.tsx`](../frontends/react/src/components/sidebar/SettingsPanel.tsx)
 
 Add your model to the `LAKESHORE_MODEL_CONFIG` object. This controls the label and description shown in the model selection dropdown.
 
@@ -499,6 +550,7 @@ This should return JSON listing your model's HuggingFace ID. If it does, vLLM is
 │       ├── models--Qwen--Qwen2.5-32B-Instruct/         # ~64 GiB (FP16)
 │       ├── models--Qwen--Qwen2.5-32B-Instruct-AWQ/     # ~18 GiB
 │       ├── models--Qwen--Qwen2.5-72B-Instruct-AWQ/     # ~39 GiB
+│       ├── models--Qwen--Qwen2.5-VL-72B-Instruct-AWQ/ # ~39 GiB (multimodal)
 │       └── models--ORGANIZATION--MODEL-NAME/            # Your new model
 └── python/                                    # pip packages for login node use
 ```
@@ -524,13 +576,13 @@ If `mmlsquota` shows you are near the limit, clean up old model downloads you no
 When adding a new model, make sure you have updated **all** of these:
 
 - [ ] Model weights downloaded to `/projects/acer_hpc_admin/nassar/huggingface/`
-- [ ] SBATCH script created in `scripts/vllm-your-model.sh`
-- [ ] `LAKESHORE_MODELS` dict in `stream/middleware/config.py`
-- [ ] `MODEL_CONTEXT_LIMITS` dict in `stream/middleware/config.py`
-- [ ] `model_list` in `stream/gateway/litellm_config.yaml`
-- [ ] `model_timeout` in `stream/gateway/litellm_config.yaml`
-- [ ] `LakeshoreModel` type in `frontends/react/src/types/settings.ts`
-- [ ] `LAKESHORE_MODEL_CONFIG` in `frontends/react/src/components/sidebar/SettingsPanel.tsx`
+- [ ] SBATCH script created in [`scripts/`](../scripts/)`vllm-your-model.sh`
+- [ ] `LAKESHORE_MODELS` dict in [`stream/middleware/config.py`](../stream/middleware/config.py)
+- [ ] `MODEL_CONTEXT_LIMITS` dict in [`stream/middleware/config.py`](../stream/middleware/config.py)
+- [ ] `model_list` in [`stream/gateway/litellm_config.yaml`](../stream/gateway/litellm_config.yaml)
+- [ ] `model_timeout` in [`stream/gateway/litellm_config.yaml`](../stream/gateway/litellm_config.yaml)
+- [ ] `LakeshoreModel` type in [`frontends/react/src/types/settings.ts`](../frontends/react/src/types/settings.ts)
+- [ ] `LAKESHORE_MODEL_CONFIG` in [`frontends/react/src/components/sidebar/SettingsPanel.tsx`](../frontends/react/src/components/sidebar/SettingsPanel.tsx)
 - [ ] Model string is identical across all four locations
 
 ---
@@ -573,15 +625,15 @@ When adding a new model, make sure you have updated **all** of these:
 
 **Checklist:**
 1. Is the SLURM job running? (`squeue -u nassar`)
-2. Does the `hf_name` in `config.py` exactly match the `MODEL=` in the SBATCH script?
-3. Does the `port` in `config.py` match the `PORT=` in the SBATCH script?
-4. If the model runs on a non-default node, does `config.py` have a `"host"` field?
+2. Does the `hf_name` in [`config.py`](../stream/middleware/config.py) exactly match the `MODEL=` in the SBATCH script?
+3. Does the `port` in [`config.py`](../stream/middleware/config.py) match the `PORT=` in the SBATCH script?
+4. If the model runs on a non-default node, does [`config.py`](../stream/middleware/config.py) have a `"host"` field?
 5. Is Globus Compute authenticated? (Check the Lakeshore auth panel in the sidebar)
 
 ### vLLM starts but model name mismatch
 
 **Symptom:** vLLM is running, `curl /v1/models` works, but STREAM cannot inference.
 
-**Cause:** The model name in the `curl` response (which is the HuggingFace ID) does not match the `hf_name` in `config.py`. vLLM uses the HuggingFace model ID as the model name in its OpenAI-compatible API. If you pass a different name in the chat completion request, vLLM returns a 404.
+**Cause:** The model name in the `curl` response (which is the HuggingFace ID) does not match the `hf_name` in [`config.py`](../stream/middleware/config.py). vLLM uses the HuggingFace model ID as the model name in its OpenAI-compatible API. If you pass a different name in the chat completion request, vLLM returns a 404.
 
 **Fix:** Make `hf_name` match exactly what vLLM reports in `/v1/models`.

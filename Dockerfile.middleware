@@ -8,8 +8,8 @@
 #   - Context window management
 # =============================================================================
 
-# Base image: Python 3.11 on Debian (slim = minimal size ~150MB)
-FROM python:3.11-slim
+# Base image: Python 3.12 on Debian (slim = minimal size ~150MB)
+FROM python:3.12-slim
 
 # Set working directory inside container
 WORKDIR /app

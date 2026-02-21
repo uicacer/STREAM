@@ -27,10 +27,12 @@ from globus_sdk import GlobusAPIError
 from globus_sdk.login_flows.command_line_login_flow_manager import CommandLineLoginFlowEOFError
 
 from stream.middleware.config import (
+    GLOBUS_MAX_PAYLOAD_BYTES,
     LAKESHORE_MODELS,
     MODEL_CONTEXT_LIMITS,
     get_lakeshore_vllm_url,
 )
+from stream.middleware.utils.multimodal import strip_old_images
 
 logger = logging.getLogger(__name__)
 
@@ -575,6 +577,45 @@ class GlobusComputeClient:
             logger.error(f"Authentication check failed: {e}")
             return False, f"Authentication check failed: {str(e)}"
 
+    def _estimate_payload_size(self, messages: list[dict]) -> int:
+        """
+        Estimate the serialized payload size for a Globus Compute task.
+
+        WHY THIS MATTERS:
+        Globus Compute enforces a 10 MB limit on task submissions. When the
+        user sends images, the base64-encoded image data is included in the
+        messages list, which gets serialized and sent to the Globus service.
+
+        Reference: https://globus-compute.readthedocs.io/en/stable/limits.html
+
+        A single uncompressed image can be 5-10 MB in base64. Even after frontend
+        compression (max 1024px, JPEG 85%), each image is typically 300-700 KB.
+        Multiple images can easily exceed the limit.
+
+        HOW WE ESTIMATE:
+        We can't cheaply compute the exact serialized size (that would require
+        actually serializing with dill). Instead, we estimate by measuring the
+        JSON representation of the messages, which is a good approximation since
+        the base64 strings are the dominant size component.
+
+        Args:
+            messages: Chat messages that would be sent to the remote function.
+
+        Returns:
+            Estimated payload size in bytes.
+        """
+        import json
+
+        # json.dumps gives a close approximation of the serialized size.
+        # The actual dill-serialized payload includes function bytecode and
+        # other arguments, but messages (especially base64 images) dominate.
+        try:
+            return len(json.dumps(messages).encode("utf-8"))
+        except (TypeError, ValueError):
+            # If messages can't be JSON-serialized, fall back to str() length.
+            # This is a rough estimate but better than nothing.
+            return len(str(messages).encode("utf-8"))
+
     async def submit_inference(
         self,
         messages: list[dict],
@@ -587,10 +628,11 @@ class GlobusComputeClient:
         Submit an inference task to Lakeshore via Globus Compute.
 
         This method:
-        1. Creates a Globus Compute executor
-        2. Submits the remote_vllm_inference function to execute on Lakeshore
-        3. Waits for the result with timeout
-        4. Returns the vLLM response or error information
+        1. Validates payload size (base64 images can be large)
+        2. Creates a Globus Compute executor
+        3. Submits the remote_vllm_inference function to execute on Lakeshore
+        4. Waits for the result with timeout
+        5. Returns the vLLM response or error information
 
         Args:
             messages: Chat messages in OpenAI format
@@ -621,6 +663,39 @@ class GlobusComputeClient:
             raise RuntimeError(
                 "Globus Compute not configured. Set GLOBUS_COMPUTE_ENDPOINT_ID in .env"
             )
+
+        # =====================================================================
+        # STRIP OLD IMAGES (keep only latest user message's images)
+        # =====================================================================
+        # Long conversations with multiple image messages can easily exceed
+        # the 8 MB Globus payload limit. We strip images from older messages
+        # before serialization. The model's previous text responses about
+        # those images remain in the history for context.
+        messages = strip_old_images(messages)
+
+        # =====================================================================
+        # PAYLOAD SIZE VALIDATION (for multimodal messages with images)
+        # =====================================================================
+        # Globus Compute enforces a 10 MB task payload limit (see limits.html).
+        # Our safety limit is 8 MB (GLOBUS_MAX_PAYLOAD_BYTES). We check BEFORE
+        # submitting to give the user a clear error instead of a cryptic
+        # TASK_PAYLOAD_TOO_LARGE failure from the Globus API.
+        estimated_size = self._estimate_payload_size(messages)
+        if estimated_size > GLOBUS_MAX_PAYLOAD_BYTES:
+            size_mb = estimated_size / (1024 * 1024)
+            limit_mb = GLOBUS_MAX_PAYLOAD_BYTES / (1024 * 1024)
+            logger.error(
+                f"Payload too large for Globus Compute: {size_mb:.1f} MB > {limit_mb:.0f} MB limit"
+            )
+            return {
+                "error": (
+                    f"Image payload too large for Lakeshore ({size_mb:.1f} MB). "
+                    f"Globus Compute has a {limit_mb:.0f} MB limit. "
+                    "Try reducing image size/quality or using fewer images. "
+                    "Alternatively, use the Cloud tier which has no size limit."
+                ),
+                "error_type": "payload_too_large",
+            }
 
         # Log if this is a retry attempt
         if _retry:
@@ -948,6 +1023,23 @@ class GlobusComputeClient:
 
         if not relay_url:
             return {"error": "RELAY_URL not configured", "error_type": "ConfigError"}
+
+        # Strip old images (same as submit_inference)
+        messages = strip_old_images(messages)
+
+        # Payload size check (same as submit_inference — images can be large)
+        estimated_size = self._estimate_payload_size(messages)
+        if estimated_size > GLOBUS_MAX_PAYLOAD_BYTES:
+            size_mb = estimated_size / (1024 * 1024)
+            limit_mb = GLOBUS_MAX_PAYLOAD_BYTES / (1024 * 1024)
+            return {
+                "error": (
+                    f"Image payload too large for Lakeshore ({size_mb:.1f} MB). "
+                    f"Globus Compute has a {limit_mb:.0f} MB limit. "
+                    "Try reducing image size/quality or using fewer images."
+                ),
+                "error_type": "payload_too_large",
+            }
 
         # Ensure authentication before attempting submission
         is_authenticated, auth_message = self.ensure_authenticated()

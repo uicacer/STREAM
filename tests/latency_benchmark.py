@@ -300,7 +300,7 @@ class BenchmarkConfig:
 
     # Which models/judges to test
     models: list = field(default_factory=list)
-    judges: list = field(default_factory=lambda: ["ollama-1b", "ollama-3b", "haiku"])
+    judges: list = field(default_factory=lambda: ["ollama-3b", "gemma-vision", "haiku"])
 
     # Hardware specs (populated during init)
     hardware: dict = field(default_factory=dict)
@@ -1584,7 +1584,7 @@ Examples:
         print("Testing automatic routing with different complexity judges.")
         print("The overhead vs direct tests shows the judge latency cost.")
 
-        for judge in ["ollama-1b", "ollama-3b", "haiku"]:
+        for judge in ["ollama-3b", "gemma-vision", "haiku"]:
             result = run_benchmark(
                 model="auto",
                 judge=judge,

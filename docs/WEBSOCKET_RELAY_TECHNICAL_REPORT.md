@@ -987,7 +987,7 @@ Relay: relay.stream.example.com:443 (TLS via nginx/caddy)
 - Simple, independent of campus infrastructure
 
 **Deployment steps:**
-1. Install Python 3.11+ and the `websockets` library on the server
+1. Install Python 3.12+ and the `websockets` library on the server
 2. Copy `stream/relay/server.py` to the server
 3. Run: `python server.py --host 0.0.0.0 --port 8765`
 4. Configure a reverse proxy (nginx/Caddy) with TLS termination

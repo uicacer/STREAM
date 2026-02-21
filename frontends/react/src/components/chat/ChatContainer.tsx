@@ -15,12 +15,14 @@ import { TypingIndicator } from './TypingIndicator'
 import { ChatInput } from '../input/ChatInput'
 import { ContextLimitDialog, parseContextError, type ContextErrorInfo } from './ContextLimitDialog'
 import { AuthErrorMessage, parseAuthError, type AuthErrorInfo } from './AuthErrorMessage'
+import { VisionErrorMessage, parseVisionError, type VisionErrorInfo } from './VisionErrorMessage'
+import { getTotalImageBytes, LAKESHORE_MAX_IMAGE_BYTES } from '../input/ImageUpload'
 import { useChatStore } from '../../stores/chatStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useHealthStore } from '../../stores/healthStore'
 import { streamChat, isReasoningModel } from '../../api/stream'
 import { summarizeConversation } from '../../api/summarize'
-import { AlertTriangle, ArrowDown } from 'lucide-react'
+import { AlertTriangle, ArrowDown, ImageIcon, Info } from 'lucide-react'
 
 export function ChatContainer() {
   const messages = useChatStore(state => state.messages)
@@ -58,6 +60,15 @@ export function ChatContainer() {
 
   // Auth error dialog state
   const [authError, setAuthError] = useState<AuthErrorInfo | null>(null)
+
+  // Vision/multimodal error state
+  const [visionError, setVisionError] = useState<VisionErrorInfo | null>(null)
+
+  // Payload size warning for Lakeshore tier (hard block)
+  const [payloadWarning, setPayloadWarning] = useState<string | null>(null)
+
+  // Info-level notice when Auto mode skips Lakeshore due to large images
+  const [lakeshoreSkippedInfo, setLakeshoreSkippedInfo] = useState<string | null>(null)
 
   // Health status for Cloud tier availability
   const cloudStatus = useHealthStore(state => state.cloud)
@@ -194,10 +205,16 @@ export function ChatContainer() {
   }, [pendingQuery, isStreaming])
 
   /**
-   * Handle sending a message
+   * Handle sending a message (with optional images)
+   *
+   * MULTIMODAL FLOW:
+   * 1. addUserMessage stores the text + images in the message object
+   * 2. stream.ts reads message.images and builds OpenAI vision format
+   * 3. Backend receives content as string or ContentBlock[]
+   * 4. Router selects a vision-capable model if images are present
    */
-  const handleSend = async (content: string) => {
-    addUserMessage(content)
+  const handleSend = async (content: string, images?: string[]) => {
+    addUserMessage(content, images)
     startStreaming()
 
     // Create AbortController for this request
@@ -207,6 +224,33 @@ export function ChatContainer() {
     const settings = getSettings()
     console.log('[ChatContainer] Sending with settings:', settings)
 
+    // Check if images exceed the Lakeshore limit (6 MB).
+    if (images && images.length > 0) {
+      const totalBytes = getTotalImageBytes(images)
+      if (totalBytes > LAKESHORE_MAX_IMAGE_BYTES) {
+        const sizeMB = (totalBytes / (1024 * 1024)).toFixed(1)
+
+        if (settings.tier === 'lakeshore') {
+          // Hard block: user explicitly chose Lakeshore, can't proceed
+          setPayloadWarning(
+            `The attached images total ${sizeMB} MB, which exceeds the 6 MB limit ` +
+            `for Lakeshore via Globus Compute. Please switch to Local or Cloud tier ` +
+            `for this message, or reduce the number of images.`
+          )
+          finishStreaming()
+          return
+        }
+
+        if (settings.tier === 'auto') {
+          // Soft info: Auto mode will skip Lakeshore, route to Local or Cloud
+          setLakeshoreSkippedInfo(
+            `Images total ${sizeMB} MB (over 6 MB) — Lakeshore will be skipped ` +
+            `for this message. Routing to Local or Cloud instead.`
+          )
+        }
+      }
+    }
+
     // Filter messages for API:
     // - Exclude messages marked as 'summarized' (they're just for display)
     // - Include summary markers (they contain the context)
@@ -215,11 +259,14 @@ export function ChatContainer() {
 
     const allMessages = [
       ...messagesForApi,
-      { id: '', role: 'user' as const, content, createdAt: '' }
+      { id: '', role: 'user' as const, content, images, createdAt: '' }
     ]
 
     setError(null)
-    setAuthError(null) // Clear stale auth error from previous query
+    setAuthError(null)
+    setVisionError(null)
+    setPayloadWarning(null)
+    setLakeshoreSkippedInfo(null)
 
     try {
       await streamChat(allMessages, settings, {
@@ -228,6 +275,17 @@ export function ChatContainer() {
         },
         onMetadata: (meta) => {
           setMetadata(meta)
+
+          // When the backend auto-switches to a vision model (e.g. images
+          // detected in Auto mode), update the sidebar selector so the user
+          // sees which model is actually being used.
+          if (settings.tier === 'auto' && meta.tier === 'local' && meta.model) {
+            const currentLocal = useSettingsStore.getState().localModel
+            if (meta.model !== currentLocal && (meta.model === 'local-llama' || meta.model === 'local-vision')) {
+              console.log(`[ChatContainer] Backend auto-switched local model: ${currentLocal} → ${meta.model}`)
+              useSettingsStore.getState().setLocalModel(meta.model)
+            }
+          }
 
           // When a runtime fallback occurs (tier failed during inference),
           // immediately flip the failed tier's health dot to red.
@@ -266,7 +324,15 @@ export function ChatContainer() {
           const authErr = parseAuthError(err)
           if (authErr) {
             setAuthError(authErr)
-            setPendingRetryQuery(content) // Save query for retry with different tier
+            setPendingRetryQuery(content)
+            finishStreaming()
+            return
+          }
+          // Check if this is a vision/multimodal error
+          const visErr = parseVisionError(err)
+          if (visErr) {
+            setVisionError(visErr)
+            setPendingRetryQuery(content)
             finishStreaming()
             return
           }
@@ -404,6 +470,46 @@ export function ChatContainer() {
     setPendingRetryQuery(null)
   }
 
+  /**
+   * Vision error handlers
+   */
+  const handleVisionSwitchToVision = () => {
+    const currentTier = useSettingsStore.getState().tier
+    if (currentTier === 'local' || currentTier === 'auto') {
+      useSettingsStore.getState().setLocalModel('local-vision')
+    }
+    setVisionError(null)
+    if (pendingRetryQuery) {
+      const query = pendingRetryQuery
+      setPendingRetryQuery(null)
+      setTimeout(() => handleSend(query), 100)
+    }
+  }
+
+  const handleVisionSwitchToAuto = () => {
+    setTier('auto')
+    setVisionError(null)
+    if (pendingRetryQuery) {
+      const query = pendingRetryQuery
+      setPendingRetryQuery(null)
+      setTimeout(() => handleSend(query), 100)
+    }
+  }
+
+  const handleVisionDismiss = () => {
+    setVisionError(null)
+    setPendingRetryQuery(null)
+  }
+
+  const handlePayloadSwitchTier = (newTier: 'local' | 'cloud') => {
+    setTier(newTier)
+    setPayloadWarning(null)
+  }
+
+  const handlePayloadDismiss = () => {
+    setPayloadWarning(null)
+  }
+
   const isReasoning = streamMetadata?.model
     ? isReasoningModel(streamMetadata.model)
     : false
@@ -439,6 +545,57 @@ export function ChatContainer() {
               onSwitchTier={handleAuthSwitchTier}
               onDismiss={handleAuthDismiss}
             />
+          )}
+
+          {/* Vision/multimodal error - inline message with action buttons */}
+          {visionError && (
+            <VisionErrorMessage
+              error={visionError}
+              onSwitchToVision={handleVisionSwitchToVision}
+              onSwitchToAuto={handleVisionSwitchToAuto}
+              onDismiss={handleVisionDismiss}
+            />
+          )}
+
+          {/* Payload size warning for Lakeshore */}
+          {payloadWarning && (
+            <div className="flex flex-col gap-3 p-4 rounded-lg bg-amber-500/10 border border-amber-500/30">
+              <div className="flex items-start gap-2 text-amber-600 dark:text-amber-400">
+                <ImageIcon className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-medium">Images too large for Lakeshore</p>
+                  <p className="text-sm mt-1">{payloadWarning}</p>
+                </div>
+              </div>
+              <div className="flex gap-2 ml-7">
+                <button
+                  onClick={() => handlePayloadSwitchTier('local')}
+                  className="px-3 py-1.5 text-sm rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-700 dark:text-amber-300 transition-colors"
+                >
+                  Switch to Local
+                </button>
+                <button
+                  onClick={() => handlePayloadSwitchTier('cloud')}
+                  className="px-3 py-1.5 text-sm rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-700 dark:text-amber-300 transition-colors"
+                >
+                  Switch to Cloud
+                </button>
+                <button
+                  onClick={handlePayloadDismiss}
+                  className="px-3 py-1.5 text-sm rounded-lg hover:bg-muted text-muted-foreground transition-colors"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Info: Lakeshore skipped in Auto mode due to large images */}
+          {lakeshoreSkippedInfo && (
+            <div className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-600 dark:text-blue-400">
+              <Info className="w-4 h-4 flex-shrink-0" />
+              <span className="text-sm">{lakeshoreSkippedInfo}</span>
+            </div>
           )}
 
           {/* Streaming response */}

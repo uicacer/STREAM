@@ -78,11 +78,11 @@ export function Message({ message, isStreaming = false }: MessageProps) {
    * Format model name for display
    */
   const formatModelName = (model: string): string => {
-    if (model.includes('tiny')) return 'Llama 3.2 1B'
-    if (model.includes('quality')) return 'Llama 3.1 8B'
+    if (model === 'local-vision') return 'Gemma 3 4B (Vision)'
     if (model.includes('llama')) return 'Llama 3.2 3B'
     if (model.includes('claude')) return 'Claude Sonnet 4'
-    if (model.includes('gpt-4')) return 'GPT-4 Turbo'
+    if (model === 'cloud-gpt-cheap' || model.includes('4o-mini')) return 'GPT-4o Mini'
+    if (model === 'cloud-gpt' || model.includes('4o')) return 'GPT-4o'
     if (model.includes('deepseek')) return 'DeepSeek R1 1.5B'
     if (model.includes('qwq')) return 'QwQ 1.5B'
     if (model.includes('coder') && model.includes('1.5b')) return 'Qwen 2.5 Coder 1.5B'
@@ -126,6 +126,23 @@ export function Message({ message, isStreaming = false }: MessageProps) {
             thinking={message.thinking}
             isStreaming={isStreaming}
           />
+        )}
+
+        {/* Image thumbnails for user messages with images */}
+        {isUser && message.images && message.images.length > 0 && (
+          <div className="flex flex-wrap gap-2 mb-2">
+            {message.images.map((dataUrl, index) => (
+              <img
+                key={index}
+                src={dataUrl}
+                alt={`Attached image ${index + 1}`}
+                className="max-w-48 max-h-48 rounded-lg object-cover cursor-pointer
+                           hover:opacity-90 transition-opacity border border-white/20"
+                onClick={() => window.open(dataUrl, '_blank')}
+                title="Click to view full size"
+              />
+            ))}
+          </div>
         )}
 
         {/* Message content */}

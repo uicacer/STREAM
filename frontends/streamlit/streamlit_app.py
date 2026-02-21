@@ -372,8 +372,8 @@ with st.sidebar:
             st.caption("_Disabled when using a specific tier_")
 
         judge_options = {
-            "⚡ Ollama 1b (Fastest local, free)": "ollama-1b",
             "🎯 Ollama 3b (Balanced, free)": "ollama-3b",
+            "👁️ Gemma Vision (Multimodal, free)": "gemma-vision",
             "🚀 Claude Haiku (~$1/5K judgments)": "haiku",
         }
 
@@ -394,9 +394,9 @@ with st.sidebar:
                 st.info(
                     "💰 Claude Haiku costs approximately **$1 per 5,000 query judgments**. Most accurate option."
                 )
-            elif st.session_state.judge_strategy == "ollama-1b":
+            elif st.session_state.judge_strategy == "gemma-vision":
                 st.info(
-                    "🆓 Completely free! Speed depends on your machine's hardware. Less accurate for complex queries."
+                    "🆓 Completely free! Vision-capable judge that can assess image complexity. Uses Gemma 3 4B."
                 )
             else:
                 st.info(
@@ -526,10 +526,10 @@ for message in st.session_state.messages:
                 model_display = "Claude Sonnet 4"
                 tier_emoji = "🔮"  # Anthropic
             elif "gpt-4" in model.lower():
-                model_display = "GPT-4 Turbo"
+                model_display = "GPT-4o"
                 tier_emoji = "🤖"  # OpenAI
-            elif "gpt-3.5" in model.lower():
-                model_display = "GPT-3.5"
+            elif "4o-mini" in model.lower() or model == "cloud-gpt-cheap":
+                model_display = "GPT-4o Mini"
                 tier_emoji = "⚡"  # OpenAI budget
             else:
                 model_display = model

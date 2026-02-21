@@ -12,7 +12,7 @@
  *
  * Instead, health is checked only when the user takes an action:
  *   - App startup: checks Local and Cloud with the user's selected models
- *     (e.g., verifies "llama3.1:8b" is in Ollama, not just the default 3B).
+ *     (e.g., verifies "gemma3:4b" is in Ollama, not just the default 3B).
  *     Lakeshore stays Level 1 (auth check only — no GPU job).
  *   - User changes tier: Level 2 check (verifies the specific model works)
  *   - User changes model: Level 2 check for the new model

@@ -6,39 +6,22 @@ model_list:
   # ===========================================================================
   # TIER 1: LOCAL MODELS (Ollama)
   # ===========================================================================
-  - model_name: local-llama-tiny
-    litellm_params:
-      model: ollama/llama3.2:1b
-      api_base: http://ollama:11434
-      # ↑ "ollama" = Docker service name from docker-compose.yml. Docker DNS (Domain Name System) resolves it automatically
-    model_info:
-      input_cost_per_token: 0.0
-      output_cost_per_token: 0.0
-      # max_tokens: 4096 # Optional: override model default
-      # rpm: 60  # Rate limit (requests per minute)
-      # tpm: 100000  # Token limit (tokens per minute)
-
   - model_name: local-llama
     litellm_params:
       model: ollama/llama3.2:3b
       api_base: http://ollama:11434
+      # ↑ "ollama" = Docker service name from docker-compose.yml. Docker DNS resolves it automatically
     model_info:
       input_cost_per_token: 0.0
       output_cost_per_token: 0.0
-      # max_tokens: 4096
-      # rpm: 60  # Rate limit (requests per minute)
-      # tpm: 100000  # Token limit (tokens per minute)
 
-  - model_name: local-llama-quality
+  - model_name: local-vision
     litellm_params:
-      model: ollama/llama3.1:8b
+      model: ollama/gemma3:4b
       api_base: http://ollama:11434
     model_info:
       input_cost_per_token: 0.0
       output_cost_per_token: 0.0
-      # max_tokens: 8192
-      # rpm: 60  # Rate limit (requests per minute)
-      # tpm: 100000  # Token limit (tokens per minute)
 
   # ===========================================================================
   # TIER 2: CLOUD MODELS (Paid APIs)
@@ -69,25 +52,19 @@ model_list:
 
   - model_name: cloud-gpt
     litellm_params:
-      model: gpt-4-turbo-2024-04-09
+      model: gpt-4o
       api_key: os.environ/OPENAI_API_KEY
     model_info:
-      input_cost_per_token: 0.00001     # $10 per 1M input tokens
-      output_cost_per_token: 0.00003    # $30 per 1M output tokens
-      # max_tokens: 4096
-      # rpm: 60  # Rate limit (requests per minute)
-      # tpm: 100000  # Token limit (tokens per minute)
+      input_cost_per_token: 0.0000025   # $2.50 per 1M input tokens
+      output_cost_per_token: 0.00001    # $10 per 1M output tokens
 
   - model_name: cloud-gpt-cheap
     litellm_params:
-      model: gpt-3.5-turbo-0125
+      model: gpt-4o-mini
       api_key: os.environ/OPENAI_API_KEY
     model_info:
-      input_cost_per_token: 0.0000005   # $0.50 per 1M input tokens
-      output_cost_per_token: 0.0000015  # $1.50 per 1M output tokens
-      # max_tokens: 4096
-      # rpm: 60  # Rate limit (requests per minute)
-      # tpm: 100000  # Token limit (tokens per minute)
+      input_cost_per_token: 0.00000015  # $0.15 per 1M input tokens
+      output_cost_per_token: 0.0000006  # $0.60 per 1M output tokens
 
   # ===========================================================================
   # TIER 3: CAMPUS GPU (Lakeshore vLLM)
@@ -155,6 +132,16 @@ model_list:
       input_cost_per_token: 0.0
       output_cost_per_token: 0.0
 
+  # 72B VL AWQ model (multimodal flagship, runs on H100 NVL)
+  - model_name: lakeshore-qwen-vl-72b
+    litellm_params:
+      model: openai/Qwen/Qwen2.5-VL-72B-Instruct-AWQ
+      api_base: http://lakeshore-proxy:8001/v1
+      api_key: dummy
+    model_info:
+      input_cost_per_token: 0.0
+      output_cost_per_token: 0.0
+
   # 32B AWQ model (high quality)
   - model_name: lakeshore-qwen-32b
     litellm_params:
@@ -181,13 +168,13 @@ model_list:
 
 router_settings:
   model_timeout:
-    local-llama-tiny: 60    # Allow time for model loading
     local-llama: 90
-    local-llama-quality: 120
+    local-vision: 120
     lakeshore-qwen: 120
     lakeshore-qwen-1.5b: 120
     lakeshore-qwen-32b-fp16: 120
     lakeshore-qwen-72b: 180
+    lakeshore-qwen-vl-72b: 180
     lakeshore-qwen-32b: 120
     lakeshore-coder-1.5b: 120
     lakeshore-deepseek-r1: 120

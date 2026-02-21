@@ -33,7 +33,7 @@
  * The "data: " prefix is part of the SSE protocol.
  */
 
-import type { Message, ChatSettings, StreamMetadata } from '../types'
+import type { Message, ChatSettings, StreamMetadata, ContentBlock } from '../types'
 
 /**
  * StreamCallbacks - Functions called as streaming events occur
@@ -125,9 +125,30 @@ export async function streamChat(
       // The model field is used for tier selection in STREAM
       model: settings.tier,
 
-      // Send only role and content (what the API expects)
-      // We strip out id, createdAt, etc. which are frontend-only
-      messages: messages.map(m => ({ role: m.role, content: m.content })),
+      // Send only role and content (what the API expects).
+      // We strip out id, createdAt, etc. which are frontend-only.
+      //
+      // MULTIMODAL: If a message has images, we build the OpenAI vision
+      // format — content becomes an array of ContentBlocks instead of
+      // a plain string. This is the format that the backend, Ollama,
+      // vLLM, and LiteLLM all understand natively.
+      messages: messages.map(m => {
+        // If this message has images, build the multimodal content array
+        if (m.images && m.images.length > 0) {
+          const contentBlocks: ContentBlock[] = [
+            // Always include the text block first (even if empty)
+            { type: 'text' as const, text: m.content },
+            // Then add each image as an image_url block
+            ...m.images.map(dataUrl => ({
+              type: 'image_url' as const,
+              image_url: { url: dataUrl },
+            })),
+          ]
+          return { role: m.role, content: contentBlocks }
+        }
+        // No images — send plain string content (backwards compatible)
+        return { role: m.role, content: m.content }
+      }),
 
       // Request streaming response
       stream: true,
@@ -163,6 +184,12 @@ export async function streamChat(
           message: detail.message,
           estimated_tokens: detail.estimated_tokens,
           model_limit: detail.model_limit,
+        }))
+      } else if (detail.error_type === 'model_not_multimodal') {
+        // User sent images to a text-only model
+        callbacks.onError(JSON.stringify({
+          type: 'model_not_multimodal',
+          message: detail.message,
         }))
       } else if (detail.error_type === 'auth_subscription') {
         // API key invalid or subscription expired

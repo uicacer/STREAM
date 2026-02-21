@@ -9,7 +9,11 @@ This module determines which AI tier to use for a query based on:
 
 import logging
 
-from stream.middleware.config import DEFAULT_MODELS, LLM_JUDGE_ENABLED
+from stream.middleware.config import (
+    DEFAULT_MODELS,
+    DEFAULT_VISION_MODELS,
+    LLM_JUDGE_ENABLED,
+)
 from stream.middleware.core.complexity_judge import (
     judge_complexity_with_keywords,
     judge_complexity_with_llm,
@@ -266,23 +270,59 @@ def get_model_for_tier(
     cloud_provider: str | None = None,
     local_model: str | None = None,
     lakeshore_model: str | None = None,
+    has_images: bool = False,
 ) -> str:
     """
-    Get model name for a tier.
+    Get model name for a tier, with modality-aware selection.
+
+    MODALITY-AWARE ROUTING LOGIC:
+    When the user's query contains images (has_images=True), this function
+    needs to ensure a vision-capable model is selected. The behavior depends
+    on how the user made their selection:
+
+    1. User specified an explicit model (e.g., local_model="local-llama"):
+       → Return it as-is. The caller (chat.py) will check if it's vision-capable
+         and raise an error if not. We don't silently override explicit choices.
+
+    2. User selected a tier but NOT a specific model:
+       → If images are present, return the default VISION model for that tier.
+       → If no images, return the default TEXT model for that tier.
+
+    3. AUTO mode (no tier or model specified):
+       → Same as #2 — the tier was already determined by the router.
 
     Args:
         tier: The tier to get model for (local, lakeshore, cloud)
         cloud_provider: Optional cloud provider override for cloud tier
         local_model: Optional model override for local tier
         lakeshore_model: Optional model override for lakeshore tier
+        has_images: Whether the query contains images
 
     Returns:
-        Model name to use with LiteLLM
+        Model name to use for inference
     """
+    # CASE 1: User explicitly specified a model — return it as-is.
+    # The caller (chat.py Step 4b) handles the modality validation and
+    # returns a clear error if the model can't process images.
     if tier == "local" and local_model:
         return local_model
     if tier == "lakeshore" and lakeshore_model:
         return lakeshore_model
     if tier == "cloud" and cloud_provider:
         return cloud_provider
+
+    # CASE 2 & 3: No explicit model — STREAM picks the best model.
+    # If images are present, use the default vision model for this tier.
+    # This is NOT a silent override — the user only chose the tier (or AUTO),
+    # so picking the right model within that tier is STREAM's job.
+    if has_images:
+        vision_model = DEFAULT_VISION_MODELS.get(tier)
+        if vision_model:
+            logger.info(
+                f"Selecting vision model '{vision_model}' for tier '{tier}' "
+                f"(query contains images)"
+            )
+            return vision_model
+
+    # No images or no vision model available — use the text default
     return DEFAULT_MODELS.get(tier, DEFAULT_MODELS["local"])

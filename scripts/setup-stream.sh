@@ -447,48 +447,21 @@ else
 
     # Show what we're going to download
     print_info "Required models:"
-    print_info "  • llama3.2:1b - 1.3 GB (for smart routing)"
-    print_info "  • llama3.2:3b - 2.0 GB (for local inference)"
-    echo ""
-    print_info "Optional model:"
-    print_info "  • llama3.1:8b - 4.7 GB (higher quality, slower)"
+    print_info "  • llama3.2:3b - 2.0 GB (text inference and smart routing)"
+    print_info "  • gemma3:4b   - 3.3 GB (vision/multimodal inference)"
     echo ""
 
     # Ask for confirmation before starting downloads
     if ! ask_yes_no "Download models now?" "y"; then
         print_warning "Skipping model downloads"
         print_info "You can download them later with:"
-        print_info "  docker exec -it stream-ollama ollama pull llama3.2:1b"
         print_info "  docker exec -it stream-ollama ollama pull llama3.2:3b"
+        print_info "  docker exec -it stream-ollama ollama pull gemma3:4b"
     else
         # User confirmed, proceed with downloads
 
         # -----------------------------------------------------------------------------
-        # Download llama3.2:1b (Required - Judge Model)
-        # -----------------------------------------------------------------------------
-        echo ""
-        MODEL="llama3.2:1b"
-
-        if echo "$EXISTING_MODELS" | grep -q "^$MODEL"; then
-            print_success "$MODEL already installed ✓"
-        else
-            print_info "${BOLD}Downloading $MODEL${NC}"
-            print_info "Size: ~1.3 GB | Time: 5-10 minutes"
-            print_info "Purpose: Smart query routing and complexity detection"
-            echo ""
-
-            # Run ollama pull and show progress
-            if docker exec -it stream-ollama ollama pull $MODEL; then
-                print_success "$MODEL downloaded successfully"
-            else
-                print_error "Failed to download $MODEL"
-                print_info "This model is required for STREAM to function"
-                exit 1
-            fi
-        fi
-
-        # -----------------------------------------------------------------------------
-        # Download llama3.2:3b (Required - Local Tier)
+        # Download llama3.2:3b (Required - Text Inference + Judge)
         # -----------------------------------------------------------------------------
         echo ""
         MODEL="llama3.2:3b"
@@ -498,7 +471,7 @@ else
         else
             print_info "${BOLD}Downloading $MODEL${NC}"
             print_info "Size: ~2.0 GB | Time: 5-10 minutes"
-            print_info "Purpose: Fast local inference for simple queries"
+            print_info "Purpose: Text inference for simple queries and smart routing"
             echo ""
 
             if docker exec -it stream-ollama ollama pull $MODEL; then
@@ -511,31 +484,25 @@ else
         fi
 
         # -----------------------------------------------------------------------------
-        # Download llama3.1:8b (Optional - Higher Quality)
+        # Download gemma3:4b (Required - Vision/Multimodal)
         # -----------------------------------------------------------------------------
         echo ""
-        MODEL="llama3.1:8b"
+        MODEL="gemma3:4b"
 
-        # Skip in quick mode
-        if [ "$QUICK_MODE" = true ]; then
-            print_warning "Skipping optional model in quick mode"
-        elif echo "$EXISTING_MODELS" | grep -q "^$MODEL"; then
+        if echo "$EXISTING_MODELS" | grep -q "^$MODEL"; then
             print_success "$MODEL already installed ✓"
         else
-            print_info "${BOLD}Optional: $MODEL${NC}"
-            print_info "Size: ~4.7 GB | Time: 10-15 minutes"
-            print_info "Purpose: Better quality responses (slower)"
+            print_info "${BOLD}Downloading $MODEL${NC}"
+            print_info "Size: ~3.3 GB | Time: 5-10 minutes"
+            print_info "Purpose: Vision model for image+text queries"
             echo ""
 
-            # Ask if user wants this large model
-            if ask_yes_no "Download optional 8B model?" "n"; then
-                if docker exec -it stream-ollama ollama pull $MODEL; then
-                    print_success "$MODEL downloaded successfully"
-                else
-                    print_warning "Failed to download $MODEL (non-critical)"
-                fi
+            if docker exec -it stream-ollama ollama pull $MODEL; then
+                print_success "$MODEL downloaded successfully"
             else
-                print_info "Skipping $MODEL (you can add it later)"
+                print_error "Failed to download $MODEL"
+                print_info "This model is required for multimodal support"
+                exit 1
             fi
         fi
     fi

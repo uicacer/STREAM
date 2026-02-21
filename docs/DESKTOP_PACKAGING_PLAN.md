@@ -1189,7 +1189,7 @@ If we need more desktop-native features (system tray, auto-updater, native menus
 - Mac: Make sure you're running native Ollama, not Docker Ollama
 - Windows: Make sure NVIDIA drivers are installed
 - Linux: Make sure CUDA toolkit is installed: `nvidia-smi` should show GPU
-- Check: `ollama run llama3.2:1b` — it should show "using Metal" or "using CUDA"
+- Check: `ollama run llama3.2:3b` — it should show "using Metal" or "using CUDA"
 
 ### Port 5000 already in use
 

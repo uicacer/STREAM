@@ -9,7 +9,7 @@ Think of it like a shipping container for your code:
 
 ```
 WITHOUT PyInstaller:
-  User needs: Python 3.11 + pip install litellm fastapi uvicorn httpx ...
+  User needs: Python 3.12 + pip install litellm fastapi uvicorn httpx ...
   Then runs:  python -m stream.desktop.main
 
 WITH PyInstaller:
@@ -261,7 +261,7 @@ run on Windows, so it can't create a Windows bundle.
 
 ### To build on Windows:
 
-1. Install Python 3.11+ and the project dependencies on a Windows machine
+1. Install Python 3.12+ and the project dependencies on a Windows machine
 2. Copy the project files (or clone the git repo)
 3. Run `pip install pyinstaller` (or `uv pip install pyinstaller`)
 4. The `stream.spec` will need a few Windows-specific changes:

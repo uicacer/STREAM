@@ -5,9 +5,20 @@ This module determines whether a query is LOW, MEDIUM, or HIGH complexity
 to route it to the appropriate AI tier.
 
 Supports multiple judge strategies:
-- ollama-1b: Fastest local, less accurate, free
 - ollama-3b: Balanced accuracy, free (default)
+- gemma-vision: Vision-capable judge that can analyze images, free
 - haiku: Fastest & most accurate, ~$1 per 5,000 judgments
+
+MULTIMODAL JUDGING:
+When the user sends an image with their query, the complexity of the image
+itself can affect routing. For example:
+  - A photo of a cat with "What is this?" → LOW complexity
+  - A scientific chart with "Analyze this data" → HIGH complexity
+  - A medical scan with "What do you see?" → HIGH complexity
+
+The gemma-vision judge strategy can process images to make better routing
+decisions. Text-only judges (ollama-3b, haiku) only see the text portion
+of the query, which may still be sufficient for many cases.
 """
 
 import hashlib
@@ -81,7 +92,7 @@ def judge_complexity_with_llm(
 
     Args:
         query: User's question
-        strategy: Judge strategy to use ("ollama-1b", "ollama-3b", "haiku")
+        strategy: Judge strategy to use ("ollama-3b", "gemma-vision", "haiku")
 
     Returns:
         Tuple of (complexity, error_reason, cost, tokens) where:
@@ -229,16 +240,39 @@ def judge_complexity_with_keywords(query: str) -> tuple[str, str | None]:
     return "medium", None
 
 
-def judge_complexity(query: str, strategy: str = None) -> JudgmentResult:
+def judge_complexity(
+    query: str,
+    strategy: str = None,
+    query_has_images: bool = False,
+) -> JudgmentResult:
     """
     Judge query complexity using LLM with keyword fallback.
 
+    MULTIMODAL HANDLING:
+    When images are present in the query, the behavior depends on the strategy:
+
+    1. gemma-vision strategy + images present:
+       → The judge can see images, so it may better assess complexity
+         (e.g., a medical scan is HIGH, a cat photo is LOW).
+       → However, this adds latency since the judge must process the image.
+
+    2. Text-only strategy (ollama-3b, haiku) + images present:
+       → Only the text portion is sent to the judge.
+       → Keyword fallback has a special rule: if images are present and
+         no strong keyword signal is found, default to MEDIUM instead of
+         the usual default. This is because most image queries require
+         at least moderate processing (describe, analyze, etc.).
+
+    3. No images present:
+       → Behaves exactly as before (no change from pre-multimodal code).
+
     Args:
-        query: User's question
-        strategy: Judge strategy ("ollama-1b", "ollama-3b", "haiku"). Default: ollama-3b
+        query: User's question (text only — images already stripped)
+        strategy: Judge strategy ("ollama-3b", "gemma-vision", "haiku")
+        query_has_images: Whether the original query contained images
 
     Returns:
-        JudgmentResult with complexity, method used, cost, and fallback info if applicable
+        JudgmentResult with complexity, method used, cost, and fallback info
     """
     strategy = strategy or DEFAULT_JUDGE_STRATEGY
 
@@ -258,17 +292,24 @@ def judge_complexity(query: str, strategy: str = None) -> JudgmentResult:
         logger.warning(f"LLM judge ({strategy}) failed: {error}. Falling back to keywords.")
         keyword_complexity, matched_keyword = judge_complexity_with_keywords(query)
 
+        # MULTIMODAL KEYWORD FALLBACK RULE:
+        # If the query has images but no keywords matched, default to MEDIUM
+        # instead of the standard default. Image queries almost always require
+        # at least moderate processing (describe, compare, analyze).
+        if not matched_keyword and query_has_images:
+            keyword_complexity = "medium"
+            logger.info("JUDGE [keywords]: No keywords matched but images present → MEDIUM")
+
         if matched_keyword:
             return JudgmentResult(
                 complexity=keyword_complexity,
                 method="keyword_fallback",
                 strategy_used=strategy,
                 fallback_reason=f"LLM judge failed ({error}), used keyword matching",
-                judge_cost=judge_cost,  # Include cost even if judge failed after making call
+                judge_cost=judge_cost,
                 judge_tokens=judge_tokens,
             )
         else:
-            # No keywords matched - defaulted to MEDIUM
             return JudgmentResult(
                 complexity=keyword_complexity,
                 method="default_fallback",
@@ -280,6 +321,11 @@ def judge_complexity(query: str, strategy: str = None) -> JudgmentResult:
 
     # LLM judge disabled - use keywords (no cost)
     keyword_complexity, matched_keyword = judge_complexity_with_keywords(query)
+
+    # Same multimodal default rule as above
+    if not matched_keyword and query_has_images:
+        keyword_complexity = "medium"
+
     if matched_keyword:
         return JudgmentResult(
             complexity=keyword_complexity,

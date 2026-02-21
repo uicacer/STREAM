@@ -32,9 +32,8 @@ docker stats
 
 | Model | Parameters | RAM Needed | Speed |
 |-------|-----------|------------|-------|
-| llama3.2:1b | 1B | ~1GB | Very Fast |
 | llama3.2:3b | 3B | ~2GB | Fast |
-| llama3.1:8b | 8B | ~5GB | Medium |
+| gemma3:4b | 4B | ~3.3GB | Fast (vision) |
 | mixtral:8x7b | 47B | ~26GB | Slow |
 | llama3.1:70b | 70B | ~40GB | Very Slow |
 

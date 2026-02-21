@@ -27,12 +27,18 @@ from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from stream.middleware.config import DEFAULT_JUDGE_STRATEGY, JUDGE_STRATEGIES
+from stream.middleware.config import (
+    DEFAULT_JUDGE_STRATEGY,
+    DEFAULT_VISION_MODELS,
+    JUDGE_STRATEGIES,
+    VISION_CAPABLE_MODELS,
+)
 from stream.middleware.core.complexity_judge import judge_complexity
 from stream.middleware.core.query_router import AuthError, get_model_for_tier, get_tier_for_query
 from stream.middleware.core.streaming import create_streaming_response
 from stream.middleware.core.tier_health import set_active_cloud_provider
 from stream.middleware.utils.context_window import check_context_limit
+from stream.middleware.utils.multimodal import extract_text_content, has_images
 from stream.middleware.utils.token_estimator import estimate_tokens
 
 # Configure module logger
@@ -54,23 +60,42 @@ class Message(BaseModel):
 
     OpenAI-compatible format with role and content.
 
+    MULTIMODAL SUPPORT:
+    The "content" field can be either:
+      1. A plain string (text-only messages) — the traditional format
+      2. A list of content blocks (multimodal messages) — the OpenAI vision format
+
+    Text-only example:
+        {"role": "user", "content": "Hello!"}
+
+    Multimodal example (text + image):
+        {"role": "user", "content": [
+            {"type": "text", "text": "What is in this image?"},
+            {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,/9j/..."}}
+        ]}
+
+    WHY str | list[dict]:
+    The original STREAM only supported text (content: str). To add image
+    support without breaking existing clients, we accept BOTH formats.
+    A plain string request still works exactly as before. A list request
+    enables multimodal content. This is the same approach OpenAI uses —
+    their API accepts both formats for backwards compatibility.
+
     Attributes:
         role: Message sender ("user", "assistant", or "system")
-        content: Message text
-
-    Example:
-        >>> msg = Message(role="user", content="Hello!")
-        >>> msg.model_dump()
-        {"role": "user", "content": "Hello!"}
+        content: Message text (string) or list of content blocks (multimodal)
     """
 
     role: str = Field(
         ...,  # Required field (... means no default)
         description="Role: user, assistant, or system",
     )
-    content: str = Field(
+    content: str | list[dict] = Field(
         ...,  # Required field
-        description="Message content",
+        description=(
+            "Message content. String for text-only, or list of content blocks "
+            "for multimodal (OpenAI vision format)."
+        ),
     )
 
 
@@ -107,7 +132,7 @@ class ChatCompletionRequest(BaseModel):
     messages: list[Message] = Field(
         ...,  # Required
         description="Conversation messages",
-        min_items=1,  # At least one message required
+        min_length=1,  # At least one message required
     )
 
     temperature: float | None = Field(
@@ -123,12 +148,12 @@ class ChatCompletionRequest(BaseModel):
 
     judge_strategy: str | None = Field(
         default=None,
-        description="Judge strategy for complexity analysis (ollama-1b, ollama-3b, haiku). Default: ollama-3b",
+        description="Judge strategy for complexity analysis (ollama-3b, gemma-vision, haiku). Default: ollama-3b",
     )
 
     local_model: str | None = Field(
         default=None,
-        description="Model to use for local tier (local-llama-tiny, local-llama, local-llama-quality). Default: local-llama",
+        description="Model to use for local tier (local-llama, local-vision). Default: local-llama",
     )
 
     lakeshore_model: str | None = Field(
@@ -229,13 +254,23 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
     correlation_id = request.state.correlation_id
 
     # =========================================================================
-    # STEP 2: Extract User Query
+    # STEP 2: Extract User Query (with multimodal support)
     # =========================================================================
-    # Get the most recent user message (last message with role="user")
+    # Get the most recent user message (last message with role="user").
+    #
+    # MULTIMODAL HANDLING:
+    # The user's content might be a string ("Hello") or a list of content
+    # blocks ([{"type": "text", "text": "..."}, {"type": "image_url", ...}]).
+    # For the complexity judge, we only need the TEXT portion — the judge
+    # can't process images (unless using the gemma-vision strategy).
+    # extract_text_content() handles both formats transparently.
     user_messages = [msg for msg in request_body.messages if msg.role == "user"]
 
     if user_messages:
-        user_query = user_messages[-1].content
+        # Extract just the text for the complexity judge.
+        # If content is a string, this returns it as-is.
+        # If content is a list of blocks, this extracts and joins text blocks.
+        user_query = extract_text_content(user_messages[-1].content)
     else:
         # Edge case: No user messages (shouldn't happen due to validation)
         user_query = ""
@@ -243,6 +278,19 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
             f"[{correlation_id}] No user messages in conversation",
             extra={"correlation_id": correlation_id},
         )
+
+    # =========================================================================
+    # STEP 2b: Detect Images in the Conversation
+    # =========================================================================
+    # Check if ANY message in the conversation contains images.
+    # This affects:
+    #   1. ROUTING: Must select a vision-capable model
+    #   2. TOKEN ESTIMATION: Images consume ~765 tokens each
+    #   3. PAYLOAD SIZE: Base64 images can be large (Globus has 10 MB limit)
+    #
+    # We convert messages to dicts first so has_images() can inspect them.
+    messages_as_dicts = [msg.model_dump() for msg in request_body.messages]
+    query_has_images = has_images(messages_as_dicts)
 
     # =========================================================================
     # STEP 3: Analyze Query Complexity
@@ -275,8 +323,12 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
             extra={"correlation_id": correlation_id},
         )
     else:
-        # Use the judge_complexity function with selected strategy
-        judgment_result = judge_complexity(user_query, judge_strategy)
+        # Use the judge_complexity function with selected strategy.
+        # We pass query_has_images so the judge can adjust its default
+        # complexity for image queries (MEDIUM instead of the usual default).
+        judgment_result = judge_complexity(
+            user_query, judge_strategy, query_has_images=query_has_images
+        )
         complexity = judgment_result.complexity
         judge_cost = judgment_result.judge_cost  # Capture judge cost
 
@@ -336,7 +388,54 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
         cloud_provider=request_body.cloud_provider,
         local_model=request_body.local_model,
         lakeshore_model=request_body.lakeshore_model,
+        has_images=query_has_images,
     )
+
+    # =========================================================================
+    # STEP 4b: Validate Model Supports Modality
+    # =========================================================================
+    # If the query contains images but the selected model is text-only:
+    #   - AUTO mode → auto-switch to the vision model for that tier
+    #   - Explicit tier/model → respect user choice, return helpful error
+    if query_has_images and model not in VISION_CAPABLE_MODELS:
+        if request_body.model == "auto":
+            # Auto mode: STREAM is in control, switch to vision model
+            vision_model = DEFAULT_VISION_MODELS.get(tier)
+            if vision_model:
+                logger.info(
+                    f"[{correlation_id}] Auto-switching from '{model}' to "
+                    f"vision model '{vision_model}' (query contains images)",
+                    extra={
+                        "correlation_id": correlation_id,
+                        "model": model,
+                        "vision_model": vision_model,
+                    },
+                )
+                model = vision_model
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "error_type": "model_not_multimodal",
+                        "message": (f"No vision-capable model is available for the '{tier}' tier."),
+                    },
+                )
+        else:
+            # User explicitly selected a tier/model — respect their choice
+            logger.warning(
+                f"[{correlation_id}] Image query sent to text-only model '{model}'",
+                extra={"correlation_id": correlation_id, "model": model},
+            )
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error_type": "model_not_multimodal",
+                    "message": (
+                        "The selected model is text-only and can't process images. "
+                        "Switch to a vision model or use Auto mode to let STREAM pick one for you."
+                    ),
+                },
+            )
 
     # Track routing fallback info for UI notification
     routing_fallback_info = None
@@ -360,8 +459,11 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
     # =========================================================================
     # STEP 5: Prepare Messages
     # =========================================================================
-    # Convert Pydantic models to dictionaries for downstream processing
-    messages = [msg.model_dump() for msg in request_body.messages]
+    # Use the dict conversion we already computed in Step 2b.
+    # These dicts preserve the original content format (string or list),
+    # which flows through to Ollama, vLLM, and LiteLLM unchanged.
+    # All three inference engines accept the OpenAI vision format natively.
+    messages = messages_as_dicts
 
     # =========================================================================
     # STEP 6: Validate Context Window

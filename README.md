@@ -870,7 +870,7 @@ docker-compose up -d
 ```bash
 # Re-download models
 docker exec -it stream-ollama ollama pull llama3.2:3b
-docker exec -it stream-ollama ollama pull llama3.2:1b
+docker exec -it stream-ollama ollama pull gemma3:4b
 
 # Restart
 docker-compose restart
@@ -1088,8 +1088,8 @@ A: Currently **Qwen2.5-1.5B-Instruct** - it's fast, lightweight, and provides go
 ## Model Information
 
 ### Local Models (Ollama)
-- **llama3.2:1b** - 1.3 GB - Faster but lower quality
-- **llama3.2:3b** - 2.0 GB - Used for routing decisions
+- **llama3.2:3b** - 2.0 GB - Text inference and routing decisions
+- **gemma3:4b** - 3.3 GB - Vision/multimodal inference (image+text)
 
 ### Lakeshore Models
 - **Qwen2.5-1.5B-Instruct** - 1.5 GB - Currently deployed (fast, good quality)

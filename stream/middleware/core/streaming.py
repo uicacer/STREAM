@@ -633,6 +633,46 @@ async def create_streaming_response(
                 ]
             )
 
+            # Payload too large is a per-request issue (not a tier failure).
+            # The tier itself works fine -- only this specific request has
+            # images that exceed the Globus Compute 10 MB payload limit.
+            # We fall back to another tier WITHOUT marking the current one
+            # as unavailable (so it stays green in the health indicator).
+            is_payload_error = "payload" in error_str and "too large" in error_str
+
+            if is_payload_error and attempt < MAX_FALLBACK_ATTEMPTS - 1:
+                logger.info(
+                    f"[{correlation_id}] Payload too large for {current_tier.upper()}, "
+                    f"attempting fallback (tier is healthy, request is oversized)",
+                    extra={
+                        "correlation_id": correlation_id,
+                        "failed_tier": current_tier,
+                    },
+                )
+
+                fallback_tier = get_fallback_tier(complexity, tiers_tried)
+
+                if fallback_tier:
+                    tracker.record_fallback(fallback_tier)
+                    current_tier = fallback_tier
+                    current_model = get_model_for_tier(fallback_tier)
+                    tiers_tried.append(fallback_tier)
+                    stream_start_time = time.perf_counter()
+                    timeout_warning_sent = False
+
+                    fallback_event = {
+                        "stream_metadata": {
+                            "fallback": True,
+                            "original_tier": tier,
+                            "current_tier": current_tier,
+                            "model": current_model,
+                            "complexity": complexity,
+                            "reason": "Images too large for Lakeshore payload limit",
+                        }
+                    }
+                    yield f"data: {json.dumps(fallback_event)}\n\n"
+                    continue
+
             # Should we attempt fallback?
             # Yes if: (1) it's a tier failure AND (2) we haven't exhausted retries
             if is_tier_failure and attempt < MAX_FALLBACK_ATTEMPTS - 1:

@@ -90,6 +90,30 @@ LAKESHORE_PROXY_URL = os.getenv(
     f"http://{LAKESHORE_PROXY_HOST}:{LAKESHORE_PROXY_PORT}",
 )
 
+# Maximum payload size for Globus Compute tasks (in bytes).
+#
+# Globus Compute enforces a 10 MB limit on task submissions:
+#   "The current data limit is set to 10MB on task submissions, which
+#    applies to both individual functions as well as batch submissions."
+# Reference: https://globus-compute.readthedocs.io/en/stable/limits.html
+#
+# We set our internal limit to 8 MB to leave headroom for:
+#   - Function bytecode serialization overhead (~50-100 KB)
+#   - dill serialization framing (~10-20 KB)
+#   - Safety margin for edge cases
+#
+# This primarily matters for multimodal queries: a single base64-encoded
+# image can be 1-5 MB. The frontend compresses images (max 1024px, JPEG 85%)
+# to keep them under ~500 KB, but multiple images can still exceed the limit.
+GLOBUS_MAX_PAYLOAD_BYTES = 8 * 1024 * 1024  # 8 MB
+
+# Maximum total image data per message for Lakeshore (in bytes).
+# Within the 8 MB total payload budget, we reserve ~2 MB for conversation
+# text, function serialization, and framing. This leaves 6 MB for images
+# in the current user message. The frontend warns users when attached
+# images exceed this threshold and suggests Local or Cloud tiers instead.
+GLOBUS_MAX_IMAGE_BYTES = 6 * 1024 * 1024  # 6 MB
+
 USE_GLOBUS_COMPUTE = (
     os.getenv("USE_GLOBUS_COMPUTE", "true").lower() == "true"
 )  # Enable Globus Compute mode
@@ -199,6 +223,15 @@ LAKESHORE_MODELS = {
         "host": "ghi2-002",
         "port": 8000,
         "description": "General purpose (72B AWQ, flagship quality)",
+    },
+    # 72B VL AWQ: Vision-Language flagship. Handles both text and image queries.
+    #   See scripts/vllm-qwen-vl-72b.sh for SLURM launch script.
+    "lakeshore-qwen-vl-72b": {
+        "hf_name": "Qwen/Qwen2.5-VL-72B-Instruct-AWQ",
+        "host": "ghi2-002",
+        "port": 8000,
+        "description": "Vision + Text (72B AWQ, multimodal flagship)",
+        "multimodal": True,
     },
     # --- 32B AWQ model (high quality, runs alongside 1.5B models) ---
     # Requires its own 3g.40gb MIG slice. Uses CUDA graphs (no --enforce-eager)
@@ -313,20 +346,31 @@ LAKESHORE_HEALTH_TIMEOUT = int(os.getenv("LAKESHORE_HEALTH_TIMEOUT", "20"))
 # =============================================================================
 
 # Judge strategy options (user can select in UI)
+#
+# These control how STREAM classifies query complexity (LOW/MEDIUM/HIGH).
+# The judge runs BEFORE the main inference to decide which tier to use.
+#
+# NOTE: "ollama-1b" was removed because we removed llama3.2:1b from local
+# models to save disk space. The 3B model provides better accuracy anyway.
 JUDGE_STRATEGIES = {
-    "ollama-1b": {
-        "model": "local-llama-tiny",
-        "name": "Ollama 1b",
-        "description": "Fastest local, less accurate, free",
-        "icon": "⚡",
-        "timeout": 30,
-    },
     "ollama-3b": {
         "model": "local-llama",
         "name": "Ollama 3b",
         "description": "Balanced accuracy, free",
         "icon": "🎯",
         "timeout": 60,
+    },
+    "gemma-vision": {
+        "model": "local-vision",
+        "name": "Gemma Vision 4B",
+        "description": "Vision-capable judge, can analyze images, free",
+        "icon": "👁️",
+        "timeout": 60,
+        # This flag tells the complexity judge to pass full multimodal
+        # content (including images) to the judge model, instead of
+        # extracting text only. Useful when the image itself affects
+        # complexity (e.g., a simple photo vs. a complex medical scan).
+        "vision": True,
     },
     "haiku": {
         "model": "cloud-haiku",
@@ -340,7 +384,7 @@ JUDGE_STRATEGIES = {
 # Default judge strategy
 DEFAULT_JUDGE_STRATEGY = "ollama-3b"
 
-# Legacy config (for backwards compatibility)
+# Legacy config (for backwards compatibility with older code paths)
 JUDGE_MODEL = JUDGE_STRATEGIES[DEFAULT_JUDGE_STRATEGY]["model"]
 JUDGE_TIMEOUT = JUDGE_STRATEGIES[DEFAULT_JUDGE_STRATEGY]["timeout"]
 LLM_JUDGE_ENABLED = True
@@ -375,15 +419,15 @@ CLOUD_PROVIDERS = {
         "env_key": "ANTHROPIC_API_KEY",  # Required env var
     },
     "cloud-gpt": {
-        "name": "GPT-4 Turbo",
+        "name": "GPT-4o",
         "provider": "OpenAI",
-        "description": "Strong general-purpose model",
+        "description": "Strong general-purpose model with vision",
         "env_key": "OPENAI_API_KEY",
     },
     "cloud-gpt-cheap": {
-        "name": "GPT-3.5 Turbo",
+        "name": "GPT-4o Mini",
         "provider": "OpenAI",
-        "description": "Fast and affordable",
+        "description": "Fast and affordable with vision",
         "env_key": "OPENAI_API_KEY",
     },
 }
@@ -397,15 +441,54 @@ DEFAULT_MODELS = {
     "cloud": DEFAULT_CLOUD_PROVIDER,  # Now configurable!
 }
 
+# Default vision models for each tier.
+# When the router detects images and needs to pick a vision-capable model,
+# it uses this mapping to find the right model for the selected tier.
+# This is only used when the user selected AUTO or a tier without
+# specifying a model — if the user explicitly chose a model, we respect it.
+DEFAULT_VISION_MODELS = {
+    "local": "local-vision",
+    "lakeshore": "lakeshore-qwen-vl-72b",
+    "cloud": DEFAULT_CLOUD_PROVIDER,  # All cloud models support vision
+}
+
 
 # =============================================================================
 # OLLAMA MODELS
 # =============================================================================
 
 OLLAMA_MODELS = {
-    "local-llama-tiny": "llama3.2:1b",
+    # Text-only model: good for general queries without images.
+    # Llama 3.2 3B is a balanced choice — fast enough for local inference,
+    # capable enough for most text tasks, and fits comfortably in ~4 GB RAM.
     "local-llama": "llama3.2:3b",
-    "local-llama-quality": "llama3.1:8b",
+    # Vision model: handles both text AND image queries.
+    # Gemma 3 4B is Google's open-source multimodal model based on the
+    # Gemini 2.0 architecture. It can process images (describe, analyze,
+    # extract text, etc.) while still being small enough for local inference.
+    # Uses ~6 GB RAM, fits within Docker Ollama's 8 GB allocation.
+    "local-vision": "gemma3:4b",
+}
+
+
+# =============================================================================
+# VISION-CAPABLE MODELS
+# =============================================================================
+# This set tells the router which models can process images.
+# When a user sends an image, the router uses this to:
+#   1. AUTO mode: pick a vision-capable model automatically
+#   2. Explicit model: reject text-only models with a helpful error
+#
+# If you add a new vision model (local, lakeshore, or cloud), add it here.
+VISION_CAPABLE_MODELS = {
+    # Local: Gemma 3 4B (multimodal, handles text + images)
+    "local-vision",
+    # Lakeshore: Qwen2.5-VL-72B (vision-language model on H100)
+    "lakeshore-qwen-vl-72b",
+    # Cloud: Claude Sonnet 4, GPT-4o, and GPT-4o Mini all support vision
+    "cloud-claude",
+    "cloud-gpt",
+    "cloud-gpt-cheap",
 }
 
 # =============================================================================
@@ -450,16 +533,15 @@ OLLAMA_MODELS = {
 # • 4000 tokens ≈ 2 pages (good for detailed responses)
 #
 MODEL_CONTEXT_LIMITS = {
-    # Local: 4K limit for faster CPU inference
-    # max_input = 4096 - 512 = 3584 tokens (~14KB of text)
-    "local-llama-tiny": {"total": 4096, "reserve_output": 512},
     # Llama 3.2:3b supports 128K context natively. 32K is a practical limit
     # for desktop — large enough for extended conversations, small enough for
     # fast Apple Silicon GPU inference. (~2GB model leaves plenty of VRAM.)
     "local-llama": {"total": 32768, "reserve_output": 2048},
     # Uncomment below to test context-limit-exceeded error dialog:
     # "local-llama": {"total": 500, "reserve_output": 100},
-    "local-llama-quality": {"total": 4096, "reserve_output": 512},
+    # Gemma 3 4B supports 128K context, but images consume significant context.
+    # Each image uses ~765 tokens, so we use 32K as a practical limit.
+    "local-vision": {"total": 32768, "reserve_output": 2048},
     # Lakeshore: 32K total context (vLLM --max-model-len=32768).
     # Demo uses 1.5B model which fits easily with 32K context on 40GB MIG.
     # For 32B production models, reduce to 16384 (--enforce-eager needed, less VRAM).
@@ -470,12 +552,14 @@ MODEL_CONTEXT_LIMITS = {
     "lakeshore-qwen-32b": {"total": 8192, "reserve_output": 1024},
     "lakeshore-deepseek-r1": {"total": 32768, "reserve_output": 2048},
     "lakeshore-qwq": {"total": 32768, "reserve_output": 2048},
+    "lakeshore-qwen-vl-72b": {"total": 32768, "reserve_output": 2048},
     "lakeshore-qwen": {"total": 32768, "reserve_output": 2048},  # Legacy
     # Cloud: Full native context limits
     # max_input = 200000 - 4000 = 196000 tokens (~780KB of text)
     "cloud-claude": {"total": 200000, "reserve_output": 4000},
+    "cloud-haiku": {"total": 200000, "reserve_output": 4000},
     "cloud-gpt": {"total": 128000, "reserve_output": 4000},
-    "cloud-gpt-cheap": {"total": 16385, "reserve_output": 1000},
+    "cloud-gpt-cheap": {"total": 128000, "reserve_output": 4000},
 }
 
 # =============================================================================
