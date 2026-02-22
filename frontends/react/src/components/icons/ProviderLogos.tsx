@@ -69,7 +69,7 @@ export function OllamaLogo({ className }: LogoProps) {
   )
 }
 
-/** Google — "G" mark (Gemini / Gemma models)
+/** Google — "G" mark (Gemini models)
  * SVG source: https://developers.google.com/identity/branding-guidelines
  * Official 4-color treatment: Blue #4285F4, Green #34A853, Yellow #FBBC05, Red #EA4335 */
 export function GoogleLogo({ className }: LogoProps) {
@@ -79,6 +79,59 @@ export function GoogleLogo({ className }: LogoProps) {
       <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
       <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
       <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+    </svg>
+  )
+}
+
+/** Gemma — sparkle/star mark (Google's open-weight Gemma models)
+ * SVG source: https://raw.githubusercontent.com/simple-icons/simple-icons/master/icons/googlegemini.svg
+ * The Gemma/Gemini sparkle uses a purple-to-blue gradient matching Google's official branding. */
+export function GemmaLogo({ className }: LogoProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" aria-label="Gemma">
+      <defs>
+        <linearGradient id="gemma-gradient" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor="#8B5CF6" />
+          <stop offset="100%" stopColor="#3B82F6" />
+        </linearGradient>
+      </defs>
+      <path fill="url(#gemma-gradient)" d="M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81" />
+    </svg>
+  )
+}
+
+/** DuckDuckGo — duck mascot mark (web search provider)
+ * SVG source: https://raw.githubusercontent.com/simple-icons/simple-icons/master/icons/duckduckgo.svg
+ * The compound path uses even-odd fill: the duck details are cutouts in the red-orange circle.
+ * A white circle behind the path makes the cutouts render as white, matching the real logo. */
+export function DuckDuckGoLogo({ className }: LogoProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" aria-label="DuckDuckGo">
+      <circle cx="12" cy="12" r="12" fill="white" />
+      <path fill="#DE5833" d="M12 0C5.37 0 0 5.37 0 12s5.37 12 12 12 12-5.37 12-12S18.63 0 12 0zm0 .984C18.083.984 23.016 5.916 23.016 12S18.084 23.016 12 23.016.984 18.084.984 12C.984 5.917 5.916.984 12 .984zm0 .938C6.434 1.922 1.922 6.434 1.922 12c0 4.437 2.867 8.205 6.85 9.55-.237-.82-.776-2.753-1.6-6.052-1.184-4.741-2.064-8.606 2.379-9.813.047-.011.064-.064.03-.093-.514-.467-1.382-.548-2.233-.38a.06.06 0 0 1-.07-.058c0-.011 0-.023.011-.035.205-.286.572-.507.822-.64a1.843 1.843 0 0 0-.607-.335c-.059-.022-.059-.12-.006-.144.006-.006.012-.012.024-.012 1.749-.233 3.586.292 4.49 1.448.011.011.023.017.035.023 2.968.635 3.509 4.837 3.328 5.998a9.607 9.607 0 0 0 2.346-.576c.746-.286 1.008-.222 1.101-.053.1.193-.018.513-.28.81-.496.567-1.393 1.01-2.974 1.137-.546.044-1.029.024-1.445.006-.789-.035-1.339-.059-1.633.39-.192.298-.041.998 1.487 1.22 1.09.157 2.078.047 2.798-.034.643-.07 1.073-.118 1.172.069.21.402-.996 1.207-3.066 1.224-.158 0-.315-.006-.467-.011-1.283-.065-2.227-.414-2.816-.735a.094.094 0 0 1-.035-.017c-.105-.059-.31.045-.188.267.07.134.444.478 1.004.776-.058.466.087 1.184.338 2l.088-.016c.041-.009.087-.019.134-.025.507-.082.775.012.926.175.717-.536 1.913-1.294 2.03-1.154.583.694.66 2.332.53 2.99-.004.012-.017.024-.04.035-.274.117-1.783-.296-1.783-.511-.059-1.075-.26-1.173-.493-1.225h-.156c.006.006.012.018.018.03l.052.12c.093.257.24 1.063.13 1.26-.112.199-.835.297-1.284.303-.443.006-.543-.158-.637-.408-.07-.204-.103-.675-.103-.95a.857.857 0 0 1 .012-.216c-.134.058-.333.193-.397.281-.017.262-.017.682.123 1.149.07.221-1.518 1.164-1.74.99-.227-.181-.634-1.952-.459-2.67-.187.017-.338.075-.42.191-.367.508.093 2.933.582 3.248.257.169 1.54-.553 2.176-1.095.105.145.305.158.553.158.326-.012.782-.06 1.103-.158.192.45.423.972.613 1.388 4.47-1.032 7.803-5.037 7.803-9.82 0-5.566-4.512-10.078-10.078-10.078zm1.791 5.646c-.42 0-.678.146-.795.332-.023.047.047.094.094.07.14-.075.357-.161.701-.156.328.006.516.09.67.159l.023.01c.041.017.088-.03.059-.065-.134-.18-.332-.35-.752-.35zm-5.078.198a1.24 1.24 0 0 0-.522.082c-.454.169-.67.526-.67.76 0 .051.112.057.141.011.081-.123.21-.31.617-.478.408-.17.73-.146.951-.094.047.012.083-.041.041-.07a.989.989 0 0 0-.558-.211zm5.434 1.423a.651.651 0 0 0-.655.647.652.652 0 0 0 1.307 0 .646.646 0 0 0-.652-.647zm.283.262h.008a.17.17 0 0 1 .17.17c0 .093-.077.17-.17.17a.17.17 0 0 1-.17-.17c0-.09.072-.165.162-.17zm-5.358.076a.752.752 0 0 0-.758.758c0 .42.338.758.758.758s.758-.337.758-.758a.756.756 0 0 0-.758-.758zm.328.303h.01c.112 0 .2.089.2.2 0 .11-.088.197-.2.197a.195.195 0 0 1-.197-.198c0-.107.082-.194.187-.199z" />
+    </svg>
+  )
+}
+
+/** Tavily — branching arrows mark (AI-optimized web search provider)
+ * Traced from Tavily's actual 32x32 favicon: one upward arrow with two
+ * branches (right and down-left) forking from the shaft midpoint. */
+export function TavilyLogo({ className }: LogoProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" aria-label="Tavily">
+      <rect x="1" y="1" width="22" height="22" rx="4.5" fill="#333333" />
+      <g fill="white">
+        {/* Main upward arrow: arrowhead + shaft */}
+        <path d="M10,4.5 L7,8.5 L8.8,8.5 L8.8,13 L11.2,13 L11.2,8.5 L13,8.5 Z" />
+        {/* Right branch arrow */}
+        <g transform="translate(12,13.5) rotate(90)">
+          <path d="M0,-4.5 L-2,0 L-0.8,0 L-0.8,3 L0.8,3 L0.8,0 L2,0 Z" />
+        </g>
+        {/* Down-left branch arrow */}
+        <g transform="translate(9.5,14.5) rotate(145)">
+          <path d="M0,-4.5 L-2,0 L-0.8,0 L-0.8,3 L0.8,3 L0.8,0 L2,0 Z" />
+        </g>
+      </g>
     </svg>
   )
 }
@@ -114,7 +167,7 @@ export function QwenLogo({ className }: LogoProps) {
 // 1. Create an SVG component above
 // 2. Add it here with a display name
 
-type ProviderKey = 'anthropic' | 'openai' | 'meta' | 'ollama' | 'google' | 'qwen' | 'deepseek'
+type ProviderKey = 'anthropic' | 'openai' | 'meta' | 'ollama' | 'google' | 'gemma' | 'qwen' | 'deepseek' | 'duckduckgo' | 'tavily'
 
 interface ProviderInfo {
   name: string
@@ -122,13 +175,16 @@ interface ProviderInfo {
 }
 
 const PROVIDER_REGISTRY: Record<ProviderKey, ProviderInfo> = {
-  anthropic: { name: 'Anthropic', Logo: AnthropicLogo },
-  openai:    { name: 'OpenAI',    Logo: OpenAILogo },
-  meta:      { name: 'Meta',      Logo: MetaLogo },
-  ollama:    { name: 'Ollama',    Logo: OllamaLogo },
-  google:    { name: 'Google',    Logo: GoogleLogo },
-  qwen:      { name: 'Qwen',      Logo: QwenLogo },
-  deepseek:  { name: 'DeepSeek',  Logo: DeepSeekLogo },
+  anthropic:  { name: 'Anthropic',  Logo: AnthropicLogo },
+  openai:     { name: 'OpenAI',     Logo: OpenAILogo },
+  meta:       { name: 'Meta',       Logo: MetaLogo },
+  ollama:     { name: 'Ollama',     Logo: OllamaLogo },
+  google:     { name: 'Google',     Logo: GoogleLogo },
+  gemma:      { name: 'Gemma',      Logo: GemmaLogo },
+  qwen:       { name: 'Qwen',       Logo: QwenLogo },
+  deepseek:   { name: 'DeepSeek',   Logo: DeepSeekLogo },
+  duckduckgo: { name: 'DuckDuckGo', Logo: DuckDuckGoLogo },
+  tavily:     { name: 'Tavily',     Logo: TavilyLogo },
 }
 
 // =============================================================================
@@ -157,10 +213,16 @@ const MODEL_PATTERNS: [string, ProviderKey][] = [
   ['llama',     'ollama'],
   ['codellama', 'ollama'],
 
-  // Google models (Gemma 3 runs locally as local-vision)
+  // Google Gemini (cloud)
   ['gemini',    'google'],
-  ['gemma',     'google'],
-  ['local-vision', 'google'],
+
+  // Gemma models (uses the Gemma sparkle logo, not the Google "G")
+  ['gemma',        'gemma'],
+  ['local-vision', 'gemma'],
+
+  // Web search providers
+  ['duckduckgo', 'duckduckgo'],
+  ['tavily',     'tavily'],
 
   // DeepSeek models (Lakeshore tier)
   ['deepseek',  'deepseek'],

@@ -222,6 +222,7 @@ async def create_streaming_response(
     judge_fallback_info: dict | None = None,
     routing_fallback_info: dict | None = None,
     judge_cost: float = 0.0,
+    web_search_sources: list[str] | None = None,
 ) -> AsyncGenerator[str, None]:
     """
     Create a streaming Server-Sent Events (SSE) response with metrics tracking and automatic fallback.
@@ -305,6 +306,10 @@ async def create_streaming_response(
     # Include judge fallback info if LLM judge failed
     if judge_fallback_info:
         metadata_event["stream_metadata"]["judge_fallback"] = judge_fallback_info
+
+    # Include web search source URLs so the frontend can display them
+    if web_search_sources:
+        metadata_event["stream_metadata"]["web_search_sources"] = web_search_sources
 
     # -------------------------------------------------------------------------
     # PRE-ROUTING FALLBACK vs RUNTIME FALLBACK

@@ -27,8 +27,11 @@ import {
   Unlock,
   Loader2,
   AlertTriangle,
+  Globe,
+  Eye,
+  EyeOff,
 } from 'lucide-react'
-import { ModelLogo } from '../icons/ProviderLogos'
+import { ModelLogo, DuckDuckGoLogo, TavilyLogo } from '../icons/ProviderLogos'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useChatStore } from '../../stores/chatStore'
 import { useHealthStore, getTierDisplayInfo } from '../../stores/healthStore'
@@ -194,6 +197,10 @@ export function SettingsPanel({ onExampleQuery }: SettingsPanelProps) {
   const setLocalModel = useSettingsStore((state) => state.setLocalModel)
   const setLakeshoreModel = useSettingsStore((state) => state.setLakeshoreModel)
   const setCloudProvider = useSettingsStore((state) => state.setCloudProvider)
+  const webSearchProvider = useSettingsStore((state) => state.webSearchProvider)
+  const setWebSearchProvider = useSettingsStore((state) => state.setWebSearchProvider)
+  const tavilyApiKey = useSettingsStore((state) => state.tavilyApiKey)
+  const setTavilyApiKey = useSettingsStore((state) => state.setTavilyApiKey)
 
   /**
    * Get messages for stats calculation
@@ -248,6 +255,7 @@ export function SettingsPanel({ onExampleQuery }: SettingsPanelProps) {
   const [lakeshoreOpen, setLakeshoreOpen] = useState(false)
   const [cloudOpen, setCloudOpen] = useState(false)
   const [advancedOpen, setAdvancedOpen] = useState(false)
+  const [showTavilyKey, setShowTavilyKey] = useState(false)
   const [statsOpen, setStatsOpen] = useState(true)
 
   /**
@@ -393,7 +401,7 @@ export function SettingsPanel({ onExampleQuery }: SettingsPanelProps) {
           onClick={() => setLocalOpen(!localOpen)}
           className="w-full flex items-center gap-2 px-3 py-2.5 text-sm hover:bg-muted/50 transition-colors"
         >
-          <Laptop className="w-4 h-4 flex-shrink-0 text-orange-500" />
+          <Laptop className="w-5 h-5 flex-shrink-0 text-orange-500" />
           <span className="font-medium">Local Models</span>
           <span className="text-xs text-muted-foreground ml-auto mr-2">
             {LOCAL_MODEL_CONFIG[localModel]?.label}
@@ -437,7 +445,7 @@ export function SettingsPanel({ onExampleQuery }: SettingsPanelProps) {
           onClick={() => setLakeshoreOpen(!lakeshoreOpen)}
           className="w-full flex items-center gap-2 px-3 py-2.5 text-sm hover:bg-muted/50 transition-colors"
         >
-          <Building2 className="w-4 h-4 flex-shrink-0 text-green-500" />
+          <Building2 className="w-5 h-5 flex-shrink-0 text-green-500" />
           <span className="font-medium">Lakeshore Models</span>
           <span className="text-xs text-muted-foreground ml-auto mr-2">
             {LAKESHORE_MODEL_CONFIG[lakeshoreModel]?.label ?? lakeshoreModel}
@@ -481,7 +489,7 @@ export function SettingsPanel({ onExampleQuery }: SettingsPanelProps) {
           onClick={() => setCloudOpen(!cloudOpen)}
           className="w-full flex items-center gap-2 px-3 py-2.5 text-sm hover:bg-muted/50 transition-colors"
         >
-          <Cloud className="w-4 h-4 flex-shrink-0 text-blue-500" />
+          <Cloud className="w-5 h-5 flex-shrink-0 text-blue-500" />
           <span className="font-medium">Cloud Models</span>
           <span className="text-xs text-muted-foreground ml-auto mr-2">
             {CLOUD_PROVIDER_CONFIG[cloudProvider]?.label}
@@ -602,7 +610,7 @@ export function SettingsPanel({ onExampleQuery }: SettingsPanelProps) {
           className="w-full flex items-center justify-between text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
         >
           <span className="flex items-center gap-2">
-            <BarChart3 className="w-4 h-4" />
+            <BarChart3 className="w-5 h-5" />
             Session Stats
           </span>
           {statsOpen ? (
@@ -734,6 +742,94 @@ export function SettingsPanel({ onExampleQuery }: SettingsPanelProps) {
                 )}
               </div>
             </div>
+
+            {/**
+             * Web Search Provider
+             */}
+            <div>
+              <label className="text-sm text-muted-foreground block mb-2 flex items-center gap-2">
+                <Globe className="w-5 h-5" />
+                Web Search Provider
+              </label>
+              <p className="text-xs text-muted-foreground mb-2">
+                When web search is enabled (globe icon in chat input), STREAM searches the internet
+                for your query and includes results in the AI's context.
+              </p>
+              <div className="space-y-1">
+                {/* DuckDuckGo option */}
+                <button
+                  onClick={() => setWebSearchProvider('duckduckgo')}
+                  className={`
+                    w-full flex items-center gap-2 px-3 py-2 rounded-lg text-left text-sm
+                    transition-colors
+                    ${webSearchProvider === 'duckduckgo'
+                      ? 'bg-primary/10 text-primary border border-primary/30'
+                      : 'hover:bg-muted text-foreground'
+                    }
+                  `}
+                >
+                  <DuckDuckGoLogo className="w-4 h-4 flex-shrink-0" />
+                  <div className="min-w-0">
+                    <div className="font-medium">DuckDuckGo</div>
+                    <div className="text-xs text-muted-foreground">
+                      Free, no API key needed
+                    </div>
+                  </div>
+                </button>
+
+                {/* Tavily option */}
+                <button
+                  onClick={() => setWebSearchProvider('tavily')}
+                  className={`
+                    w-full flex items-center gap-2 px-3 py-2 rounded-lg text-left text-sm
+                    transition-colors
+                    ${webSearchProvider === 'tavily'
+                      ? 'bg-primary/10 text-primary border border-primary/30'
+                      : 'hover:bg-muted text-foreground'
+                    }
+                  `}
+                >
+                  <TavilyLogo className="w-4 h-4 flex-shrink-0" />
+                  <div className="min-w-0">
+                    <div className="font-medium">Tavily</div>
+                    <div className="text-xs text-muted-foreground">
+                      AI-optimized, 1K free searches/month
+                    </div>
+                  </div>
+                </button>
+              </div>
+
+              {/* Tavily API Key input — only shown when Tavily is selected */}
+              {webSearchProvider === 'tavily' && (
+                <div className="mt-2">
+                  <label className="text-xs text-muted-foreground block mb-1">
+                    Tavily API Key
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showTavilyKey ? 'text' : 'password'}
+                      value={tavilyApiKey}
+                      onChange={(e) => setTavilyApiKey(e.target.value)}
+                      placeholder="tvly-..."
+                      className="w-full px-3 py-2 pr-10 text-sm rounded-lg border border-muted-foreground/30 bg-background focus:outline-none focus:ring-2 focus:ring-ring focus:border-primary"
+                    />
+                    <button
+                      onClick={() => setShowTavilyKey(!showTavilyKey)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      aria-label={showTavilyKey ? 'Hide API key' : 'Show API key'}
+                    >
+                      {showTavilyKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Get a free key at{' '}
+                    <a href="https://tavily.com" target="_blank" rel="noopener noreferrer" className="text-primary underline">
+                      tavily.com
+                    </a>
+                  </p>
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>
@@ -743,7 +839,7 @@ export function SettingsPanel({ onExampleQuery }: SettingsPanelProps) {
        */}
       <div className="border-t pt-3 mt-4">
         <h3 className="text-sm font-medium mb-2 flex items-center gap-2">
-          <Lightbulb className="w-4 h-4" />
+          <Lightbulb className="w-5 h-5" />
           Try These
         </h3>
         <div className="space-y-1">

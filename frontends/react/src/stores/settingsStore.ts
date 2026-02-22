@@ -19,7 +19,7 @@
 
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { Tier, JudgeStrategy, ChatSettings, CloudProvider, LocalModel, LakeshoreModel } from '../types'
+import type { Tier, JudgeStrategy, ChatSettings, CloudProvider, LocalModel, LakeshoreModel, WebSearchProvider } from '../types'
 
 /**
  * SettingsState - The shape of our settings store
@@ -33,6 +33,11 @@ interface SettingsState {
   localModel: LocalModel
   lakeshoreModel: LakeshoreModel
   cloudProvider: CloudProvider
+
+  // Web Search — internet connectivity for LLM queries
+  webSearch: boolean
+  webSearchProvider: WebSearchProvider
+  tavilyApiKey: string
 
   /**
    * Has the store been initialized with backend defaults?
@@ -48,6 +53,9 @@ interface SettingsState {
   setLocalModel: (model: LocalModel) => void
   setLakeshoreModel: (model: LakeshoreModel) => void
   setCloudProvider: (provider: CloudProvider) => void
+  setWebSearch: (enabled: boolean) => void
+  setWebSearchProvider: (provider: WebSearchProvider) => void
+  setTavilyApiKey: (key: string) => void
   getSettings: () => ChatSettings
 
   /**
@@ -94,6 +102,9 @@ export const useSettingsStore = create<SettingsState>()(
       localModel: 'local-llama',          // Default local model (3B)
       lakeshoreModel: 'lakeshore-qwen-1.5b',   // Default lakeshore model
       cloudProvider: 'cloud-claude',      // Default cloud provider
+      webSearch: false,                   // Web search off by default
+      webSearchProvider: 'duckduckgo',    // Free, no API key needed
+      tavilyApiKey: '',                   // User provides if they choose Tavily
       _initialized: false,
 
       // ============= Actions =============
@@ -109,6 +120,12 @@ export const useSettingsStore = create<SettingsState>()(
       setLakeshoreModel: (lakeshoreModel) => set({ lakeshoreModel }),
 
       setCloudProvider: (cloudProvider) => set({ cloudProvider }),
+
+      setWebSearch: (webSearch) => set({ webSearch }),
+
+      setWebSearchProvider: (webSearchProvider) => set({ webSearchProvider }),
+
+      setTavilyApiKey: (tavilyApiKey) => set({ tavilyApiKey }),
 
       setTheme: (theme) => {
         set({ theme })
@@ -135,6 +152,8 @@ export const useSettingsStore = create<SettingsState>()(
           localModel: state.localModel,
           lakeshoreModel: state.lakeshoreModel,
           cloudProvider: state.cloudProvider,
+          webSearch: state.webSearch,
+          webSearchProvider: state.webSearchProvider,
         }
       },
 
@@ -170,7 +189,7 @@ export const useSettingsStore = create<SettingsState>()(
       /**
        * Version for migrations - increment when storage format changes
        */
-      version: 6,
+      version: 7,
       /**
        * Migration: Runs automatically when storage version changes.
        * Each version upgrade fixes a specific issue with persisted state.
@@ -241,6 +260,18 @@ export const useSettingsStore = create<SettingsState>()(
           }
         }
 
+        if (version < 7) {
+          // v6 → v7: Web search support.
+          // Add web search fields with safe defaults for existing users.
+          console.log('[Settings] Migration v7: adding web search defaults')
+          return {
+            ...state,
+            webSearch: false,
+            webSearchProvider: 'duckduckgo',
+            tavilyApiKey: '',
+          }
+        }
+
         return state
       },
       /**
@@ -261,6 +292,10 @@ export const useSettingsStore = create<SettingsState>()(
         localModel: state.localModel,           // Persist per-tier model choices
         lakeshoreModel: state.lakeshoreModel,
         cloudProvider: state.cloudProvider,
+        // Web search preferences — persisted so users don't have to reconfigure
+        // webSearch toggle is NOT persisted (resets to off each session)
+        webSearchProvider: state.webSearchProvider,
+        tavilyApiKey: state.tavilyApiKey,
         _initialized: state._initialized,
       }),
     }

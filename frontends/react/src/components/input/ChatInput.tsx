@@ -1,28 +1,36 @@
 /**
- * ChatInput.tsx - Text Input with Image Upload for Sending Messages
- * ==================================================================
+ * ChatInput.tsx - Text Input with Image Upload and Web Search Toggle
+ * ===================================================================
  *
  * This component handles user input for the chat:
  * - Text area that grows with content
  * - Image upload button (pick from files)
  * - Camera capture button (take a photo on mobile)
+ * - Web search toggle (globe icon to enable internet search)
  * - Paste images from clipboard (Ctrl+V / Cmd+V)
  * - Image thumbnails shown ABOVE the input (not beside it)
  * - Send button that transforms to stop button during streaming
  * - Keyboard shortcuts (Enter to send, Shift+Enter for newline)
  *
  * LAYOUT (top to bottom):
- *   ┌──────────────────────────────────────┐
- *   │ [img1] [img2] [img3]  3 images       │  ← ImagePreviewStrip
- *   ├──────────────────────────────────────┤
- *   │ 📎 📷 │ Type your message...   │ ▶  │  ← Upload + Camera + textarea + send
- *   └──────────────────────────────────────┘
+ *   ┌──────────────────────────────────────────┐
+ *   │ [img1] [img2] [img3]  3 images           │  ← ImagePreviewStrip
+ *   ├──────────────────────────────────────────┤
+ *   │ 📎 📷 🌐 │ Type your message...   │ ▶  │  ← Upload + Camera + Globe + textarea + send
+ *   └──────────────────────────────────────────┘
+ *
+ * WEB SEARCH TOGGLE:
+ *   The globe icon toggles web search on/off. When active, it's highlighted
+ *   in blue and shows a small "Web" label. The backend will search the
+ *   internet for the user's query and inject results into the LLM context.
+ *   Provider configuration (DuckDuckGo vs Tavily) is in the settings panel.
  */
 
 import { useState, useRef, useEffect, useCallback, KeyboardEvent, ClipboardEvent } from 'react'
-import { Send, Square } from 'lucide-react'
+import { Send, Square, Globe } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { ImageUpload, ImagePreviewStrip, compressImage } from './ImageUpload'
+import { useSettingsStore } from '../../stores/settingsStore'
 
 interface ChatInputProps {
   /** Called when user sends a message (text + optional images) */
@@ -41,6 +49,8 @@ export function ChatInput({
   const [value, setValue] = useState('')
   const [images, setImages] = useState<string[]>([])
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const webSearch = useSettingsStore(state => state.webSearch)
+  const setWebSearch = useSettingsStore(state => state.setWebSearch)
 
   // Auto-resize textarea
   useEffect(() => {
@@ -117,13 +127,34 @@ export function ChatInput({
         {/* Image preview strip — shown ABOVE the input row when images are attached */}
         <ImagePreviewStrip images={images} onRemove={handleRemoveImage} />
 
-        {/* Input row: upload button + textarea + send/stop button */}
+        {/* Input row: upload + camera + globe + textarea + send/stop */}
         <div className="relative flex items-end gap-2">
           <ImageUpload
             images={images}
             onImagesChange={setImages}
             disabled={isStreaming}
           />
+
+          {/* Web search toggle — same p-2 / w-5 h-5 as upload & camera icons.
+             A small blue dot badge indicates when search is active. */}
+          <button
+            onClick={() => setWebSearch(!webSearch)}
+            disabled={isStreaming}
+            className={cn(
+              "relative p-2 rounded-xl transition-all",
+              webSearch
+                ? "text-blue-500 bg-blue-500/10 hover:bg-blue-500/20"
+                : "hover:bg-muted text-muted-foreground",
+              "disabled:opacity-50 disabled:cursor-not-allowed"
+            )}
+            aria-label={webSearch ? "Disable web search" : "Enable web search"}
+            title={webSearch ? "Web search enabled — click to disable" : "Enable web search"}
+          >
+            <Globe className="w-5 h-5" />
+            {webSearch && (
+              <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-blue-500 rounded-full" />
+            )}
+          </button>
 
           <textarea
             ref={textareaRef}

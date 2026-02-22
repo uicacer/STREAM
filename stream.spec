@@ -168,6 +168,17 @@ a = Analysis(
         "pydantic",
         "pydantic_core",
         "pydantic.deprecated.decorator",
+
+        # --- Web Search (Internet connectivity) ---
+        # duckduckgo-search uses dynamic imports for its backends.
+        # BeautifulSoup/lxml are used for HTML content extraction.
+        # Tavily is the optional premium search provider.
+        "duckduckgo_search",
+        "bs4",
+        "lxml",
+        "lxml.html",
+        "lxml.html.clean",
+        "tavily",
     ],
 
     # =====================================================================

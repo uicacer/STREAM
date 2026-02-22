@@ -82,6 +82,23 @@ export type LakeshoreModel =
 export type CloudProvider = 'cloud-claude' | 'cloud-gpt' | 'cloud-gpt-cheap'
 
 /**
+ * WebSearchProvider - Available web search providers
+ *
+ * When web search is enabled (the globe toggle in the chat input), STREAM
+ * searches the internet for the user's query before sending it to the LLM.
+ *
+ * - "duckduckgo" → Free, no API key needed, good privacy (default)
+ *                   Uses the duckduckgo-search Python library.
+ *                   Best for desktop mode and campus use.
+ *
+ * - "tavily"     → AI-optimized results, requires API key
+ *                   Returns pre-extracted content designed for LLMs.
+ *                   Free tier: 1,000 searches/month.
+ *                   Better quality results for complex research queries.
+ */
+export type WebSearchProvider = 'duckduckgo' | 'tavily'
+
+/**
  * CloudProviderInfo - Metadata about a cloud provider
  */
 export interface CloudProviderInfo {
@@ -135,4 +152,21 @@ export interface ChatSettings {
    * Users can switch providers if one is unavailable
    */
   cloudProvider?: CloudProvider
+
+  /**
+   * Whether web search is enabled for the current message.
+   *
+   * When true, the backend searches the internet for the user's query
+   * and injects results as context before sending to the LLM. This
+   * lets the LLM answer with current information from the web.
+   *
+   * Controlled by the globe toggle icon in the chat input area.
+   */
+  webSearch?: boolean
+
+  /**
+   * Which web search provider to use.
+   * Configured in the Advanced Settings section of the sidebar.
+   */
+  webSearchProvider?: WebSearchProvider
 }

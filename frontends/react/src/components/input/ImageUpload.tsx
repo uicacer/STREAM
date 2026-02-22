@@ -654,7 +654,7 @@ export function ImageUpload({ images, onImagesChange, disabled }: ImageUploadPro
           onClick={() => fileInputRef.current?.click()}
           disabled={disabled}
           className={cn(
-            "p-3 rounded-xl transition-all",
+            "p-2 rounded-xl transition-all",
             "hover:bg-muted text-muted-foreground",
             "disabled:opacity-50 disabled:cursor-not-allowed"
           )}
@@ -669,14 +669,14 @@ export function ImageUpload({ images, onImagesChange, disabled }: ImageUploadPro
           onClick={handleCameraClick}
           disabled={disabled}
           className={cn(
-            "p-2 -ml-1 rounded-xl transition-all",
+            "p-2 rounded-xl transition-all",
             "hover:bg-muted text-muted-foreground",
             "disabled:opacity-50 disabled:cursor-not-allowed"
           )}
           aria-label="Take a photo"
           title="Take a photo"
         >
-          <Camera className="w-4 h-4" />
+          <Camera className="w-5 h-5" />
         </button>
 
         {/* Hidden file input for uploading existing images */}

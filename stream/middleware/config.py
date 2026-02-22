@@ -114,6 +114,39 @@ GLOBUS_MAX_PAYLOAD_BYTES = 8 * 1024 * 1024  # 8 MB
 # images exceed this threshold and suggests Local or Cloud tiers instead.
 GLOBUS_MAX_IMAGE_BYTES = 6 * 1024 * 1024  # 6 MB
 
+# =============================================================================
+# WEB SEARCH (Internet Connectivity for LLM Queries)
+# =============================================================================
+# When enabled, STREAM searches the web for the user's query BEFORE sending
+# it to the LLM. Search results are injected as a system message so the LLM
+# can reference current information in its response.
+#
+# This is a "Retrieval-Augmented Generation" (RAG) approach using live web
+# search instead of a static vector database. It works with ALL models across
+# ALL tiers because it injects results as plain text context — no tool calling
+# or function calling support required from the model.
+#
+# Two providers are supported:
+#   - DuckDuckGo: Free, no API key, works out of the box (default)
+#   - Tavily: AI-optimized results, requires API key, better quality
+
+# How many search results to include in the context.
+# More results = more context for the LLM, but also more tokens consumed.
+# 5 results is a good balance: enough variety without overwhelming the context.
+WEB_SEARCH_MAX_RESULTS = 5
+
+# Maximum characters of extracted content to include per search result.
+# DuckDuckGo returns snippets (~200 chars), but URL fetching can return
+# entire pages. We truncate to avoid blowing the model's context window.
+# 4000 chars ≈ 1000 tokens, so 5 results × 4000 chars ≈ 5000 tokens.
+WEB_SEARCH_MAX_CONTENT_LENGTH = 4000
+
+# Timeout for web search and URL fetch operations (in seconds).
+# Web searches should be fast, but we need to account for slow networks,
+# rate limiting, and complex queries. 10 seconds is generous enough to
+# avoid timeout errors while not blocking the user for too long.
+WEB_SEARCH_TIMEOUT = 10
+
 USE_GLOBUS_COMPUTE = (
     os.getenv("USE_GLOBUS_COMPUTE", "true").lower() == "true"
 )  # Enable Globus Compute mode

@@ -40,6 +40,7 @@ from stream.middleware.core.tier_health import set_active_cloud_provider
 from stream.middleware.utils.context_window import check_context_limit
 from stream.middleware.utils.multimodal import extract_text_content, has_images
 from stream.middleware.utils.token_estimator import estimate_tokens
+from stream.middleware.utils.web_search import perform_web_search
 
 # Configure module logger
 logger = logging.getLogger(__name__)
@@ -164,6 +165,24 @@ class ChatCompletionRequest(BaseModel):
     cloud_provider: str | None = Field(
         default=None,
         description="Cloud provider to use when tier is 'cloud' (cloud-claude, cloud-gpt, cloud-gpt-cheap). Default: cloud-claude",
+    )
+
+    # Web search fields — enables internet connectivity for LLM queries.
+    # When web_search is True, the backend searches the web for the user's
+    # query and injects results as a system message before sending to the LLM.
+    web_search: bool = Field(
+        default=False,
+        description="Enable web search to augment LLM responses with current internet information",
+    )
+
+    web_search_provider: str | None = Field(
+        default="duckduckgo",
+        description="Web search provider: 'duckduckgo' (free, default) or 'tavily' (AI-optimized, requires API key)",
+    )
+
+    tavily_api_key: str | None = Field(
+        default=None,
+        description="API key for Tavily web search provider (only needed when web_search_provider is 'tavily')",
     )
 
 
@@ -291,6 +310,60 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
     # We convert messages to dicts first so has_images() can inspect them.
     messages_as_dicts = [msg.model_dump() for msg in request_body.messages]
     query_has_images = has_images(messages_as_dicts)
+
+    # =========================================================================
+    # STEP 2c: Web Search (Internet Connectivity)
+    # =========================================================================
+    # When the user enables web search (the globe toggle in the chat input),
+    # we search the internet for the user's query BEFORE sending it to the LLM.
+    # Search results are injected as a system message at the start of the
+    # conversation so the LLM can reference current information.
+    #
+    # WHY BEFORE COMPLEXITY ANALYSIS:
+    #   The web search results don't affect routing — complexity is judged
+    #   on the user's query alone, not the search context. We inject the
+    #   search results into messages_as_dicts which is what gets sent to
+    #   the LLM, not the complexity judge.
+    #
+    # This works with ALL models across ALL tiers because it's plain text
+    # context injection — no tool calling or function calling required.
+    web_search_sources: list[str] = []
+
+    if request_body.web_search:
+        logger.info(
+            f"[{correlation_id}] Web search enabled (provider: {request_body.web_search_provider})"
+        )
+        try:
+            search_context, web_search_sources = await perform_web_search(
+                query=user_query,
+                full_message_text=user_query,
+                provider=request_body.web_search_provider or "duckduckgo",
+                tavily_api_key=request_body.tavily_api_key,
+            )
+
+            if search_context:
+                # Prepend search results as a system message.
+                # System messages are invisible to the user but visible to the LLM.
+                # Placing it first gives it the highest attention in the context.
+                web_search_message = {
+                    "role": "system",
+                    "content": search_context,
+                }
+                messages_as_dicts = [web_search_message] + messages_as_dicts
+                logger.info(
+                    f"[{correlation_id}] Injected web search context "
+                    f"({len(web_search_sources)} sources, {len(search_context)} chars)"
+                )
+            else:
+                logger.info(f"[{correlation_id}] Web search returned no results")
+
+        except Exception as e:
+            # Web search failure should NOT block the chat request.
+            # The LLM can still answer without search results.
+            logger.warning(
+                f"[{correlation_id}] Web search failed (non-fatal): {e}",
+                extra={"correlation_id": correlation_id},
+            )
 
     # =========================================================================
     # STEP 3: Analyze Query Complexity
@@ -533,6 +606,7 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
                 judge_fallback_info=judge_fallback_info,
                 routing_fallback_info=routing_fallback_info,
                 judge_cost=judge_cost,
+                web_search_sources=web_search_sources or None,
             ),
             media_type="text/event-stream",  # SSE content type
             headers={

@@ -34,6 +34,7 @@
  */
 
 import type { Message, ChatSettings, StreamMetadata, ContentBlock } from '../types'
+import { useSettingsStore } from '../stores/settingsStore'
 
 /**
  * StreamCallbacks - Functions called as streaming events occur
@@ -159,6 +160,18 @@ export async function streamChat(
       local_model: settings.localModel,
       lakeshore_model: settings.lakeshoreModel,
       cloud_provider: settings.cloudProvider,
+
+      // Web search — when enabled, the backend searches the internet for
+      // the user's query and injects results as context before the LLM call.
+      web_search: settings.webSearch || false,
+      web_search_provider: settings.webSearchProvider || 'duckduckgo',
+      // Tavily API key is read from the store directly (not included
+      // in getSettings() to avoid exposing it in the settings object).
+      // Only sent when Tavily is the selected provider.
+      ...(settings.webSearch && settings.webSearchProvider === 'tavily'
+        ? { tavily_api_key: useSettingsStore.getState().tavilyApiKey }
+        : {}
+      ),
     }),
     signal: abortSignal,
   })
