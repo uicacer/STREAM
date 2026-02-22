@@ -38,6 +38,7 @@ interface SettingsState {
   webSearch: boolean
   webSearchProvider: WebSearchProvider
   tavilyApiKey: string
+  serperApiKey: string
 
   /**
    * Has the store been initialized with backend defaults?
@@ -56,6 +57,7 @@ interface SettingsState {
   setWebSearch: (enabled: boolean) => void
   setWebSearchProvider: (provider: WebSearchProvider) => void
   setTavilyApiKey: (key: string) => void
+  setSerperApiKey: (key: string) => void
   getSettings: () => ChatSettings
 
   /**
@@ -105,6 +107,7 @@ export const useSettingsStore = create<SettingsState>()(
       webSearch: false,                   // Web search off by default
       webSearchProvider: 'duckduckgo',    // Free, no API key needed
       tavilyApiKey: '',                   // User provides if they choose Tavily
+      serperApiKey: '',                   // User provides if they choose Google (via Serper.dev)
       _initialized: false,
 
       // ============= Actions =============
@@ -126,6 +129,8 @@ export const useSettingsStore = create<SettingsState>()(
       setWebSearchProvider: (webSearchProvider) => set({ webSearchProvider }),
 
       setTavilyApiKey: (tavilyApiKey) => set({ tavilyApiKey }),
+
+      setSerperApiKey: (serperApiKey) => set({ serperApiKey }),
 
       setTheme: (theme) => {
         set({ theme })
@@ -189,7 +194,7 @@ export const useSettingsStore = create<SettingsState>()(
       /**
        * Version for migrations - increment when storage format changes
        */
-      version: 7,
+      version: 8,
       /**
        * Migration: Runs automatically when storage version changes.
        * Each version upgrade fixes a specific issue with persisted state.
@@ -272,6 +277,17 @@ export const useSettingsStore = create<SettingsState>()(
           }
         }
 
+        if (version < 8) {
+          // v7 → v8: Google Search (via Serper.dev) support.
+          // Add Serper API key field, remove any old Google Custom Search fields.
+          console.log('[Settings] Migration v8: adding Serper API key for Google search')
+          const { googleApiKey: _removed1, googleCx: _removed2, ...rest } = state as Record<string, unknown>
+          return {
+            ...rest,
+            serperApiKey: '',
+          }
+        }
+
         return state
       },
       /**
@@ -296,6 +312,7 @@ export const useSettingsStore = create<SettingsState>()(
         // webSearch toggle is NOT persisted (resets to off each session)
         webSearchProvider: state.webSearchProvider,
         tavilyApiKey: state.tavilyApiKey,
+        serperApiKey: state.serperApiKey,
         _initialized: state._initialized,
       }),
     }

@@ -48,6 +48,50 @@ export interface ImageBlock {
 export type ContentBlock = TextBlock | ImageBlock
 
 /**
+ * DocumentContentPart - A single piece of extracted document content
+ *
+ * Documents are extracted into an ordered list of these parts, preserving
+ * the interleaving of text and images as they appear in the original document.
+ *
+ * For example, a PDF page might produce:
+ *   [TextPart("Figure 3 shows..."), ImagePart(chart), TextPart("Table 2:...")]
+ *
+ * This directly maps to the OpenAI multimodal content format, so extracted
+ * documents flow through the existing chat pipeline with zero changes.
+ */
+export interface DocumentContentPart {
+  type: 'text' | 'image'
+  text: string | null
+  image_base64: string | null
+  image_mime: string | null
+}
+
+/**
+ * DocumentAttachment - A document attached to a chat message
+ *
+ * When a user uploads a document (PDF, DOCX, etc.), the frontend sends it
+ * to the backend for extraction. The result is stored as a DocumentAttachment
+ * containing the structured content parts (text + images in document order).
+ *
+ * These are displayed as compact attachment chips in the chat input, with
+ * collapsible previews in chat messages — similar to Claude's file display.
+ */
+export interface DocumentAttachment {
+  id: string
+  filename: string
+  fileType: string
+  fileSize: number
+  contentParts: DocumentContentPart[]
+  textPreview: string
+  totalTextLength: number
+  imageCount: number
+  pageCount: number
+  warnings: string[]
+  status: 'uploading' | 'ready' | 'error'
+  error?: string
+}
+
+/**
  * Message - A single chat message (user or assistant)
  *
  * This represents one message in the conversation, whether it's
@@ -84,6 +128,16 @@ export interface Message {
    * The frontend compresses images before storing (max 1024px, JPEG 85%).
    */
   images?: string[]
+
+  /**
+   * Optional: Documents attached to this message.
+   *
+   * Each document has been extracted on the backend into structured
+   * content parts (text + images). When sending to the API, these
+   * parts are assembled into the OpenAI multimodal content format
+   * alongside any pasted images and the user's text.
+   */
+  documents?: DocumentAttachment[]
 
   /**
    * Optional: The "thinking" process for reasoning models

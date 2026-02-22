@@ -177,12 +177,17 @@ class ChatCompletionRequest(BaseModel):
 
     web_search_provider: str | None = Field(
         default="duckduckgo",
-        description="Web search provider: 'duckduckgo' (free, default) or 'tavily' (AI-optimized, requires API key)",
+        description="Web search provider: 'duckduckgo' (free), 'tavily' (AI-optimized), or 'google' (Google Search)",
     )
 
     tavily_api_key: str | None = Field(
         default=None,
         description="API key for Tavily web search provider (only needed when web_search_provider is 'tavily')",
+    )
+
+    serper_api_key: str | None = Field(
+        default=None,
+        description="Serper.dev API key for Google search (only needed when web_search_provider is 'google')",
     )
 
 
@@ -339,6 +344,7 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
                 full_message_text=user_query,
                 provider=request_body.web_search_provider or "duckduckgo",
                 tavily_api_key=request_body.tavily_api_key,
+                serper_api_key=request_body.serper_api_key,
             )
 
             if search_context:

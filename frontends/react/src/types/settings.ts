@@ -95,8 +95,13 @@ export type CloudProvider = 'cloud-claude' | 'cloud-gpt' | 'cloud-gpt-cheap'
  *                   Returns pre-extracted content designed for LLMs.
  *                   Free tier: 1,000 searches/month.
  *                   Better quality results for complex research queries.
+ *
+ * - "google"     → Google Search (via Serper.dev), the highest quality results
+ *                   Returns real Google search results through Serper's API.
+ *                   Free: 2,500 queries. Paid: $50 for 50K ($1/1K queries).
+ *                   Requires a Serper.dev API key (no Search Engine ID needed).
  */
-export type WebSearchProvider = 'duckduckgo' | 'tavily'
+export type WebSearchProvider = 'duckduckgo' | 'tavily' | 'google'
 
 /**
  * CloudProviderInfo - Metadata about a cloud provider

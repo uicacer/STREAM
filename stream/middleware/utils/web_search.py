@@ -307,6 +307,76 @@ async def _search_tavily(query: str, api_key: str) -> list[SearchResult]:
 
 
 # =============================================================================
+# GOOGLE SEARCH (via Serper.dev)
+# =============================================================================
+
+
+async def _search_google(query: str, api_key: str) -> list[SearchResult]:
+    """Search Google via Serper.dev — real-time Google search results API.
+
+    Serper.dev provides actual Google search results through a simple REST API.
+    Unlike Google's deprecated Programmable Search Engine (which only searches
+    specific sites), Serper searches the entire web using Google's index.
+
+    SETUP:
+      1. Sign up at https://serper.dev (no credit card required)
+      2. Copy your API key from the dashboard
+      That's it — just one API key, no search engine ID needed.
+
+    PRICING (as of 2026):
+      - Free tier: 2,500 queries (one-time, no expiration)
+      - Starter: $50 for 50,000 queries ($1/1K), valid 6 months
+      - See: https://serper.dev
+
+    Args:
+        query: The search query string.
+        api_key: Serper.dev API key.
+
+    Returns:
+        List of SearchResult objects (up to WEB_SEARCH_MAX_RESULTS).
+    """
+    if not api_key:
+        logger.warning("[WebSearch] Serper API key not provided, falling back to DuckDuckGo")
+        return await _search_duckduckgo(query)
+
+    try:
+        async with httpx.AsyncClient(timeout=WEB_SEARCH_TIMEOUT) as client:
+            response = await client.post(
+                "https://google.serper.dev/search",
+                headers={
+                    "X-API-KEY": api_key,
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "q": query,
+                    "num": WEB_SEARCH_MAX_RESULTS,
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
+
+        results: list[SearchResult] = []
+        for item in data.get("organic", [])[:WEB_SEARCH_MAX_RESULTS]:
+            results.append(
+                SearchResult(
+                    title=item.get("title", ""),
+                    url=item.get("link", ""),
+                    content=item.get("snippet", ""),
+                )
+            )
+        return results
+
+    except httpx.HTTPStatusError as e:
+        logger.warning(f"[WebSearch] Serper API error: {e.response.status_code}")
+        return await _search_duckduckgo(query)
+    except Exception as e:
+        logger.warning(
+            f"[WebSearch] Google search (Serper) failed: {e}. Falling back to DuckDuckGo."
+        )
+        return await _search_duckduckgo(query)
+
+
+# =============================================================================
 # SEARCH DISPATCHER
 # =============================================================================
 
@@ -315,16 +385,18 @@ async def search_web(
     query: str,
     provider: str = "duckduckgo",
     tavily_api_key: str | None = None,
+    serper_api_key: str | None = None,
 ) -> list[SearchResult]:
     """Search the web using the specified provider.
 
     This is the main entry point for web search. It dispatches to the
-    appropriate provider and handles fallback from Tavily to DuckDuckGo.
+    appropriate provider and handles fallback to DuckDuckGo.
 
     Args:
         query: The search query string.
-        provider: "duckduckgo" or "tavily".
+        provider: "duckduckgo", "tavily", or "google".
         tavily_api_key: API key for Tavily (required if provider is "tavily").
+        serper_api_key: Serper.dev API key (required if provider is "google").
 
     Returns:
         List of SearchResult objects.
@@ -336,6 +408,9 @@ async def search_web(
 
     if provider == "tavily" and tavily_api_key:
         return await _search_tavily(query, tavily_api_key)
+
+    if provider == "google" and serper_api_key:
+        return await _search_google(query, serper_api_key)
 
     return await _search_duckduckgo(query)
 
@@ -420,6 +495,7 @@ async def perform_web_search(
     full_message_text: str | None = None,
     provider: str = "duckduckgo",
     tavily_api_key: str | None = None,
+    serper_api_key: str | None = None,
 ) -> tuple[str | None, list[str]]:
     """Perform a complete web search operation: search + URL fetch + format.
 
@@ -433,8 +509,9 @@ async def perform_web_search(
         query: The user's query text (used as the search query).
         full_message_text: The full text of the user's message (for URL detection).
             If None, uses query.
-        provider: Search provider ("duckduckgo" or "tavily").
+        provider: Search provider ("duckduckgo", "tavily", or "google").
         tavily_api_key: API key for Tavily (if using Tavily provider).
+        serper_api_key: Serper.dev API key (if using Google provider).
 
     Returns:
         Tuple of:
@@ -456,7 +533,7 @@ async def perform_web_search(
                 source_urls.append(url)
 
     # Step 2: Search the web
-    search_results = await search_web(query, provider, tavily_api_key)
+    search_results = await search_web(query, provider, tavily_api_key, serper_api_key)
     for result in search_results:
         if result.url:
             source_urls.append(result.url)

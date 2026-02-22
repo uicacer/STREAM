@@ -333,6 +333,102 @@ class TestTavilySearch:
 
 
 # =============================================================================
+# GOOGLE SEARCH (SERPER.DEV) TESTS
+# =============================================================================
+
+
+class TestGoogleSearch:
+    """Tests for the Google Search provider (via Serper.dev)."""
+
+    @pytest.mark.asyncio
+    async def test_google_returns_results(self):
+        """Serper.dev search should return SearchResult objects from Google."""
+        mock_json = {
+            "organic": [
+                {
+                    "title": "Google Result",
+                    "link": "https://example.com/result",
+                    "snippet": "A Google result",
+                },
+            ]
+        }
+        mock_response = MagicMock()
+        mock_response.json.return_value = mock_json
+        mock_response.raise_for_status = MagicMock()
+
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client.post.return_value = mock_response
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client_class.return_value = mock_client
+
+            results = await search_web(
+                "test query",
+                provider="google",
+                serper_api_key="test-serper-key",
+            )
+
+        assert len(results) == 1
+        assert results[0].title == "Google Result"
+        assert results[0].url == "https://example.com/result"
+        assert results[0].content == "A Google result"
+
+    @pytest.mark.asyncio
+    async def test_google_without_key_falls_back_to_duckduckgo(self):
+        """Google without Serper API key should fall back to DuckDuckGo."""
+        mock_results = [
+            {"title": "DDG Fallback", "href": "https://ddg.com", "body": "From DuckDuckGo"},
+        ]
+
+        with patch("duckduckgo_search.DDGS") as mock_ddgs_class:
+            mock_ddgs = MagicMock()
+            mock_ddgs.text.return_value = mock_results
+            mock_ddgs.__enter__ = MagicMock(return_value=mock_ddgs)
+            mock_ddgs.__exit__ = MagicMock(return_value=False)
+            mock_ddgs_class.return_value = mock_ddgs
+
+            results = await search_web(
+                "test",
+                provider="google",
+                serper_api_key=None,
+            )
+
+        assert len(results) == 1
+        assert results[0].title == "DDG Fallback"
+
+    @pytest.mark.asyncio
+    async def test_google_error_falls_back_to_duckduckgo(self):
+        """Serper API errors should fall back to DuckDuckGo."""
+        mock_results = [
+            {"title": "DDG Fallback", "href": "https://ddg.com", "body": "From DuckDuckGo"},
+        ]
+
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client.post.side_effect = Exception("API quota exceeded")
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client_class.return_value = mock_client
+
+            with patch("duckduckgo_search.DDGS") as mock_ddgs_class:
+                mock_ddgs = MagicMock()
+                mock_ddgs.text.return_value = mock_results
+                mock_ddgs.__enter__ = MagicMock(return_value=mock_ddgs)
+                mock_ddgs.__exit__ = MagicMock(return_value=False)
+                mock_ddgs_class.return_value = mock_ddgs
+
+                results = await search_web(
+                    "test",
+                    provider="google",
+                    serper_api_key="bad-key",
+                )
+
+        assert len(results) == 1
+        assert results[0].title == "DDG Fallback"
+
+
+# =============================================================================
 # RESULT FORMATTING TESTS
 # =============================================================================
 
@@ -355,7 +451,7 @@ class TestFormatSearchContext:
         assert "Content one" in context
         assert "2. Title Two" in context
         assert "[End of Web Search Results]" in context
-        assert "Cite sources" in context
+        assert "citing sources" in context
 
     def test_formats_fetched_urls(self):
         """Fetched URL content should appear before search results."""
@@ -478,7 +574,7 @@ class TestChatCompletionRequestWebSearch:
     """Verify that the ChatCompletionRequest model accepts web search fields."""
 
     def test_web_search_fields_have_defaults(self):
-        """web_search, web_search_provider, tavily_api_key should have safe defaults."""
+        """web_search, web_search_provider, and API keys should have safe defaults."""
         from stream.middleware.routes.chat import ChatCompletionRequest
 
         req = ChatCompletionRequest(
@@ -487,9 +583,10 @@ class TestChatCompletionRequestWebSearch:
         assert req.web_search is False
         assert req.web_search_provider == "duckduckgo"
         assert req.tavily_api_key is None
+        assert req.serper_api_key is None
 
-    def test_web_search_enabled(self):
-        """All web search fields should be settable."""
+    def test_web_search_tavily_enabled(self):
+        """Tavily web search fields should be settable."""
         from stream.middleware.routes.chat import ChatCompletionRequest
 
         req = ChatCompletionRequest(
@@ -501,6 +598,20 @@ class TestChatCompletionRequestWebSearch:
         assert req.web_search is True
         assert req.web_search_provider == "tavily"
         assert req.tavily_api_key == "tvly-test-key"
+
+    def test_web_search_google_enabled(self):
+        """Google (Serper) web search fields should be settable."""
+        from stream.middleware.routes.chat import ChatCompletionRequest
+
+        req = ChatCompletionRequest(
+            messages=[{"role": "user", "content": "Latest AI trends"}],
+            web_search=True,
+            web_search_provider="google",
+            serper_api_key="test-serper-key",
+        )
+        assert req.web_search is True
+        assert req.web_search_provider == "google"
+        assert req.serper_api_key == "test-serper-key"
 
 
 # =============================================================================

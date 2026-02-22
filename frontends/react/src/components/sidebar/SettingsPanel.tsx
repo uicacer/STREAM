@@ -30,8 +30,10 @@ import {
   Globe,
   Eye,
   EyeOff,
+  Thermometer,
+  Scale,
 } from 'lucide-react'
-import { ModelLogo, DuckDuckGoLogo, TavilyLogo } from '../icons/ProviderLogos'
+import { ModelLogo, DuckDuckGoLogo, TavilyLogo, GoogleLogo } from '../icons/ProviderLogos'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useChatStore } from '../../stores/chatStore'
 import { useHealthStore, getTierDisplayInfo } from '../../stores/healthStore'
@@ -120,7 +122,7 @@ const LOCAL_MODEL_CONFIG: Record<LocalModel, { label: string; description: strin
   },
   'local-vision': {
     label: 'Gemma 3 4B',
-    description: 'Vision + Text (handles images)',
+    description: 'Text + Vision (handles images)',
   },
 }
 
@@ -142,7 +144,7 @@ const LAKESHORE_MODEL_CONFIG: Record<LakeshoreModel, { label: string; descriptio
   },
   'lakeshore-qwen-vl-72b': {
     label: 'Qwen 2.5 VL 72B',
-    description: 'Vision + Text multimodal (AWQ)',
+    description: 'Text + Vision multimodal (AWQ)',
   },
   'lakeshore-qwen-32b': {
     label: 'Qwen 2.5 32B',
@@ -201,6 +203,8 @@ export function SettingsPanel({ onExampleQuery }: SettingsPanelProps) {
   const setWebSearchProvider = useSettingsStore((state) => state.setWebSearchProvider)
   const tavilyApiKey = useSettingsStore((state) => state.tavilyApiKey)
   const setTavilyApiKey = useSettingsStore((state) => state.setTavilyApiKey)
+  const serperApiKey = useSettingsStore((state) => state.serperApiKey)
+  const setSerperApiKey = useSettingsStore((state) => state.setSerperApiKey)
 
   /**
    * Get messages for stats calculation
@@ -256,6 +260,7 @@ export function SettingsPanel({ onExampleQuery }: SettingsPanelProps) {
   const [cloudOpen, setCloudOpen] = useState(false)
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [showTavilyKey, setShowTavilyKey] = useState(false)
+  const [showSerperKey, setShowSerperKey] = useState(false)
   const [statsOpen, setStatsOpen] = useState(true)
 
   /**
@@ -676,9 +681,13 @@ export function SettingsPanel({ onExampleQuery }: SettingsPanelProps) {
              * Temperature Slider
              */}
             <div>
-              <label className="text-sm text-muted-foreground block mb-1">
+              <label className="text-sm text-muted-foreground block mb-1 flex items-center gap-2">
+                <Thermometer className="w-4 h-4" />
                 Temperature: {temperature.toFixed(1)}
               </label>
+              <p className="text-xs text-muted-foreground mb-2">
+                Controls how creative or focused the AI responses are. Lower values give more predictable answers.
+              </p>
               <input
                 type="range"
                 min="0"
@@ -703,10 +712,14 @@ export function SettingsPanel({ onExampleQuery }: SettingsPanelProps) {
             {/**
              * Judge Strategy (only enabled in Auto mode)
              */}
-            <div>
-              <label className="text-sm text-muted-foreground block mb-2">
+            <div className="border-t border-border/50 pt-4">
+              <label className="text-sm text-muted-foreground block mb-1 flex items-center gap-2">
+                <Scale className="w-4 h-4" />
                 Complexity Judge {tier !== 'auto' && '(Auto mode only)'}
               </label>
+              <p className="text-xs text-muted-foreground mb-2">
+                In Auto mode, this model classifies your query's complexity to decide which tier handles it.
+              </p>
               <div className="space-y-1">
                 {(Object.entries(JUDGE_CONFIG) as [JudgeStrategy, typeof JUDGE_CONFIG['ollama-3b']][]).map(
                   ([strategyKey, config]) => {
@@ -746,9 +759,9 @@ export function SettingsPanel({ onExampleQuery }: SettingsPanelProps) {
             {/**
              * Web Search Provider
              */}
-            <div>
+            <div className="border-t border-border/50 pt-4">
               <label className="text-sm text-muted-foreground block mb-2 flex items-center gap-2">
-                <Globe className="w-5 h-5" />
+                <Globe className="w-4 h-4" />
                 Web Search Provider
               </label>
               <p className="text-xs text-muted-foreground mb-2">
@@ -772,7 +785,7 @@ export function SettingsPanel({ onExampleQuery }: SettingsPanelProps) {
                   <div className="min-w-0">
                     <div className="font-medium">DuckDuckGo</div>
                     <div className="text-xs text-muted-foreground">
-                      Free, no API key needed
+                      Free · No API key · Privacy-focused
                     </div>
                   </div>
                 </button>
@@ -793,42 +806,100 @@ export function SettingsPanel({ onExampleQuery }: SettingsPanelProps) {
                   <div className="min-w-0">
                     <div className="font-medium">Tavily</div>
                     <div className="text-xs text-muted-foreground">
-                      AI-optimized, 1K free searches/month
+                      AI-optimized · 1K free/mo · API key required
                     </div>
                   </div>
                 </button>
-              </div>
 
-              {/* Tavily API Key input — only shown when Tavily is selected */}
-              {webSearchProvider === 'tavily' && (
-                <div className="mt-2">
-                  <label className="text-xs text-muted-foreground block mb-1">
-                    Tavily API Key
-                  </label>
-                  <div className="relative">
-                    <input
-                      type={showTavilyKey ? 'text' : 'password'}
-                      value={tavilyApiKey}
-                      onChange={(e) => setTavilyApiKey(e.target.value)}
-                      placeholder="tvly-..."
-                      className="w-full px-3 py-2 pr-10 text-sm rounded-lg border border-muted-foreground/30 bg-background focus:outline-none focus:ring-2 focus:ring-ring focus:border-primary"
-                    />
-                    <button
-                      onClick={() => setShowTavilyKey(!showTavilyKey)}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                      aria-label={showTavilyKey ? 'Hide API key' : 'Show API key'}
-                    >
-                      {showTavilyKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
+                {/* Tavily config — appears directly below the Tavily button */}
+                {webSearchProvider === 'tavily' && (
+                  <div className="ml-6 mt-1 mb-2">
+                    <label className="text-xs text-muted-foreground block mb-1">
+                      API Key
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showTavilyKey ? 'text' : 'password'}
+                        value={tavilyApiKey}
+                        onChange={(e) => setTavilyApiKey(e.target.value)}
+                        placeholder="tvly-..."
+                        className="w-full px-3 py-1.5 pr-10 text-xs rounded-lg border border-muted-foreground/30 bg-background focus:outline-none focus:ring-2 focus:ring-ring focus:border-primary"
+                      />
+                      <button
+                        onClick={() => setShowTavilyKey(!showTavilyKey)}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                        aria-label={showTavilyKey ? 'Hide API key' : 'Show API key'}
+                      >
+                        {showTavilyKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Get a free key at{' '}
+                      <a href="https://tavily.com" target="_blank" rel="noopener noreferrer" className="text-primary underline">
+                        tavily.com
+                      </a>
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Free: 1,000 credits/month · Paid: from $30/mo for 4,000 credits
+                    </p>
                   </div>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Get a free key at{' '}
-                    <a href="https://tavily.com" target="_blank" rel="noopener noreferrer" className="text-primary underline">
-                      tavily.com
-                    </a>
-                  </p>
-                </div>
-              )}
+                )}
+
+                {/* Google Search option */}
+                <button
+                  onClick={() => setWebSearchProvider('google')}
+                  className={`
+                    w-full flex items-center gap-2 px-3 py-2 rounded-lg text-left text-sm
+                    transition-colors
+                    ${webSearchProvider === 'google'
+                      ? 'bg-primary/10 text-primary border border-primary/30'
+                      : 'hover:bg-muted text-foreground'
+                    }
+                  `}
+                >
+                  <GoogleLogo className="w-4 h-4 flex-shrink-0" />
+                  <div className="min-w-0">
+                    <div className="font-medium">Google Search <span className="font-normal text-muted-foreground">via Serper</span></div>
+                    <div className="text-xs text-muted-foreground">
+                      Google results · 2,500 free queries · API key required
+                    </div>
+                  </div>
+                </button>
+
+                {/* Google (Serper) config — appears directly below the Google button */}
+                {webSearchProvider === 'google' && (
+                  <div className="ml-6 mt-1 mb-2">
+                    <label className="text-xs text-muted-foreground block mb-1">
+                      API Key
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showSerperKey ? 'text' : 'password'}
+                        value={serperApiKey}
+                        onChange={(e) => setSerperApiKey(e.target.value)}
+                        placeholder="serper-api-key..."
+                        className="w-full px-3 py-1.5 pr-10 text-xs rounded-lg border border-muted-foreground/30 bg-background focus:outline-none focus:ring-2 focus:ring-ring focus:border-primary"
+                      />
+                      <button
+                        onClick={() => setShowSerperKey(!showSerperKey)}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                        aria-label={showSerperKey ? 'Hide API key' : 'Show API key'}
+                      >
+                        {showSerperKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Get a free key at{' '}
+                      <a href="https://serper.dev" target="_blank" rel="noopener noreferrer" className="text-primary underline">
+                        serper.dev
+                      </a>
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Free: 2,500 queries (one-time) · Paid: from $50 for 50,000 queries
+                    </p>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         )}
@@ -837,11 +908,14 @@ export function SettingsPanel({ onExampleQuery }: SettingsPanelProps) {
       {/**
        * Example Queries
        */}
-      <div className="border-t pt-3 mt-4">
-        <h3 className="text-sm font-medium mb-2 flex items-center gap-2">
+      <div className="border-t border-border/50 pt-4 mt-6">
+        <h3 className="text-sm font-medium mb-1 flex items-center gap-2 text-muted-foreground">
           <Lightbulb className="w-5 h-5" />
           Try These
         </h3>
+        <p className="text-xs text-muted-foreground mb-2">
+          Quick examples to get started
+        </p>
         <div className="space-y-1">
           {EXAMPLE_QUERIES.map((query) => (
             <button

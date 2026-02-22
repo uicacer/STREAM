@@ -313,7 +313,7 @@ export function getCameraStrategy(): 'native-camera' | 'webcam-modal' | 'file-pi
 //   apps can't use the camera). We stop all tracks in both the cleanup
 //   effect and the handleClose function.
 
-function CameraModal({
+export function CameraModal({
   onCapture,
   onClose,
 }: {
@@ -648,7 +648,7 @@ export function ImageUpload({ images, onImagesChange, disabled }: ImageUploadPro
 
   return (
     <>
-      <div className="flex items-center">
+      <div className="flex items-center gap-1">
         {/* Upload existing image */}
         <button
           onClick={() => fileInputRef.current?.click()}

@@ -167,7 +167,7 @@ export function QwenLogo({ className }: LogoProps) {
 // 1. Create an SVG component above
 // 2. Add it here with a display name
 
-type ProviderKey = 'anthropic' | 'openai' | 'meta' | 'ollama' | 'google' | 'gemma' | 'qwen' | 'deepseek' | 'duckduckgo' | 'tavily'
+type ProviderKey = 'anthropic' | 'openai' | 'meta' | 'ollama' | 'google' | 'gemma' | 'qwen' | 'deepseek' | 'duckduckgo' | 'tavily' | 'googlesearch'
 
 interface ProviderInfo {
   name: string
@@ -183,8 +183,9 @@ const PROVIDER_REGISTRY: Record<ProviderKey, ProviderInfo> = {
   gemma:      { name: 'Gemma',      Logo: GemmaLogo },
   qwen:       { name: 'Qwen',       Logo: QwenLogo },
   deepseek:   { name: 'DeepSeek',   Logo: DeepSeekLogo },
-  duckduckgo: { name: 'DuckDuckGo', Logo: DuckDuckGoLogo },
-  tavily:     { name: 'Tavily',     Logo: TavilyLogo },
+  duckduckgo:   { name: 'DuckDuckGo',     Logo: DuckDuckGoLogo },
+  tavily:       { name: 'Tavily',         Logo: TavilyLogo },
+  googlesearch: { name: 'Google Search',  Logo: GoogleLogo },
 }
 
 // =============================================================================

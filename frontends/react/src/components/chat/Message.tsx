@@ -22,11 +22,12 @@ import ReactMarkdown from 'react-markdown'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import 'katex/dist/katex.min.css'
-import { Copy, Check, Laptop, Building2, Cloud, Clock, AlertTriangle } from 'lucide-react'
+import { Copy, Check, Laptop, Building2, Cloud, Clock, AlertTriangle, FileText, ChevronDown, ChevronRight } from 'lucide-react'
 import { ModelLogo } from '../icons/ProviderLogos'
 import { cn } from '../../lib/utils'
 import { ThinkingBlock } from './ThinkingBlock'
-import type { Message as MessageType } from '../../types'
+import { formatFileSize } from '../../api/documents'
+import type { Message as MessageType, DocumentAttachment } from '../../types'
 
 /**
  * Tier configuration for display with colors
@@ -78,7 +79,7 @@ export function Message({ message, isStreaming = false }: MessageProps) {
    * Format model name for display
    */
   const formatModelName = (model: string): string => {
-    if (model === 'local-vision') return 'Gemma 3 4B (Vision)'
+    if (model === 'local-vision') return 'Gemma 3 4B (Text + Vision)'
     if (model.includes('llama')) return 'Llama 3.2 3B'
     if (model.includes('claude')) return 'Claude Sonnet 4'
     if (model === 'cloud-gpt-cheap' || model.includes('4o-mini')) return 'GPT-4o Mini'
@@ -126,6 +127,15 @@ export function Message({ message, isStreaming = false }: MessageProps) {
             thinking={message.thinking}
             isStreaming={isStreaming}
           />
+        )}
+
+        {/* Document attachment previews (collapsible, like Claude's file display) */}
+        {isUser && message.documents && message.documents.length > 0 && (
+          <div className="flex flex-col gap-1.5 mb-2">
+            {message.documents.map((doc) => (
+              <CollapsibleDocumentPreview key={doc.id} document={doc} isUserMessage />
+            ))}
+          </div>
         )}
 
         {/* Image thumbnails for user messages with images */}
@@ -267,6 +277,88 @@ export function Message({ message, isStreaming = false }: MessageProps) {
             <span className="font-medium">Tier Fallback:</span>{' '}
             {message.metadata.original_tier.charAt(0).toUpperCase() + message.metadata.original_tier.slice(1)} was unavailable, automatically switched to {message.metadata.tier.charAt(0).toUpperCase() + message.metadata.tier.slice(1)}.
           </span>
+        </div>
+      )}
+    </div>
+  )
+}
+
+
+// =============================================================================
+// CollapsibleDocumentPreview — Compact document display in chat messages
+// =============================================================================
+
+/**
+ * CollapsibleDocumentPreview shows an attached document as a compact chip
+ * that can be expanded to reveal a text preview, similar to Claude's file
+ * attachment display.
+ *
+ * Collapsed state: [📄 report.pdf — 12 pages · 3 images · 15.2K chars]
+ * Expanded state:  Shows first ~500 characters of extracted text content.
+ *
+ * This keeps the chat clean while allowing users to verify what was extracted.
+ */
+function CollapsibleDocumentPreview({
+  document: doc,
+  isUserMessage = false,
+}: {
+  document: DocumentAttachment
+  isUserMessage?: boolean
+}) {
+  const [isExpanded, setIsExpanded] = useState(false)
+
+  return (
+    <div
+      className={cn(
+        "rounded-lg border transition-colors text-sm",
+        isUserMessage
+          ? "border-white/20 bg-white/10"
+          : "border-border bg-muted/50"
+      )}
+    >
+      {/* Collapsed header — always visible */}
+      <button
+        onClick={() => setIsExpanded(!isExpanded)}
+        className="flex items-center gap-2 w-full px-3 py-2 text-left hover:bg-black/5 dark:hover:bg-white/5 rounded-lg transition-colors"
+      >
+        {isExpanded
+          ? <ChevronDown className="w-3.5 h-3.5 flex-shrink-0 opacity-60" />
+          : <ChevronRight className="w-3.5 h-3.5 flex-shrink-0 opacity-60" />
+        }
+        <FileText className="w-4 h-4 flex-shrink-0 opacity-70" />
+        <span className="font-medium truncate">{doc.filename}</span>
+        <span className="text-xs opacity-60 flex-shrink-0">
+          {formatFileSize(doc.fileSize)}
+          {doc.pageCount > 0 && ` · ${doc.pageCount} pages`}
+          {doc.imageCount > 0 && ` · ${doc.imageCount} images`}
+          {` · ${(doc.totalTextLength / 1000).toFixed(1)}K chars`}
+        </span>
+      </button>
+
+      {/* Expanded preview — shows first ~500 chars of extracted text */}
+      {isExpanded && (
+        <div className={cn(
+          "px-3 pb-3 border-t",
+          isUserMessage ? "border-white/10" : "border-border"
+        )}>
+          <pre className="mt-2 text-xs whitespace-pre-wrap break-words opacity-80 max-h-48 overflow-y-auto font-mono leading-relaxed">
+            {doc.textPreview || "(no text extracted)"}
+            {doc.totalTextLength > 500 && (
+              <span className="text-muted-foreground italic">
+                {`\n\n... ${(doc.totalTextLength - 500).toLocaleString()} more characters`}
+              </span>
+            )}
+          </pre>
+          {doc.warnings.length > 0 && (
+            <div className="mt-2 flex flex-col gap-1">
+              {doc.warnings.map((warning, i) => (
+                <div key={i} className="flex items-start gap-1.5 text-xs text-yellow-600 dark:text-yellow-400">
+                  <AlertTriangle className="w-3 h-3 mt-0.5 flex-shrink-0" />
+                  <span>{warning}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>

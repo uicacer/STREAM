@@ -12,7 +12,7 @@ This feature works across **all three tiers** (Local, Lakeshore, Cloud) because 
 |---|---|
 | **Default state** | Off (user must enable via globe toggle) |
 | **Default provider** | DuckDuckGo (free, no API key) |
-| **Optional provider** | Tavily (AI-optimized, requires API key) |
+| **Premium providers** | Tavily (AI-optimized) · Google Custom Search (highest quality) |
 | **Toggle location** | Globe icon in the chat input area |
 | **Provider config** | Advanced Settings in the sidebar |
 | **Works with** | All models across all tiers |
@@ -41,7 +41,7 @@ User sends message
          ▼                        │
 ┌──────────────────┐              │
 │ Search the web   │              │
-│ (DDG or Tavily)  │              │
+│ (DDG/Tavily/Google)             │
 └────────┬─────────┘              │
          │                        │
          ▼                        │
@@ -72,7 +72,7 @@ User sends message
 
 4. **URL detection**: If the user's message contains URLs (e.g., "summarize this: https://article.com"), those URLs are fetched and their content is extracted using BeautifulSoup.
 
-5. **Web search**: The user's query is sent to the selected search provider (DuckDuckGo or Tavily). The provider returns up to 5 results with titles, URLs, and content snippets.
+5. **Web search**: The user's query is sent to the selected search provider (DuckDuckGo, Tavily, or Google). The provider returns up to 5 results with titles, URLs, and content snippets.
 
 6. **Result formatting**: All search results and fetched URL content are formatted into a structured system message with clear delimiters.
 
@@ -137,6 +137,27 @@ Tavily is the premium alternative because:
 
 **Fallback behavior**: If Tavily fails (API error, invalid key, service down), STREAM automatically falls back to DuckDuckGo. This ensures web search never completely fails.
 
+### Google Search via Serper.dev (Optional Premium)
+
+| Property | Details |
+|---|---|
+| **Cost** | Free: 2,500 queries (one-time); Paid: $50 for 50,000 ($1/1K) |
+| **API key** | Required (sign up at [serper.dev](https://serper.dev)) |
+| **How it works** | Serper.dev API returns real-time Google search results |
+| **Result quality** | Highest — actual Google search results from google.com |
+| **Rate limiting** | Based on purchased credits |
+| **Best for** | Users who want Google-quality search results |
+
+Serper.dev provides actual Google search results through a simple REST API. Unlike Google's deprecated Programmable Search Engine (which only searches specific sites you configure), Serper searches the entire web using Google's full index.
+
+**Why Serper instead of Google Custom Search?** Google deprecated the "Search the entire web" feature for new Programmable Search Engines in 2025–2026. New engines can only search specific sites you add, making it useless for general web search. Serper.dev solves this by providing real Google results through a clean API with just one API key.
+
+**Setup**: Sign up at [serper.dev](https://serper.dev), copy your API key — that's it. No Search Engine ID or Google Cloud Console needed.
+
+**Pricing reference**: https://serper.dev
+
+**Fallback behavior**: If Serper fails (API error, invalid key, credits exhausted), STREAM automatically falls back to DuckDuckGo.
+
 ---
 
 ## Configuration
@@ -162,8 +183,11 @@ The globe icon sits between the camera button and the text input area:
 
 In the sidebar under **Advanced Settings > Web Search Provider**:
 
-- **DuckDuckGo**: Selected by default. No configuration needed.
-- **Tavily**: When selected, an API key input field appears. Users enter their Tavily API key here. The key is stored in localStorage (persists across sessions).
+- **DuckDuckGo**: Selected by default. No configuration needed. Free with no limits.
+- **Tavily**: When selected, an API key input field appears. 1,000 free searches/month. Paid plans from $30/month.
+- **Google Search**: When selected, an API key input field appears. Powered by Serper.dev. 2,500 free queries. Paid: $50 for 50K.
+
+All API keys are stored in localStorage (persists across sessions) and only sent to the backend when the corresponding provider is selected.
 
 ### Backend Configuration
 
@@ -183,7 +207,8 @@ The frontend sends these additional fields in the chat request:
 {
   "web_search": true,
   "web_search_provider": "duckduckgo",
-  "tavily_api_key": "tvly-..."
+  "tavily_api_key": "tvly-...",
+  "serper_api_key": "your-serper-key"
 }
 ```
 
@@ -191,6 +216,7 @@ All fields are optional and have safe defaults:
 - `web_search`: `false`
 - `web_search_provider`: `"duckduckgo"`
 - `tavily_api_key`: `null`
+- `serper_api_key`: `null`
 
 ---
 
@@ -266,6 +292,8 @@ Web search is designed to be **non-blocking** — if it fails, the chat request 
 | DuckDuckGo rate limited | Returns empty results; LLM answers without web context |
 | Tavily API error | Falls back to DuckDuckGo automatically |
 | Tavily key missing | Falls back to DuckDuckGo automatically |
+| Serper API error / credits exhausted | Falls back to DuckDuckGo automatically |
+| Serper key missing | Falls back to DuckDuckGo automatically |
 | URL fetch timeout | Skips that URL; other URLs and search results still work |
 | URL returns non-text (PDF, image) | Skips that URL |
 | All search + fetch fails | `perform_web_search` returns `None`; chat proceeds normally |
@@ -282,10 +310,10 @@ Web search is designed to be **non-blocking** — if it fails, the chat request 
 | `stream/middleware/routes/chat.py` | Request model (`web_search` fields) and injection point |
 | `stream/middleware/core/streaming.py` | Passes `web_search_sources` in SSE metadata |
 | `frontends/react/src/types/settings.ts` | `WebSearchProvider` type definition |
-| `frontends/react/src/stores/settingsStore.ts` | Web search state, actions, migration v7 |
+| `frontends/react/src/stores/settingsStore.ts` | Web search state, actions, migrations v7–v8 |
 | `frontends/react/src/components/input/ChatInput.tsx` | Globe toggle icon |
 | `frontends/react/src/api/stream.ts` | Sends web search fields in API request |
-| `frontends/react/src/components/sidebar/SettingsPanel.tsx` | Provider selection and Tavily API key input |
+| `frontends/react/src/components/sidebar/SettingsPanel.tsx` | Provider selection, API key inputs (Tavily, Google) |
 | `stream.spec` | Desktop build hidden imports for web search packages |
 | `pyproject.toml` | Python dependencies for web search |
 | `tests/test_web_search.py` | Comprehensive test suite |

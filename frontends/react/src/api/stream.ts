@@ -34,6 +34,7 @@
  */
 
 import type { Message, ChatSettings, StreamMetadata, ContentBlock } from '../types'
+import { documentsToContentBlocks, formatFileSize } from './documents'
 import { useSettingsStore } from '../stores/settingsStore'
 
 /**
@@ -133,23 +134,83 @@ export async function streamChat(
       // format — content becomes an array of ContentBlocks instead of
       // a plain string. This is the format that the backend, Ollama,
       // vLLM, and LiteLLM all understand natively.
-      messages: messages.map(m => {
-        // If this message has images, build the multimodal content array
-        if (m.images && m.images.length > 0) {
-          const contentBlocks: ContentBlock[] = [
-            // Always include the text block first (even if empty)
-            { type: 'text' as const, text: m.content },
-            // Then add each image as an image_url block
-            ...m.images.map(dataUrl => ({
-              type: 'image_url' as const,
-              image_url: { url: dataUrl },
-            })),
-          ]
-          return { role: m.role, content: contentBlocks }
-        }
-        // No images — send plain string content (backwards compatible)
-        return { role: m.role, content: m.content }
-      }),
+      //
+      // IMPORTANT — STRIPPING OLD DOCUMENT/IMAGE CONTENT:
+      // Only the LAST user message gets full document and image content.
+      // Older messages get a brief reference instead (e.g., "[Attached:
+      // report.pdf — 5 pages, 11.6K chars]"). Without this, every old
+      // message's extracted documents would be re-sent, causing:
+      //   - Massive input token counts ($0.12+ per message)
+      //   - 30+ second latency from processing old content
+      //   - Potential context window overflow
+      // The LLM's previous responses about those documents remain in
+      // history, so it still has context from the conversation.
+      messages: (() => {
+        // Find the index of the last user message — only this one gets full content
+        const lastUserIndex = messages.reduce(
+          (last, m, i) => m.role === 'user' ? i : last, -1
+        )
+
+        return messages.map((m, index) => {
+          const isLatestUser = index === lastUserIndex
+          const hasImages = m.images && m.images.length > 0
+          const hasDocs = m.documents && m.documents.length > 0 &&
+            m.documents.some(d => d.status === 'ready')
+
+          // For OLDER user messages: replace full document/image content with
+          // a short text reference. This dramatically reduces payload size while
+          // preserving the conversational context (the LLM already responded to
+          // those documents, so the response text carries the context forward).
+          if (!isLatestUser && (hasImages || hasDocs)) {
+            const refs: string[] = []
+
+            if (hasDocs) {
+              for (const doc of m.documents!) {
+                if (doc.status !== 'ready') continue
+                const meta = [formatFileSize(doc.fileSize)]
+                if (doc.pageCount > 0) meta.push(`${doc.pageCount} pages`)
+                meta.push(`${(doc.totalTextLength / 1000).toFixed(1)}K chars`)
+                refs.push(`[Attached: ${doc.filename} — ${meta.join(', ')}]`)
+              }
+            }
+            if (hasImages) {
+              refs.push(`[Attached: ${m.images!.length} image(s)]`)
+            }
+
+            const textWithRefs = refs.length > 0
+              ? `${refs.join('\n')}\n\n${m.content}`
+              : m.content
+
+            return { role: m.role, content: textWithRefs }
+          }
+
+          // For the LATEST user message: include full document and image content
+          if (hasImages || hasDocs) {
+            const contentBlocks: ContentBlock[] = []
+
+            if (hasDocs) {
+              const docBlocks = documentsToContentBlocks(m.documents!)
+              contentBlocks.push(...docBlocks)
+            }
+
+            contentBlocks.push({ type: 'text' as const, text: m.content })
+
+            if (hasImages) {
+              contentBlocks.push(
+                ...m.images!.map(dataUrl => ({
+                  type: 'image_url' as const,
+                  image_url: { url: dataUrl },
+                }))
+              )
+            }
+
+            return { role: m.role, content: contentBlocks }
+          }
+
+          // No images or documents — send plain string content (backwards compatible)
+          return { role: m.role, content: m.content }
+        })
+      })(),
 
       // Request streaming response
       stream: true,
@@ -165,11 +226,15 @@ export async function streamChat(
       // the user's query and injects results as context before the LLM call.
       web_search: settings.webSearch || false,
       web_search_provider: settings.webSearchProvider || 'duckduckgo',
-      // Tavily API key is read from the store directly (not included
-      // in getSettings() to avoid exposing it in the settings object).
-      // Only sent when Tavily is the selected provider.
+      // API keys are read from the store directly (not included in
+      // getSettings() to avoid exposing them in the settings object).
+      // Only sent when the corresponding provider is selected.
       ...(settings.webSearch && settings.webSearchProvider === 'tavily'
         ? { tavily_api_key: useSettingsStore.getState().tavilyApiKey }
+        : {}
+      ),
+      ...(settings.webSearch && settings.webSearchProvider === 'google'
+        ? { serper_api_key: useSettingsStore.getState().serperApiKey }
         : {}
       ),
     }),

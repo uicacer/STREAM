@@ -205,16 +205,16 @@ export function ChatContainer() {
   }, [pendingQuery, isStreaming])
 
   /**
-   * Handle sending a message (with optional images)
+   * Handle sending a message (with optional images and documents)
    *
    * MULTIMODAL FLOW:
-   * 1. addUserMessage stores the text + images in the message object
-   * 2. stream.ts reads message.images and builds OpenAI vision format
+   * 1. addUserMessage stores text + images + documents in the message object
+   * 2. stream.ts reads message.images/.documents and builds OpenAI vision format
    * 3. Backend receives content as string or ContentBlock[]
    * 4. Router selects a vision-capable model if images are present
    */
-  const handleSend = async (content: string, images?: string[]) => {
-    addUserMessage(content, images)
+  const handleSend = async (content: string, images?: string[], documents?: import('../../types').DocumentAttachment[]) => {
+    addUserMessage(content, images, documents)
     startStreaming()
 
     // Create AbortController for this request
@@ -224,30 +224,44 @@ export function ChatContainer() {
     const settings = getSettings()
     console.log('[ChatContainer] Sending with settings:', settings)
 
-    // Check if images exceed the Lakeshore limit (6 MB).
-    if (images && images.length > 0) {
-      const totalBytes = getTotalImageBytes(images)
-      if (totalBytes > LAKESHORE_MAX_IMAGE_BYTES) {
-        const sizeMB = (totalBytes / (1024 * 1024)).toFixed(1)
+    // Check if images + document content exceed the Lakeshore limit (6 MB).
+    // Globus Compute has a 10 MB payload limit (see globus_compute_client.py).
+    // We use 6 MB as a safe threshold, leaving room for text and serialization.
+    const imageBytes = images ? getTotalImageBytes(images) : 0
+    const docBytes = documents
+      ? documents.reduce((sum, doc) => {
+          // Estimate payload size: all base64 image data + text content
+          return sum + doc.contentParts.reduce((partSum, part) => {
+            if (part.type === 'image' && part.image_base64) {
+              return partSum + part.image_base64.length  // base64 chars ≈ bytes
+            }
+            if (part.type === 'text' && part.text) {
+              return partSum + part.text.length
+            }
+            return partSum
+          }, 0)
+        }, 0)
+      : 0
+    const totalMediaBytes = imageBytes + docBytes
 
-        if (settings.tier === 'lakeshore') {
-          // Hard block: user explicitly chose Lakeshore, can't proceed
-          setPayloadWarning(
-            `The attached images total ${sizeMB} MB, which exceeds the 6 MB limit ` +
-            `for Lakeshore via Globus Compute. Please switch to Local or Cloud tier ` +
-            `for this message, or reduce the number of images.`
-          )
-          finishStreaming()
-          return
-        }
+    if (totalMediaBytes > LAKESHORE_MAX_IMAGE_BYTES) {
+      const sizeMB = (totalMediaBytes / (1024 * 1024)).toFixed(1)
 
-        if (settings.tier === 'auto') {
-          // Soft info: Auto mode will skip Lakeshore, route to Local or Cloud
-          setLakeshoreSkippedInfo(
-            `Images total ${sizeMB} MB (over 6 MB) — Lakeshore will be skipped ` +
-            `for this message. Routing to Local or Cloud instead.`
-          )
-        }
+      if (settings.tier === 'lakeshore') {
+        setPayloadWarning(
+          `The attached content totals ${sizeMB} MB, which exceeds the 6 MB limit ` +
+          `for Lakeshore via Globus Compute. Please switch to Local or Cloud tier ` +
+          `for this message, or reduce the number of attachments.`
+        )
+        finishStreaming()
+        return
+      }
+
+      if (settings.tier === 'auto') {
+        setLakeshoreSkippedInfo(
+          `Attachments total ${sizeMB} MB (over 6 MB) — Lakeshore will be skipped ` +
+          `for this message. Routing to Local or Cloud instead.`
+        )
       }
     }
 
@@ -259,7 +273,7 @@ export function ChatContainer() {
 
     const allMessages = [
       ...messagesForApi,
-      { id: '', role: 'user' as const, content, images, createdAt: '' }
+      { id: '', role: 'user' as const, content, images, documents, createdAt: '' }
     ]
 
     setError(null)

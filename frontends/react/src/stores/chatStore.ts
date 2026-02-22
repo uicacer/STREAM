@@ -90,8 +90,9 @@ interface ChatState {
    *
    * @param content - The text content of the message
    * @param images - Optional array of base64 data URLs for attached images
+   * @param documents - Optional array of extracted document attachments
    */
-  addUserMessage: (content: string, images?: string[]) => void
+  addUserMessage: (content: string, images?: string[], documents?: import('../types').DocumentAttachment[]) => void
 
   /**
    * Start streaming - prepare for incoming tokens
@@ -177,7 +178,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   // ============= Action Implementations =============
 
-  addUserMessage: (content, images) => {
+  addUserMessage: (content, images, documents) => {
     /**
      * Add a user message to the chat
      *
@@ -185,16 +186,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
      * 1. Update Zustand state (instant UI update)
      * 2. Save to IndexedDB via conversationStore (persistent)
      *
-     * MULTIMODAL: If images are provided, they're stored in the message's
-     * "images" field. The API layer (stream.ts) reads this field when
+     * MULTIMODAL: If images or documents are provided, they're stored in the
+     * message object. The API layer (stream.ts) reads these fields when
      * building the request payload, constructing the OpenAI vision format
-     * (content: ContentBlock[]) from the text + images.
+     * (content: ContentBlock[]) from the documents + text + images.
      */
     const message: Message = {
       id: crypto.randomUUID(),
       role: 'user',
       content,
       images: images && images.length > 0 ? images : undefined,
+      documents: documents && documents.length > 0 ? documents : undefined,
       createdAt: new Date().toISOString(),
     }
 
