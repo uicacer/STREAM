@@ -22,7 +22,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import 'katex/dist/katex.min.css'
-import { Copy, Check, Laptop, Building2, Cloud, Clock, AlertTriangle, FileText, ChevronDown, ChevronRight } from 'lucide-react'
+import { Copy, Check, Laptop, Building2, Cloud, Clock, AlertTriangle, FileText, ChevronDown, ChevronRight, ShieldCheck, ShieldAlert } from 'lucide-react'
 import { ModelLogo } from '../icons/ProviderLogos'
 import { cn } from '../../lib/utils'
 import { ThinkingBlock } from './ThinkingBlock'
@@ -79,18 +79,89 @@ export function Message({ message, isStreaming = false }: MessageProps) {
    * Format model name for display
    */
   const formatModelName = (model: string): string => {
+    // Dynamic OpenRouter models — extract human-readable name from the ID
+    // e.g., "cloud-or-dynamic-anthropic/claude-opus-4.6" → "claude-opus-4.6"
+    if (model.startsWith('cloud-or-dynamic-')) {
+      const parts = model.replace('cloud-or-dynamic-', '').split('/')
+      const rawName = parts[parts.length - 1] || model
+      return rawName
+        .replace(/-/g, ' ')
+        .replace(/\b\w/g, c => c.toUpperCase())
+    }
+
+    // Curated OpenRouter models
+    const curatedNames: Record<string, string> = {
+      'cloud-or-claude': 'Claude Sonnet 4',
+      'cloud-or-gpt4o': 'GPT-4o',
+      'cloud-or-gemini-pro': 'Gemini 2.5 Pro',
+      'cloud-or-gemini-flash': 'Gemini 2.5 Flash',
+      'cloud-or-o3-mini': 'o3-mini',
+      'cloud-or-deepseek-r1': 'DeepSeek R1',
+      'cloud-or-llama-maverick': 'Llama 4 Maverick',
+      'cloud-or-deepseek-v3': 'DeepSeek V3',
+      'cloud-or-glm5': 'GLM-5',
+    }
+    if (curatedNames[model]) return curatedNames[model]
+
+    // Direct provider models
+    if (model === 'cloud-claude') return 'Claude Sonnet 4'
+    if (model === 'cloud-gpt') return 'GPT-4o'
+    if (model === 'cloud-gpt-cheap') return 'GPT-4o Mini'
+
+    // Local and Lakeshore models
     if (model === 'local-vision') return 'Gemma 3 4B (Text + Vision)'
     if (model.includes('llama')) return 'Llama 3.2 3B'
-    if (model.includes('claude')) return 'Claude Sonnet 4'
-    if (model === 'cloud-gpt-cheap' || model.includes('4o-mini')) return 'GPT-4o Mini'
-    if (model === 'cloud-gpt' || model.includes('4o')) return 'GPT-4o'
-    if (model.includes('deepseek')) return 'DeepSeek R1 1.5B'
     if (model.includes('qwq')) return 'QwQ 1.5B'
     if (model.includes('coder') && model.includes('1.5b')) return 'Qwen 2.5 Coder 1.5B'
+    if (model.includes('deepseek')) return 'DeepSeek R1 1.5B'
+    if (model.includes('qwen') && model.includes('72b')) return 'Qwen 2.5 72B'
     if (model.includes('qwen') && model.includes('32b')) return 'Qwen 2.5 32B'
     if (model.includes('qwen') && model.includes('1.5b')) return 'Qwen 2.5 1.5B'
     if (model.includes('qwen')) return 'Qwen 2.5'
     return model
+  }
+
+  /**
+   * Check if the verified model matches what was requested.
+   * Maps STREAM's internal model names to expected provider model IDs
+   * so we can confirm the right model actually responded.
+   */
+  const checkModelVerification = (requested: string, verified: string | undefined): 'verified' | 'mismatch' | 'unknown' => {
+    if (!verified) return 'unknown'
+
+    const v = verified.toLowerCase()
+
+    // Map STREAM model names to substrings expected in the provider's response
+    const expectedPatterns: Record<string, string[]> = {
+      // OpenRouter curated models
+      'cloud-or-claude': ['claude-sonnet', 'claude-4'],
+      'cloud-or-gpt4o': ['gpt-4o'],
+      'cloud-or-gemini-pro': ['gemini-2.5-pro', 'gemini-2'],
+      'cloud-or-gemini-flash': ['gemini-2.5-flash', 'gemini-flash'],
+      'cloud-or-o3-mini': ['o3-mini'],
+      'cloud-or-deepseek-r1': ['deepseek-r1', 'deepseek/deepseek-r1'],
+      'cloud-or-llama-maverick': ['llama-4-maverick', 'maverick'],
+      'cloud-or-deepseek-v3': ['deepseek-chat', 'deepseek-v3'],
+      'cloud-or-glm5': ['glm-5', 'glm5'],
+      // Direct provider models
+      'cloud-claude': ['claude-sonnet', 'claude-4'],
+      'cloud-gpt': ['gpt-4o'],
+      'cloud-gpt-cheap': ['gpt-4o-mini'],
+      // Local
+      'local-llama': ['llama'],
+      'local-vision': ['gemma'],
+    }
+
+    // For dynamic OpenRouter models, extract the model ID and check directly
+    if (requested.startsWith('cloud-or-dynamic-')) {
+      const requestedId = requested.replace('cloud-or-dynamic-', '').toLowerCase()
+      return v.includes(requestedId) ? 'verified' : 'mismatch'
+    }
+
+    const patterns = expectedPatterns[requested]
+    if (!patterns) return 'unknown'
+
+    return patterns.some(p => v.includes(p)) ? 'verified' : 'mismatch'
   }
 
   // Check if this is a summarized message (shown for reference only)
@@ -204,11 +275,30 @@ export function Message({ message, isStreaming = false }: MessageProps) {
             </span>
           </div>
 
-          {/* Model name with provider logo */}
-          <span className="text-muted-foreground flex items-center gap-1">
-            <ModelLogo model={message.metadata.model || ''} className="w-3.5 h-3.5" />
-            {formatModelName(message.metadata.model || 'unknown')}
-          </span>
+          {/* Model name with provider logo and verification */}
+          {(() => {
+            const model = message.metadata!.model || 'unknown'
+            const verified = message.metadata!.verified_model
+            const status = checkModelVerification(model, verified)
+
+            return (
+              <span className="text-muted-foreground flex items-center gap-1">
+                <ModelLogo model={model} className="w-3.5 h-3.5" />
+                {formatModelName(model)}
+                {status === 'verified' && (
+                  <span title={`Verified by provider: ${verified}`}>
+                    <ShieldCheck className="w-3.5 h-3.5 text-green-500" />
+                  </span>
+                )}
+                {status === 'mismatch' && (
+                  <span title={`Expected ${formatModelName(model)} but provider returned: ${verified}`} className="flex items-center gap-0.5">
+                    <ShieldAlert className="w-3.5 h-3.5 text-amber-500" />
+                    <span className="text-amber-500 text-[10px]">({verified})</span>
+                  </span>
+                )}
+              </span>
+            )
+          })()}
 
           {/* Duration (if available and valid number) */}
           {(() => {
@@ -234,17 +324,12 @@ export function Message({ message, isStreaming = false }: MessageProps) {
               const isEstimated = message.metadata.cost_estimated === true
               const hasCost = !isNaN(cost) && cost > 0
 
-              // If we have cost data, show it
               if (hasCost) {
-                // Show "estimated" suffix if cost was estimated due to interrupted streaming
-                // Estimation is based on ~4 characters per token using pricing from litellm_config.yaml
                 const suffix = isEstimated ? ' (estimated)' : ''
                 return <span>~${cost.toFixed(6)}{suffix}</span>
               }
 
-              // No cost data
               if (wasStopped) {
-                // Stopped before cost could be calculated
                 return <span className="text-muted-foreground">--</span>
               }
 

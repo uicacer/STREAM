@@ -226,15 +226,37 @@ export async function streamChat(
       // the user's query and injects results as context before the LLM call.
       web_search: settings.webSearch || false,
       web_search_provider: settings.webSearchProvider || 'duckduckgo',
-      // API keys are read from the store directly (not included in
-      // getSettings() to avoid exposing them in the settings object).
-      // Only sent when the corresponding provider is selected.
+      // Web search API keys — only sent when the corresponding provider
+      // is selected to avoid sending unnecessary credentials.
       ...(settings.webSearch && settings.webSearchProvider === 'tavily'
         ? { tavily_api_key: useSettingsStore.getState().tavilyApiKey }
         : {}
       ),
       ...(settings.webSearch && settings.webSearchProvider === 'google'
         ? { serper_api_key: useSettingsStore.getState().serperApiKey }
+        : {}
+      ),
+
+      // Cloud API keys — user-provided keys for cloud model access.
+      // These are stored in localStorage and sent with each request so
+      // the backend can authenticate with the cloud provider.
+      //
+      // We only send the key that the selected provider needs:
+      //   - OpenRouter models (cloud-or-*) → send openrouter_api_key
+      //   - Direct Anthropic (cloud-claude) → send anthropic_api_key
+      //   - Direct OpenAI (cloud-gpt*) → send openai_api_key
+      //
+      // This avoids sending all keys with every request.
+      ...(settings.cloudProvider?.startsWith('cloud-or')
+        ? { openrouter_api_key: useSettingsStore.getState().openrouterApiKey }
+        : {}
+      ),
+      ...(settings.cloudProvider === 'cloud-claude'
+        ? { anthropic_api_key: useSettingsStore.getState().anthropicApiKey }
+        : {}
+      ),
+      ...(['cloud-gpt', 'cloud-gpt-cheap'].includes(settings.cloudProvider || '')
+        ? { openai_api_key: useSettingsStore.getState().openaiApiKey }
         : {}
       ),
     }),
@@ -429,22 +451,40 @@ export async function streamChat(
           console.error('[stream] Server error:', parsed.error)
           const errorMsg = typeof parsed.error === 'string' ? parsed.error : (parsed.error.message || 'Server error')
 
-          // Check if this is a context length error from the LLM
-          const isContextError = errorMsg.toLowerCase().includes('context') ||
-                                 errorMsg.toLowerCase().includes('token') ||
-                                 errorMsg.toLowerCase().includes('too long') ||
-                                 errorMsg.toLowerCase().includes('maximum')
-
-          if (isContextError) {
-            // Format as structured error for the dialog
+          // Billing/credit limit errors from OpenRouter get their own handler.
+          // The backend sends these with error_type: "billing_limit" and a
+          // user-friendly message about increasing the key's credit limit.
+          if (parsed.error_type === 'billing_limit') {
             callbacks.onError(JSON.stringify({
-              type: 'context_exceeded',
+              type: 'billing_limit',
               message: errorMsg,
-              estimated_tokens: 0, // Unknown mid-stream
-              model_limit: 0,      // Unknown mid-stream
             }))
           } else {
-            callbacks.onError(errorMsg)
+            // Distinguish other billing errors (detected by keywords) from
+            // genuine context length errors.
+            const lower = errorMsg.toLowerCase()
+            const isBillingError = lower.includes('credits') ||
+                                   lower.includes('afford') ||
+                                   lower.includes('payment required') ||
+                                   (lower.includes('402') && lower.includes('token'))
+
+            const isContextError = !isBillingError && (
+              lower.includes('context') ||
+              (lower.includes('token') && lower.includes('limit')) ||
+              lower.includes('too long') ||
+              lower.includes('context_length_exceeded')
+            )
+
+            if (isContextError) {
+              callbacks.onError(JSON.stringify({
+                type: 'context_exceeded',
+                message: errorMsg,
+                estimated_tokens: 0,
+                model_limit: 0,
+              }))
+            } else {
+              callbacks.onError(errorMsg)
+            }
           }
         }
       } catch (e) {

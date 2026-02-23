@@ -67,7 +67,11 @@ REQUEST_TIMEOUT = httpx.Timeout(
 
 
 async def forward_to_litellm(
-    model: str, messages: list[dict], temperature: float, correlation_id: str
+    model: str,
+    messages: list[dict],
+    temperature: float,
+    correlation_id: str,
+    user_api_keys: dict[str, str] | None = None,
 ) -> AsyncGenerator[str, None]:
     """
     Forward a chat completion request to LiteLLM and stream the response.
@@ -89,6 +93,10 @@ async def forward_to_litellm(
         messages: List of message dicts with role and content
         temperature: Sampling temperature (0.0 = deterministic, 2.0 = creative)
         correlation_id: Unique request ID for tracing through logs
+        user_api_keys: Optional dict mapping env var names to user-provided
+                       API key values. Example:
+                       {"OPENROUTER_API_KEY": "sk-or-v1-abc123"}
+                       When present, these override environment variables.
 
     Yields:
         SSE-formatted lines from LiteLLM, e.g.:
@@ -97,13 +105,6 @@ async def forward_to_litellm(
 
     Raises:
         HTTPException: On connection errors, timeouts, or non-200 responses
-
-    Example:
-        >>> async for line in forward_to_litellm("gpt-4", messages, 0.7, "req-123"):
-        ...     print(line)
-        data: {"choices": [{"delta": {"content": "The"}}]}
-        data: {"choices": [{"delta": {"content": " answer"}}]}
-        data: [DONE]
 
     Note:
         This is an async generator - it yields lines as they arrive from LiteLLM,
@@ -121,7 +122,13 @@ async def forward_to_litellm(
     # The output format (SSE lines) is identical, so streaming.py doesn't
     # know or care which path was used.
     if STREAM_MODE == "desktop":
-        async for line in forward_direct(model, messages, temperature, correlation_id):
+        async for line in forward_direct(
+            model,
+            messages,
+            temperature,
+            correlation_id,
+            user_api_keys=user_api_keys,
+        ):
             yield line
         return
 
@@ -135,8 +142,22 @@ async def forward_to_litellm(
         "model": model,
         "messages": messages,
         "temperature": temperature,
-        "stream": True,  # Critical: enables SSE streaming
+        "stream": True,
     }
+
+    # Enable reasoning/thinking for direct provider calls only.
+    # OpenRouter-proxied models (cloud-or-* mapped to openrouter/*) don't support
+    # reasoning_effort through litellm — litellm raises UnsupportedParamsError.
+    # In server mode, cloud models go through OpenRouter, so we skip this.
+    from stream.middleware.config import is_reasoning_model
+
+    is_cloud_model = model.startswith("cloud")
+    if not is_cloud_model and is_reasoning_model(model):
+        payload["reasoning_effort"] = "low"
+        logger.info(
+            f"[{correlation_id}] Enabling reasoning (effort=low) for {model}",
+            extra={"correlation_id": correlation_id},
+        )
 
     # Prepare HTTP headers
     headers = {

@@ -40,6 +40,18 @@ interface SettingsState {
   tavilyApiKey: string
   serperApiKey: string
 
+  // Cloud API Keys — user-provided keys for cloud model access.
+  // Stored in localStorage (never sent to the server for storage).
+  // Sent with each chat request so the backend can authenticate
+  // with the cloud provider on the user's behalf.
+  openrouterApiKey: string
+  anthropicApiKey: string
+  openaiApiKey: string
+
+  // Favorite models — user's pinned models from the OpenRouter catalog.
+  // These appear at the top of the model selector for quick access.
+  favoriteModels: string[]
+
   /**
    * Has the store been initialized with backend defaults?
    * Used to track if we need to fetch config on first load.
@@ -58,6 +70,10 @@ interface SettingsState {
   setWebSearchProvider: (provider: WebSearchProvider) => void
   setTavilyApiKey: (key: string) => void
   setSerperApiKey: (key: string) => void
+  setOpenrouterApiKey: (key: string) => void
+  setAnthropicApiKey: (key: string) => void
+  setOpenaiApiKey: (key: string) => void
+  toggleFavoriteModel: (modelId: string) => void
   getSettings: () => ChatSettings
 
   /**
@@ -103,11 +119,15 @@ export const useSettingsStore = create<SettingsState>()(
       theme: 'dark',
       localModel: 'local-llama',          // Default local model (3B)
       lakeshoreModel: 'lakeshore-qwen-1.5b',   // Default lakeshore model
-      cloudProvider: 'cloud-claude',      // Default cloud provider
+      cloudProvider: 'cloud-or-claude',   // Default: Claude via OpenRouter (one key for all)
       webSearch: false,                   // Web search off by default
       webSearchProvider: 'duckduckgo',    // Free, no API key needed
       tavilyApiKey: '',                   // User provides if they choose Tavily
       serperApiKey: '',                   // User provides if they choose Google (via Serper.dev)
+      openrouterApiKey: '',              // User's OpenRouter API key (one key for all models)
+      anthropicApiKey: '',               // User's direct Anthropic API key
+      openaiApiKey: '',                  // User's direct OpenAI API key
+      favoriteModels: [],                // User's pinned models from the catalog
       _initialized: false,
 
       // ============= Actions =============
@@ -131,6 +151,18 @@ export const useSettingsStore = create<SettingsState>()(
       setTavilyApiKey: (tavilyApiKey) => set({ tavilyApiKey }),
 
       setSerperApiKey: (serperApiKey) => set({ serperApiKey }),
+
+      setOpenrouterApiKey: (openrouterApiKey) => set({ openrouterApiKey }),
+
+      setAnthropicApiKey: (anthropicApiKey) => set({ anthropicApiKey }),
+
+      setOpenaiApiKey: (openaiApiKey) => set({ openaiApiKey }),
+
+      toggleFavoriteModel: (modelId) => set((state) => ({
+        favoriteModels: state.favoriteModels.includes(modelId)
+          ? state.favoriteModels.filter(id => id !== modelId)
+          : [...state.favoriteModels, modelId],
+      })),
 
       setTheme: (theme) => {
         set({ theme })
@@ -194,7 +226,7 @@ export const useSettingsStore = create<SettingsState>()(
       /**
        * Version for migrations - increment when storage format changes
        */
-      version: 8,
+      version: 10,
       /**
        * Migration: Runs automatically when storage version changes.
        * Each version upgrade fixes a specific issue with persisted state.
@@ -288,6 +320,51 @@ export const useSettingsStore = create<SettingsState>()(
           }
         }
 
+        if (version < 9) {
+          // v8 → v9: OpenRouter integration.
+          // Add cloud API key fields for user-provided keys.
+          // Migrate cloudProvider from old direct-only names to OpenRouter
+          // default so new and existing users benefit from aggregator access.
+          console.log('[Settings] Migration v9: adding OpenRouter and cloud API keys')
+
+          // Map old direct provider names to their OpenRouter equivalents.
+          // Users who had "cloud-claude" selected now get "cloud-or-claude",
+          // which routes through OpenRouter instead of requiring a direct
+          // Anthropic API key. They can still switch to direct mode if they
+          // have their own provider keys.
+          const providerMigration: Record<string, string> = {
+            'cloud-claude': 'cloud-or-claude',
+            'cloud-gpt': 'cloud-or-gpt4o',
+            'cloud-gpt-cheap': 'cloud-or-gpt4o-mini',
+          }
+          const oldProvider = state.cloudProvider as string
+          const newProvider = providerMigration[oldProvider] || oldProvider
+
+          return {
+            ...state,
+            cloudProvider: newProvider,
+            openrouterApiKey: '',
+            anthropicApiKey: '',
+            openaiApiKey: '',
+            favoriteModels: [],
+          }
+        }
+
+        if (version < 10) {
+          // v9 → v10: Frontier model refresh.
+          // Removed GPT-4o Mini and Llama 3.1 70B from curated list.
+          // Map users who had those selected to their frontier replacements.
+          console.log('[Settings] Migration v10: updating to frontier curated models')
+          const state = persistedState as Record<string, unknown>
+          const retiredMigration: Record<string, string> = {
+            'cloud-or-gpt4o-mini': 'cloud-or-gemini-flash',
+            'cloud-or-llama-70b': 'cloud-or-llama-maverick',
+          }
+          const currentProvider = state.cloudProvider as string
+          const updated = retiredMigration[currentProvider] || currentProvider
+          return { ...state, cloudProvider: updated }
+        }
+
         return state
       },
       /**
@@ -313,6 +390,14 @@ export const useSettingsStore = create<SettingsState>()(
         webSearchProvider: state.webSearchProvider,
         tavilyApiKey: state.tavilyApiKey,
         serperApiKey: state.serperApiKey,
+        // Cloud API keys — persisted so users don't re-enter keys each session.
+        // These are stored in localStorage only, never sent to the server
+        // for persistent storage. They're included in chat requests so the
+        // backend can authenticate with the provider on the user's behalf.
+        openrouterApiKey: state.openrouterApiKey,
+        anthropicApiKey: state.anthropicApiKey,
+        openaiApiKey: state.openaiApiKey,
+        favoriteModels: state.favoriteModels,
         _initialized: state._initialized,
       }),
     }

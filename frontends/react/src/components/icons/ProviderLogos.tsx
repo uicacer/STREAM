@@ -69,9 +69,41 @@ export function OllamaLogo({ className }: LogoProps) {
   )
 }
 
-/** Google — "G" mark (Gemini models)
- * SVG source: https://developers.google.com/identity/branding-guidelines
- * Official 4-color treatment: Blue #4285F4, Green #34A853, Yellow #FBBC05, Red #EA4335 */
+/** Gemini — sparkle/star mark (Google Gemini models)
+ * SVG source: https://raw.githubusercontent.com/simple-icons/simple-icons/master/icons/googlegemini.svg
+ * Uses the official Gemini blue gradient. */
+export function GeminiLogo({ className }: LogoProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" aria-label="Gemini">
+      <defs>
+        <linearGradient id="gemini-gradient" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor="#1A73E8" />
+          <stop offset="100%" stopColor="#6C47FF" />
+        </linearGradient>
+      </defs>
+      <path fill="url(#gemini-gradient)" d="M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81" />
+    </svg>
+  )
+}
+
+/** Gemma — sparkle/star mark (Google's open-weight Gemma models)
+ * Same sparkle shape as Gemini but with purple-to-blue gradient to differentiate. */
+export function GemmaLogo({ className }: LogoProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" aria-label="Gemma">
+      <defs>
+        <linearGradient id="gemma-gradient" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor="#8B5CF6" />
+          <stop offset="100%" stopColor="#3B82F6" />
+        </linearGradient>
+      </defs>
+      <path fill="url(#gemma-gradient)" d="M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81" />
+    </svg>
+  )
+}
+
+/** Google — "G" mark (Google Search and other Google services, NOT Gemini)
+ * SVG source: https://developers.google.com/identity/branding-guidelines */
 export function GoogleLogo({ className }: LogoProps) {
   return (
     <svg className={className} viewBox="0 0 24 24" aria-label="Google">
@@ -83,19 +115,162 @@ export function GoogleLogo({ className }: LogoProps) {
   )
 }
 
-/** Gemma — sparkle/star mark (Google's open-weight Gemma models)
- * SVG source: https://raw.githubusercontent.com/simple-icons/simple-icons/master/icons/googlegemini.svg
- * The Gemma/Gemini sparkle uses a purple-to-blue gradient matching Google's official branding. */
-export function GemmaLogo({ className }: LogoProps) {
+/** Mistral AI — pixelated "M" mark
+ * SVG source: https://github.com/simple-icons/simple-icons (mistralai.svg)
+ * Brand colors: #FF8205 (Mistral orange, from official brand guidelines) */
+export function MistralLogo({ className }: LogoProps) {
   return (
-    <svg className={className} viewBox="0 0 24 24" aria-label="Gemma">
-      <defs>
-        <linearGradient id="gemma-gradient" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="#8B5CF6" />
-          <stop offset="100%" stopColor="#3B82F6" />
-        </linearGradient>
-      </defs>
-      <path fill="url(#gemma-gradient)" d="M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81" />
+    <svg className={className} viewBox="0 0 24 24" fill="#FF8205" aria-label="Mistral">
+      <path d="M17.143 3.429v3.428h-3.429v3.429h-3.428V6.857H6.857V3.43H3.43v13.714H0v3.428h10.286v-3.428H6.857v-3.429h3.429v3.429h3.429v-3.429h3.428v3.429h-3.428v3.428H24v-3.428h-3.43V3.429z" />
+    </svg>
+  )
+}
+
+/** Cohere — organic coral blob mark (Command models)
+ * Brand color: #FF7759 (Cohere coral, from Pentagram brand identity)
+ * The coral blob/dot is Cohere's most recognizable mark. */
+export function CohereLogo({ className }: LogoProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="#FF7759" aria-label="Cohere">
+      <path d="M12 3C7.03 3 3 7.03 3 12s4.03 9 9 9c1.62 0 3.14-.43 4.45-1.18-.81-.93-1.3-2.14-1.3-3.47 0-2.9 2.35-5.25 5.25-5.25.31 0 .62.03.91.08A8.97 8.97 0 0 0 12 3zm0 3.6c2.98 0 5.4 2.42 5.4 5.4s-2.42 5.4-5.4 5.4-5.4-2.42-5.4-5.4S9.02 6.6 12 6.6z" />
+    </svg>
+  )
+}
+
+/** xAI — "X" mark (Grok models)
+ * SVG source: https://github.com/simple-icons/simple-icons (x.svg)
+ * Brand color: currentColor (adapts to theme, xAI uses black/white) */
+export function XAILogo({ className }: LogoProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-label="xAI">
+      <path d="M14.234 10.162 22.977 0h-2.072l-7.591 8.824L7.251 0H.258l9.168 13.343L.258 24H2.33l8.016-9.318L16.749 24h6.993zm-2.837 3.299-.929-1.329L3.076 1.56h3.182l5.965 8.532.929 1.329 7.754 11.09h-3.182z" />
+    </svg>
+  )
+}
+
+/** Perplexity — geometric folded shape
+ * SVG source: https://github.com/simple-icons/simple-icons (perplexity.svg)
+ * Brand color: #20808D (Perplexity turquoise, from official brand) */
+export function PerplexityLogo({ className }: LogoProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="#20808D" aria-label="Perplexity">
+      <path d="M22.3977 7.0896h-2.3106V.0676l-7.5094 6.3542V.1577h-1.1554v6.1966L4.4904 0v7.0896H1.6023v10.3976h2.8882V24l6.932-6.3591v6.2005h1.1554v-6.0469l6.9318 6.1807v-6.4879h2.8882V7.0896zm-3.4657-4.531v4.531h-5.355l5.355-4.531zm-13.2862.0676 4.8691 4.4634H5.6458V2.6262zM2.7576 16.332V8.245h7.8476l-6.1149 6.1147v1.9723H2.7576zm2.8882 5.0404v-3.8852h.0001v-2.6488l5.7763-5.7764v7.0111l-5.7764 5.2993zm12.7086.0248-5.7766-5.1509V9.0618l5.7766 5.7766v6.5588zm2.8882-5.0652h-1.733v-1.9723L13.3948 8.245h7.8478v8.087z" />
+    </svg>
+  )
+}
+
+/** Microsoft — four-square mark (Phi, MAI models)
+ * Brand color: official 4-color treatment */
+export function MicrosoftLogo({ className }: LogoProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" aria-label="Microsoft">
+      <rect x="1" y="1" width="10" height="10" fill="#F25022"/>
+      <rect x="13" y="1" width="10" height="10" fill="#7FBA00"/>
+      <rect x="1" y="13" width="10" height="10" fill="#00A4EF"/>
+      <rect x="13" y="13" width="10" height="10" fill="#FFB900"/>
+    </svg>
+  )
+}
+
+/** NVIDIA — "eye" mark (Nemotron, etc.)
+ * SVG source: https://github.com/simple-icons/simple-icons (nvidia.svg)
+ * Brand color: #76B900 (NVIDIA green) */
+export function NvidiaLogo({ className }: LogoProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="#76B900" aria-label="NVIDIA">
+      <path d="M8.948 8.798v-1.43a6.7 6.7 0 0 1 .424-.018c3.922-.124 6.493 3.374 6.493 3.374s-2.774 3.851-5.75 3.851c-.398 0-.787-.062-1.158-.185v-4.346c1.528.185 1.837.857 2.747 2.385l2.04-1.714s-1.492-1.952-4-1.952a6.016 6.016 0 0 0-.796.035m0-4.735v2.138l.424-.027c5.45-.185 9.01 4.47 9.01 4.47s-4.08 4.964-8.33 4.964c-.37 0-.733-.035-1.095-.097v1.325c.3.035.61.062.91.062 3.957 0 6.82-2.023 9.593-4.408.459.371 2.34 1.263 2.73 1.652-2.633 2.208-8.772 3.984-12.253 3.984-.335 0-.653-.018-.971-.053v1.864H24V4.063zm0 10.326v1.131c-3.657-.654-4.673-4.46-4.673-4.46s1.758-1.944 4.673-2.262v1.237H8.94c-1.528-.186-2.73 1.245-2.73 1.245s.68 2.412 2.739 3.11M2.456 10.9s2.164-3.197 6.5-3.533V6.201C4.153 6.59 0 10.653 0 10.653s2.35 6.802 8.948 7.42v-1.237c-4.84-.6-6.492-5.936-6.492-5.936z" />
+    </svg>
+  )
+}
+
+/** AI21 Labs — "21" mark (Jamba models)
+ * Brand color: #EC5B2A (AI21 coral/orange, from their official branding) */
+export function AI21Logo({ className }: LogoProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="#EC5B2A" aria-label="AI21">
+      <path d="M4 6h3v12H4V6zm5 0h3l4 7v-7h3v12h-3l-4-7v7H9V6z" />
+    </svg>
+  )
+}
+
+/** Amazon — arrow/smile mark (Nova models)
+ * Brand color: #FF9900 (Amazon orange) */
+export function AmazonLogo({ className }: LogoProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="#FF9900" aria-label="Amazon">
+      <path d="M13.958 10.09c0 1.232.029 2.256-.591 3.351-.502.891-1.301 1.438-2.186 1.438-1.214 0-1.922-.924-1.922-2.292 0-2.692 2.415-3.182 4.7-3.182v.685zm3.186 7.705a.66.66 0 0 1-.753.077c-1.06-.879-1.247-1.286-1.827-2.124-1.748 1.783-2.985 2.317-5.249 2.317C6.886 18.065 5 16.554 5 13.855c0-2.109 1.143-3.545 2.77-4.248 1.412-.611 3.384-.72 4.893-.889v-.331c0-.611.047-1.333-.312-1.861-.314-.473-.916-.666-1.449-.666-1.003 0-1.888.525-2.103 1.58-.047.24-.218.473-.455.486L5.93 7.635c-.21-.047-.443-.217-.384-.54C6.17 3.965 9.138 3 11.773 3c1.36 0 3.138.361 4.213 1.391C17.368 5.643 17.144 7.535 17.144 9.38v3.967c0 1.198.496 1.725.963 2.372.166.233.202.513-.01.687-.531.445-1.475 1.268-1.993 1.731l-.96-.341z" />
+      <path d="M21.73 19.128c-2.16 1.598-5.295 2.448-7.993 2.448-3.783 0-7.189-1.398-9.767-3.726-.202-.183-.022-.432.222-.29 2.783 1.618 6.223 2.594 9.78 2.594 2.398 0 5.033-.497 7.458-1.527.365-.155.672.241.3.501z" />
+    </svg>
+  )
+}
+
+/** Moonshot AI — crescent moon mark (Kimi models)
+ * Brand color: #5B5FC7 (Kimi blue-purple) */
+export function MoonshotLogo({ className }: LogoProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="#5B5FC7" aria-label="Moonshot">
+      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-1.85 0-3.55-.63-4.9-1.69C8.89 16.5 11.35 15 14 15c1.58 0 3.03.57 4.15 1.52A7.963 7.963 0 0 1 12 20zm5.84-3.55A7.456 7.456 0 0 0 14 15a7.44 7.44 0 0 0-5.32 2.22A7.95 7.95 0 0 1 4 12c0-4.41 3.59-8 8-8 1.85 0 3.55.63 4.9 1.69A9.93 9.93 0 0 0 14 9c-1.58 0-3.03.57-4.15 1.52A7.963 7.963 0 0 0 17.84 16.45z" />
+    </svg>
+  )
+}
+
+/** Baidu — bear paw mark (ERNIE models)
+ * SVG source: https://github.com/simple-icons/simple-icons (baidu.svg)
+ * Brand color: #2319DC (Baidu blue) */
+export function BaiduLogo({ className }: LogoProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="#2319DC" aria-label="Baidu">
+      <path d="M9.154 0C7.71 0 6.54 1.658 6.54 3.707c0 2.051 1.171 3.71 2.615 3.71 1.446 0 2.614-1.659 2.614-3.71C11.768 1.658 10.6 0 9.154 0zm7.025.594C14.86.58 13.347 2.589 13.2 3.927c-.187 1.745.25 3.487 2.179 3.735 1.933.25 3.175-1.806 3.422-3.364.252-1.555-.995-3.364-2.362-3.674a1.218 1.218 0 0 0-.261-.03zM3.582 5.535a2.811 2.811 0 0 0-.156.008c-2.118.19-2.428 3.24-2.428 3.24-.287 1.41.686 4.425 3.297 3.864 2.617-.561 2.262-3.68 2.183-4.362-.125-1.018-1.292-2.773-2.896-2.75zm16.534 1.753c-2.308 0-2.617 2.119-2.617 3.616 0 1.43.121 3.425 2.988 3.362 2.867-.063 2.553-3.238 2.553-3.988 0-.745-.62-2.99-2.924-2.99zm-8.264 2.478c-1.424.014-2.708.925-3.323 1.947-1.118 1.868-2.863 3.05-3.112 3.363-.25.309-3.61 2.116-2.864 5.42.746 3.301 3.365 3.237 3.365 3.237s1.93.19 4.171-.31c2.24-.495 4.17.123 4.17.123s5.233 1.748 6.665-1.616c1.43-3.364-.808-5.109-.808-5.109s-2.99-2.306-4.736-4.798c-1.072-1.665-2.348-2.268-3.528-2.257z" />
+    </svg>
+  )
+}
+
+/** Inflection AI — Pi mark (Pi models)
+ * Brand color: #EF6530 (Inflection coral) */
+export function InflectionLogo({ className }: LogoProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="#EF6530" aria-label="Inflection">
+      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-.5 14.5h-1V9h1v7.5zm3 0h-1V11h1v5.5zm0-6.5h-1v-1h1v1z" />
+    </svg>
+  )
+}
+
+/** IBM — 8-bar striped "IBM" letters (Granite models)
+ * Brand color: #0F62FE (IBM blue 60, from IBM Design Language) */
+export function IBMLogo({ className }: LogoProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="#0F62FE" aria-label="IBM">
+      <path d="M1 4h7v1.5H1zm9 0h4v1.5h-4zm6 0h7v1.5h-7zM1 6.5h7V8H1zm9 0h4V8h-4zm6 0h7V8h-7zM3 9h3v1.5H3zm7 0h4v1.5h-4zm6 0h3v1.5h-3zM3 11.5h3V13H3zm7 0h4V13h-4zm6 0h3V13h-3zM3 14h3v1.5H3zm7 0h4v1.5h-4zm6 0h3v1.5h-3zM3 16.5h3V18H3zm7 0h4V18h-4zm6 0h3V18h-3zM1 19h7v1.5H1zm9 0h4v1.5h-4zm6 0h7v1.5h-7z" />
+    </svg>
+  )
+}
+
+/** Tencent — stylized mark (Hunyuan models)
+ * Brand color: #1DA1F2 (Tencent blue) */
+export function TencentLogo({ className }: LogoProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="#1DA1F2" aria-label="Tencent">
+      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14l-1.41-1.41L10.17 13H6v-2h4.17l-1.59-1.59L10 8l4 4-4 4z" />
+    </svg>
+  )
+}
+
+/** ByteDance — note/music mark (Seed, UI-TARS models)
+ * Brand color: #325AB4 (ByteDance blue) */
+export function ByteDanceLogo({ className }: LogoProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="#325AB4" aria-label="ByteDance">
+      <path d="M12 2L2 7v10l10 5 10-5V7L12 2zm0 2.18l7.5 3.75V12L12 15.75 4.5 12V7.93L12 4.18zM4.5 13.82L12 17.57v2.25l-7.5-3.75v-2.25zm15 0v2.25l-7.5 3.75v-2.25l7.5-3.75z" />
+    </svg>
+  )
+}
+
+/** Alibaba — cloud mark (Tongyi models)
+ * Brand color: #FF6A00 (Alibaba orange) */
+export function AlibabaLogo({ className }: LogoProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="#FF6A00" aria-label="Alibaba">
+      <path d="M5.6 8C3.6 8 2 9.6 2 11.6v.8C2 14.4 3.6 16 5.6 16h12.8c2 0 3.6-1.6 3.6-3.6v-.8c0-2-1.6-3.6-3.6-3.6H5.6zm1.2 2.4h10.4c.66 0 1.2.54 1.2 1.2s-.54 1.2-1.2 1.2H6.8c-.66 0-1.2-.54-1.2-1.2s.54-1.2 1.2-1.2z" />
     </svg>
   )
 }
@@ -147,6 +322,28 @@ export function DeepSeekLogo({ className }: LogoProps) {
   )
 }
 
+/** Z.ai (Zhipu AI) — stylized "Z" mark (GLM models)
+ * Z.ai (formerly Zhipu AI) develops the GLM family of models.
+ * Brand color: #4F46E5 (indigo, matching their official branding) */
+export function ZhipuLogo({ className }: LogoProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="#4F46E5" aria-label="Z.ai">
+      <path d="M4 4h16v3.5H10.5L20 16.5V20H4v-3.5h9.5L4 7.5V4z" />
+    </svg>
+  )
+}
+
+/** OpenRouter — routing arrows mark (API aggregator)
+ * SVG source: https://cdn.simpleicons.org/openrouter
+ * Brand color: #94A3B8 (slate gray) */
+export function OpenRouterLogo({ className }: LogoProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="#94A3B8" aria-label="OpenRouter">
+      <path d="M16.778 1.844v1.919q-.569-.026-1.138-.032-.708-.008-1.415.037c-1.93.126-4.023.728-6.149 2.237-2.911 2.066-2.731 1.95-4.14 2.75-.396.223-1.342.574-2.185.798-.841.225-1.753.333-1.751.333v4.229s.768.108 1.61.333c.842.224 1.789.575 2.185.799 1.41.798 1.228.683 4.14 2.75 2.126 1.509 4.22 2.11 6.148 2.236.88.058 1.716.041 2.555.005v1.918l7.222-4.168-7.222-4.17v2.176c-.86.038-1.611.065-2.278.021-1.364-.09-2.417-.357-3.979-1.465-2.244-1.593-2.866-2.027-3.68-2.508.889-.518 1.449-.906 3.822-2.59 1.56-1.109 2.614-1.377 3.978-1.466.667-.044 1.418-.017 2.278.02v2.176L24 6.014Z" />
+    </svg>
+  )
+}
+
 /** Qwen — geometric star mark (Qwen / Alibaba models)
  * SVG source: https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/qwen.svg
  * Brand color: #6C5CE7 (Qwen purple) */
@@ -167,7 +364,7 @@ export function QwenLogo({ className }: LogoProps) {
 // 1. Create an SVG component above
 // 2. Add it here with a display name
 
-type ProviderKey = 'anthropic' | 'openai' | 'meta' | 'ollama' | 'google' | 'gemma' | 'qwen' | 'deepseek' | 'duckduckgo' | 'tavily' | 'googlesearch'
+type ProviderKey = 'anthropic' | 'openai' | 'meta' | 'ollama' | 'gemini' | 'gemma' | 'google' | 'qwen' | 'deepseek' | 'zhipu' | 'openrouter' | 'mistral' | 'cohere' | 'xai' | 'perplexity' | 'microsoft' | 'nvidia' | 'ai21' | 'amazon' | 'moonshot' | 'baidu' | 'inflection' | 'ibm' | 'tencent' | 'bytedance' | 'alibaba' | 'duckduckgo' | 'tavily' | 'googlesearch'
 
 interface ProviderInfo {
   name: string
@@ -175,17 +372,35 @@ interface ProviderInfo {
 }
 
 const PROVIDER_REGISTRY: Record<ProviderKey, ProviderInfo> = {
-  anthropic:  { name: 'Anthropic',  Logo: AnthropicLogo },
-  openai:     { name: 'OpenAI',     Logo: OpenAILogo },
-  meta:       { name: 'Meta',       Logo: MetaLogo },
-  ollama:     { name: 'Ollama',     Logo: OllamaLogo },
-  google:     { name: 'Google',     Logo: GoogleLogo },
-  gemma:      { name: 'Gemma',      Logo: GemmaLogo },
-  qwen:       { name: 'Qwen',       Logo: QwenLogo },
-  deepseek:   { name: 'DeepSeek',   Logo: DeepSeekLogo },
-  duckduckgo:   { name: 'DuckDuckGo',     Logo: DuckDuckGoLogo },
-  tavily:       { name: 'Tavily',         Logo: TavilyLogo },
-  googlesearch: { name: 'Google Search',  Logo: GoogleLogo },
+  anthropic:    { name: 'Anthropic',    Logo: AnthropicLogo },
+  openai:       { name: 'OpenAI',       Logo: OpenAILogo },
+  meta:         { name: 'Meta',         Logo: MetaLogo },
+  ollama:       { name: 'Ollama',       Logo: OllamaLogo },
+  gemini:       { name: 'Gemini',       Logo: GeminiLogo },
+  gemma:        { name: 'Gemma',        Logo: GemmaLogo },
+  google:       { name: 'Google',       Logo: GoogleLogo },
+  qwen:         { name: 'Qwen',         Logo: QwenLogo },
+  deepseek:     { name: 'DeepSeek',     Logo: DeepSeekLogo },
+  zhipu:        { name: 'Z.ai',         Logo: ZhipuLogo },
+  openrouter:   { name: 'OpenRouter',   Logo: OpenRouterLogo },
+  mistral:      { name: 'Mistral',      Logo: MistralLogo },
+  cohere:       { name: 'Cohere',       Logo: CohereLogo },
+  xai:          { name: 'xAI',          Logo: XAILogo },
+  perplexity:   { name: 'Perplexity',   Logo: PerplexityLogo },
+  microsoft:    { name: 'Microsoft',    Logo: MicrosoftLogo },
+  nvidia:       { name: 'NVIDIA',       Logo: NvidiaLogo },
+  ai21:         { name: 'AI21',         Logo: AI21Logo },
+  amazon:       { name: 'Amazon',       Logo: AmazonLogo },
+  moonshot:     { name: 'Moonshot',     Logo: MoonshotLogo },
+  baidu:        { name: 'Baidu',        Logo: BaiduLogo },
+  inflection:   { name: 'Inflection',   Logo: InflectionLogo },
+  ibm:          { name: 'IBM',          Logo: IBMLogo },
+  tencent:      { name: 'Tencent',      Logo: TencentLogo },
+  bytedance:    { name: 'ByteDance',    Logo: ByteDanceLogo },
+  alibaba:      { name: 'Alibaba',      Logo: AlibabaLogo },
+  duckduckgo:   { name: 'DuckDuckGo',   Logo: DuckDuckGoLogo },
+  tavily:       { name: 'Tavily',       Logo: TavilyLogo },
+  googlesearch: { name: 'Google Search', Logo: GoogleLogo },
 }
 
 // =============================================================================
@@ -208,25 +423,99 @@ const MODEL_PATTERNS: [string, ProviderKey][] = [
   ['gpt',       'openai'],
   ['o1',        'openai'],
   ['o3',        'openai'],
+  ['o4',        'openai'],
   ['davinci',   'openai'],
+  ['chatgpt',   'openai'],
 
-  // Ollama / Llama models (local tier)
+  // Llama models — use the llama face icon (the MODEL logo, not Meta corporate).
+  // Matches both cloud (meta-llama/*, maverick) and local (ollama) Llama models.
+  ['maverick',  'ollama'],
+  ['meta-llama', 'ollama'],
   ['llama',     'ollama'],
   ['codellama', 'ollama'],
 
-  // Google Gemini (cloud)
-  ['gemini',    'google'],
+  // Gemini models (uses Gemini sparkle logo, not Google "G")
+  ['gemini',    'gemini'],
 
-  // Gemma models (uses the Gemma sparkle logo, not the Google "G")
+  // Gemma models
   ['gemma',        'gemma'],
   ['local-vision', 'gemma'],
+
+  // Mistral AI models
+  ['mistral',   'mistral'],
+  ['mixtral',   'mistral'],
+  ['mistralai', 'mistral'],
+  ['pixtral',   'mistral'],
+  ['codestral', 'mistral'],
+  ['ministral', 'mistral'],
+
+  // Cohere models
+  ['cohere',    'cohere'],
+  ['command-r', 'cohere'],
+  ['command-a', 'cohere'],
+
+  // xAI / Grok models
+  ['grok',      'xai'],
+  ['x-ai',      'xai'],
+
+  // Perplexity models
+  ['perplexity', 'perplexity'],
+  ['sonar',      'perplexity'],
+
+  // Microsoft models (Phi, MAI, WizardLM)
+  ['microsoft', 'microsoft'],
+  ['phi-',      'microsoft'],
+  ['wizardlm',  'microsoft'],
+
+  // NVIDIA models (Nemotron, etc.)
+  ['nvidia',    'nvidia'],
+  ['nemotron',  'nvidia'],
+
+  // AI21 models (Jamba)
+  ['ai21',      'ai21'],
+  ['jamba',     'ai21'],
+
+  // Amazon models (Nova)
+  ['amazon',    'amazon'],
+
+  // Moonshot / Kimi models
+  ['moonshotai', 'moonshot'],
+  ['kimi',       'moonshot'],
+
+  // Baidu models (ERNIE)
+  ['baidu',     'baidu'],
+  ['ernie',     'baidu'],
+
+  // Inflection models (Pi)
+  ['inflection', 'inflection'],
+
+  // IBM models (Granite)
+  ['ibm-granite', 'ibm'],
+  ['granite',     'ibm'],
+
+  // Tencent models (Hunyuan)
+  ['tencent',   'tencent'],
+  ['hunyuan',   'tencent'],
+
+  // ByteDance models (Seed, UI-TARS)
+  ['bytedance-seed', 'bytedance'],
+  ['bytedance',      'bytedance'],
+  ['seed-',          'bytedance'],
+
+  // Alibaba models (Tongyi)
+  ['alibaba',   'alibaba'],
+  ['tongyi',    'alibaba'],
 
   // Web search providers
   ['duckduckgo', 'duckduckgo'],
   ['tavily',     'tavily'],
 
-  // DeepSeek models (Lakeshore tier)
+  // DeepSeek models
   ['deepseek',  'deepseek'],
+
+  // Z.ai / Zhipu models (GLM family)
+  ['glm',       'zhipu'],
+  ['z-ai',      'zhipu'],
 
   // Qwen / Alibaba models (Lakeshore tier)
   ['qwq',       'qwen'],
@@ -267,9 +556,43 @@ export function getModelProvider(modelKey: string): ProviderInfo | null {
  *
  * Renders nothing if the model isn't recognized.
  */
+// Deterministic color palette for unknown providers (letter avatars).
+// These are hand-picked to be legible on both light and dark backgrounds.
+const AVATAR_COLORS = [
+  '#E74C3C', '#E67E22', '#F1C40F', '#2ECC71', '#1ABC9C',
+  '#3498DB', '#9B59B6', '#E91E63', '#00BCD4', '#FF5722',
+  '#795548', '#607D8B', '#8BC34A', '#FF9800', '#673AB7',
+]
+
+function getAvatarColor(name: string): string {
+  let hash = 0
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash)
+  }
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length]
+}
+
+function getProviderInitial(model: string): string {
+  // Extract provider prefix from catalog IDs like "arcee-ai/trinity-mini"
+  if (model.includes('/')) {
+    const provider = model.split('/')[0]
+    return provider.charAt(0).toUpperCase()
+  }
+  return model.charAt(0).toUpperCase()
+}
+
 export function ModelLogo({ model, className }: { model: string; className?: string }) {
   const provider = getModelProvider(model)
-  if (!provider) return null
+  if (!provider) {
+    const initial = getProviderInitial(model)
+    const color = getAvatarColor(model.split('/')[0] || model)
+    return (
+      <svg className={className} viewBox="0 0 24 24" aria-label={model}>
+        <circle cx="12" cy="12" r="11" fill={color} />
+        <text x="12" y="17" textAnchor="middle" fontSize="13" fontWeight="bold" fill="white" fontFamily="system-ui, sans-serif">{initial}</text>
+      </svg>
+    )
+  }
   const { Logo } = provider
   return <Logo className={className} />
 }

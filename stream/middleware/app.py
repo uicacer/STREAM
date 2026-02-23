@@ -43,6 +43,7 @@ from stream.middleware.routes.config import router as config_router
 from stream.middleware.routes.costs import router as costs_router
 from stream.middleware.routes.documents import router as documents_router
 from stream.middleware.routes.health import router as health_router
+from stream.middleware.routes.models import router as models_router
 from stream.middleware.utils.logging_config import configure_logging
 from stream.proxy.app import (
     router as lakeshore_router,  # Lakeshore proxy routes (mounted at /lakeshore in desktop mode)
@@ -327,6 +328,7 @@ app.include_router(config_router, prefix="/v1", tags=["Config"])
 app.include_router(chat_router, prefix="/v1", tags=["Chat"])
 app.include_router(costs_router, prefix="/v1", tags=["Costs"])
 app.include_router(documents_router, prefix="/v1", tags=["Documents"])
+app.include_router(models_router, prefix="/v1", tags=["Models"])
 
 
 # =============================================================================

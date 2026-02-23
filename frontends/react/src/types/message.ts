@@ -196,6 +196,12 @@ export interface MessageMetadata {
   model: string
 
   /**
+   * The actual model confirmed by the provider's response metadata.
+   * For OpenRouter: "deepseek/deepseek-chat", for Anthropic: "claude-sonnet-4-20250514"
+   */
+  verified_model?: string
+
+  /**
    * Optional: How complex the query was judged to be
    * Examples: "simple", "moderate", "complex"
    */
@@ -250,6 +256,12 @@ export interface MessageMetadata {
 export interface StreamMetadata {
   tier: string
   model: string
+  /**
+   * The actual model that served the request, confirmed by the provider's
+   * response metadata (e.g., OpenRouter returns "deepseek/deepseek-chat").
+   * Unlike `model` (what STREAM requested), this is what actually responded.
+   */
+  verified_model?: string
   complexity?: string
   cost?: number
   /**

@@ -63,7 +63,14 @@ async def startup():
     logger.info("Warming up LLM judge (pre-loads local model)...")
     judge_complexity_with_llm("warmup test")
 
-    # Step 5: Warm ping tiers (server mode only).
+    # Step 5: Pre-warm OpenRouter model catalog in background.
+    # This ensures pricing data is available for dynamic catalog models
+    # even before the user opens the model browser in settings.
+    import asyncio
+
+    asyncio.create_task(_prewarm_catalog())
+
+    # Step 6: Warm ping tiers (server mode only).
     # In desktop mode this is skipped — the judge warmup above already pre-loaded
     # the local Ollama model, and cloud/lakeshore don't need warm pings.
     # In server mode, the judge runs through the LiteLLM HTTP gateway which
@@ -97,6 +104,17 @@ async def shutdown():
 
     close_database_pool()
     logger.info("Shutdown complete")
+
+
+async def _prewarm_catalog():
+    """Pre-fetch the OpenRouter model catalog so pricing is available immediately."""
+    try:
+        from stream.middleware.routes.models import get_model_catalog
+
+        await get_model_catalog()
+        logger.info("OpenRouter catalog pre-warmed (pricing available for dynamic models)")
+    except Exception as e:
+        logger.debug(f"Catalog pre-warm skipped: {e}")
 
 
 async def _check_ollama_models():

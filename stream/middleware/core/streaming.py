@@ -223,6 +223,10 @@ async def create_streaming_response(
     routing_fallback_info: dict | None = None,
     judge_cost: float = 0.0,
     web_search_sources: list[str] | None = None,
+    user_api_keys: dict[str, str] | None = None,
+    cloud_provider: str | None = None,
+    local_model: str | None = None,
+    lakeshore_model: str | None = None,
 ) -> AsyncGenerator[str, None]:
     """
     Create a streaming Server-Sent Events (SSE) response with metrics tracking and automatic fallback.
@@ -288,6 +292,7 @@ async def create_streaming_response(
     tiers_tried = [tier]  # Track which tiers we've attempted
     current_tier = tier  # The tier we're currently trying
     current_model = model  # The model we're currently trying
+    verified_model = None  # Actual model from the provider's response metadata
 
     # =========================================================================
     # STEP 1: Send Initial Metadata
@@ -388,6 +393,7 @@ async def create_streaming_response(
                 messages=messages,
                 temperature=temperature,
                 correlation_id=correlation_id,
+                user_api_keys=user_api_keys,
             )
             async for line in stream_with_gap_warnings(raw_stream, current_tier, correlation_id):
                 # Record TTFT on first chunk
@@ -433,9 +439,41 @@ async def create_streaming_response(
                         # Don't yield [DONE] yet - we'll send it after cost metadata
                         continue
 
+                    # Intercept internal metadata and extract reasoning content.
+                    try:
+                        parsed_data = json.loads(data_str)
+
+                        # Intercept verified model metadata from litellm_direct.
+                        if "stream_verified_model" in parsed_data:
+                            verified_model = parsed_data["stream_verified_model"]
+                            logger.info(
+                                f"[{correlation_id}] Verified model: {verified_model}",
+                                extra={"correlation_id": correlation_id},
+                            )
+                            continue  # Don't forward this internal event to the client
+
+                        # Extract reasoning/thinking content from the chunk.
+                        # In desktop mode, litellm_direct.py emits separate {"thinking": ...} events.
+                        # In server mode, reasoning content is embedded in delta.reasoning_content.
+                        # This handles both: it forwards pre-extracted thinking events from desktop
+                        # mode, and extracts from server mode chunks.
+                        if "thinking" in parsed_data:
+                            # Already extracted (desktop mode) — forward as-is
+                            yield f"{line}\n\n"
+                            continue
+                        choices = parsed_data.get("choices", [])
+                        if choices:
+                            delta = choices[0].get("delta", {})
+                            reasoning = delta.get("reasoning_content")
+                            if reasoning:
+                                thinking_event = json.dumps({"thinking": reasoning})
+                                yield f"data: {thinking_event}\n\n"
+
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+
                 # Forward the line to the client immediately
-                # This provides real-time streaming (no buffering)
-                yield f"{line}\n\n"  # Add extra newline for SSE format
+                yield f"{line}\n\n"
 
                 # ---------------------------------------------------------------------
                 # Parse Token Usage (for cost tracking)
@@ -457,6 +495,13 @@ async def create_streaming_response(
 
                         # Parse JSON
                         data = json.loads(data_str)
+
+                        # Extract verified model from regular content chunks
+                        # (fallback for server mode where stream_verified_model
+                        # events aren't emitted — the model field is already
+                        # in each chunk from the provider's API response).
+                        if not verified_model and data.get("model"):
+                            verified_model = data["model"]
 
                         # Method 1: Look for usage in standard OpenAI format
                         if "usage" in data and data["usage"]:
@@ -544,13 +589,14 @@ async def create_streaming_response(
                     "stream_metadata": {
                         "tier": current_tier,
                         "model": current_model,
-                        "complexity": complexity,  # Actual query complexity
+                        "verified_model": verified_model,
+                        "complexity": complexity,
                         "fallback_used": any_fallback,
-                        "tiers_tried": tiers_tried,  # Which tiers did we try?
+                        "tiers_tried": tiers_tried,
                         "cost": {
-                            "total": total_cost,  # Total includes inference + judge
-                            "inference_cost": inference_cost,  # LLM response cost
-                            "judge_cost": judge_cost,  # Complexity judge cost (Haiku, etc.)
+                            "total": total_cost,
+                            "inference_cost": inference_cost,
+                            "judge_cost": judge_cost,
                             "input_tokens": input_tokens,
                             "output_tokens": output_tokens,
                         },
@@ -602,6 +648,28 @@ async def create_streaming_response(
             # ---------------------------------------------------------------------
             # FAILURE - Determine if we should try fallback
             # ---------------------------------------------------------------------
+
+            # Check if this is a billing/credit limit error (needs user action).
+            # This happens when the user's OpenRouter API key has a credit limit
+            # that's too low for the model's max_tokens reservation.
+            is_billing_error = e.status_code == 402 or (
+                isinstance(e.detail, dict) and e.detail.get("error_type") == "billing_limit"
+            )
+            if is_billing_error:
+                detail = e.detail if isinstance(e.detail, dict) else {"message": str(e.detail)}
+                error_response = {
+                    "error": detail.get("message", str(e.detail)),
+                    "error_type": "billing_limit",
+                    "tier": current_tier,
+                    "model": current_model,
+                }
+                logger.warning(
+                    f"[{correlation_id}] Billing limit error: {detail.get('message', '')}",
+                    extra={"correlation_id": correlation_id},
+                )
+                tracker.record_error("billing_limit")
+                yield f"data: {json.dumps(error_response)}\n\n"
+                return
 
             # Check if this is an authentication error (needs user action)
             error_str = str(e.detail).lower()
@@ -660,7 +728,13 @@ async def create_streaming_response(
                 if fallback_tier:
                     tracker.record_fallback(fallback_tier)
                     current_tier = fallback_tier
-                    current_model = get_model_for_tier(fallback_tier)
+                    current_model = get_model_for_tier(
+                        fallback_tier,
+                        cloud_provider=cloud_provider,
+                        local_model=local_model,
+                        lakeshore_model=lakeshore_model,
+                    )
+                    verified_model = None  # Reset — new tier will provide its own
                     tiers_tried.append(fallback_tier)
                     stream_start_time = time.perf_counter()
                     timeout_warning_sent = False
@@ -715,9 +789,15 @@ async def create_streaming_response(
                     # Record fallback in metrics
                     tracker.record_fallback(fallback_tier)
 
-                    # Update for next attempt
+                    # Update for next attempt, preserving the user's model preferences
                     current_tier = fallback_tier
-                    current_model = get_model_for_tier(fallback_tier)
+                    current_model = get_model_for_tier(
+                        fallback_tier,
+                        cloud_provider=cloud_provider,
+                        local_model=local_model,
+                        lakeshore_model=lakeshore_model,
+                    )
+                    verified_model = None  # Reset — new tier will provide its own
                     tiers_tried.append(fallback_tier)
 
                     # Reset timeout tracking for new tier

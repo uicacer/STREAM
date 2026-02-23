@@ -71,19 +71,40 @@ def get_model_cost(model: str) -> dict:
     """
     Get cost rates for a specific model.
 
+    For curated models: reads from litellm_config.yaml (loaded once at startup).
+    For dynamic catalog models: looks up pricing from the OpenRouter catalog cache.
+
     Args:
-        model: Model identifier (e.g., "cloud-claude", "local-llama")
+        model: Model identifier (e.g., "cloud-claude", "cloud-or-dynamic-anthropic/claude-opus-4.6")
 
     Returns:
-        dict: {"input": X, "output": Y} or {"input": 0, "output": 0} if not found
-
-    Example:
-        >>> costs = get_model_cost("cloud-claude")
-        >>> costs["input"]
-        0.000003
+        dict: {"input": X, "output": Y} per-token costs, or zeros if not found
     """
     pricing = load_model_pricing()
-    return pricing.get(model, {"input": 0.0, "output": 0.0})
+    result = pricing.get(model)
+    if result:
+        return result
+
+    # Dynamic OpenRouter models aren't in litellm_config.yaml.
+    # Look up their pricing from the OpenRouter catalog cache instead.
+    if model.startswith("cloud-or-dynamic-"):
+        openrouter_id = model.removeprefix("cloud-or-dynamic-")
+        try:
+            from stream.middleware.routes.models import _catalog_cache
+
+            catalog_data = _catalog_cache.get("data")
+            if catalog_data:
+                for entry in catalog_data.get("models", []):
+                    if entry.get("id") == openrouter_id:
+                        p = entry.get("pricing", {})
+                        return {
+                            "input": p.get("prompt", 0.0),
+                            "output": p.get("completion", 0.0),
+                        }
+        except ImportError:
+            pass
+
+    return {"input": 0.0, "output": 0.0}
 
 
 # def get_all_model_costs() -> dict:

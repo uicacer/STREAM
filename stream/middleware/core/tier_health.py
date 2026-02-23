@@ -303,6 +303,25 @@ def check_tier_health(
                 # in CLOUD_PROVIDERS with its env_key.
                 provider_info = CLOUD_PROVIDERS.get(model, {})
                 env_key = provider_info.get("env_key", "")
+                key_source = provider_info.get("key_source", "env")
+
+                # Dynamic models from the OpenRouter catalog (cloud-or-dynamic-*)
+                # aren't in CLOUD_PROVIDERS — they were discovered at runtime.
+                # They always use the user's OpenRouter key, so treat them
+                # the same as key_source="user" models.
+                if model.startswith("cloud-or-dynamic-"):
+                    return True, "dynamic model — user key validated at chat time"
+
+                # For user-provided keys (key_source="user"), the API key
+                # lives in the user's browser, not in an env var. We can't
+                # validate it during background health checks — it's validated
+                # at chat time or via the /health/validate-key endpoint.
+                # So we skip the env var check and report the tier as
+                # "available" (the user will get a clear error if their key
+                # is invalid when they actually try to use it).
+                if key_source == "user" and not os.environ.get(env_key, ""):
+                    return True, "user-provided key (validated at chat time)"
+
                 if env_key and not os.environ.get(env_key):
                     return False, f"[AUTH] Missing API key: {env_key} not set"
 

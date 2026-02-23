@@ -190,6 +190,29 @@ class ChatCompletionRequest(BaseModel):
         description="Serper.dev API key for Google search (only needed when web_search_provider is 'google')",
     )
 
+    # -------------------------------------------------------------------------
+    # User-provided cloud API keys
+    # -------------------------------------------------------------------------
+    # These allow users to bring their own API keys for cloud models.
+    # Keys are stored in the user's browser (localStorage) and sent with
+    # each request — never stored on the server. This enables STREAM to
+    # work without any server-side API key configuration.
+    #
+    # Priority: user-provided key > environment variable
+    # If both exist, the user's key wins.
+    openrouter_api_key: str | None = Field(
+        default=None,
+        description="User's OpenRouter API key (one key for 500+ models)",
+    )
+    anthropic_api_key: str | None = Field(
+        default=None,
+        description="User's Anthropic API key (direct Claude access)",
+    )
+    openai_api_key: str | None = Field(
+        default=None,
+        description="User's OpenAI API key (direct GPT access)",
+    )
+
 
 # =============================================================================
 # MAIN CHAT ENDPOINT
@@ -596,6 +619,29 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
     )
 
     # =========================================================================
+    # STEP 7b: Build User API Keys Dict
+    # =========================================================================
+    # Collect any user-provided API keys from the request body.
+    # These are sent from the browser (stored in localStorage) and override
+    # server-side environment variables when present.
+    #
+    # The dict maps environment variable names to the user's actual key value.
+    # This format lets litellm_direct.py look up the right key for any model
+    # by checking the model's `env_key` field in CLOUD_PROVIDERS.
+    #
+    # Example: If the user sends openrouter_api_key="sk-or-v1-abc123",
+    #          the dict becomes {"OPENROUTER_API_KEY": "sk-or-v1-abc123"}.
+    #          When litellm_direct resolves "cloud-or-claude" (which needs
+    #          OPENROUTER_API_KEY), it finds the user's key in this dict.
+    user_api_keys: dict[str, str] = {}
+    if request_body.openrouter_api_key:
+        user_api_keys["OPENROUTER_API_KEY"] = request_body.openrouter_api_key
+    if request_body.anthropic_api_key:
+        user_api_keys["ANTHROPIC_API_KEY"] = request_body.anthropic_api_key
+    if request_body.openai_api_key:
+        user_api_keys["OPENAI_API_KEY"] = request_body.openai_api_key
+
+    # =========================================================================
     # STEP 8: Stream Response
     # =========================================================================
     try:
@@ -613,6 +659,10 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
                 routing_fallback_info=routing_fallback_info,
                 judge_cost=judge_cost,
                 web_search_sources=web_search_sources or None,
+                user_api_keys=user_api_keys or None,
+                cloud_provider=request_body.cloud_provider,
+                local_model=request_body.local_model,
+                lakeshore_model=request_body.lakeshore_model,
             ),
             media_type="text/event-stream",  # SSE content type
             headers={

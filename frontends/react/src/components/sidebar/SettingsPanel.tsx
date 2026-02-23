@@ -13,7 +13,7 @@
  * DESIGN: Matches the Streamlit sidebar functionality
  */
 
-import { useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Bot,
   Laptop,
@@ -21,6 +21,7 @@ import {
   Cloud,
   ChevronDown,
   ChevronUp,
+  ChevronRight,
   BarChart3,
   Lightbulb,
   Lock,
@@ -32,12 +33,19 @@ import {
   EyeOff,
   Thermometer,
   Scale,
+  Key,
+  Search,
+  Star,
+  Check,
+  X,
+  ExternalLink,
 } from 'lucide-react'
-import { ModelLogo, DuckDuckGoLogo, TavilyLogo, GoogleLogo } from '../icons/ProviderLogos'
+import { ModelLogo, OpenRouterLogo, DuckDuckGoLogo, TavilyLogo, GoogleLogo } from '../icons/ProviderLogos'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useChatStore } from '../../stores/chatStore'
 import { useHealthStore, getTierDisplayInfo } from '../../stores/healthStore'
 import { authenticateGlobus } from '../../api/auth'
+import { validateApiKey, fetchModelCatalog, type CatalogModel } from '../../api/models'
 import type { Tier, JudgeStrategy, CloudProvider, LocalModel, LakeshoreModel } from '../../types'
 
 /**
@@ -164,19 +172,52 @@ const LAKESHORE_MODEL_CONFIG: Record<LakeshoreModel, { label: string; descriptio
   },
 }
 
-const CLOUD_PROVIDER_CONFIG: Record<CloudProvider, { label: string; provider: string }> = {
-  'cloud-claude': {
-    label: 'Claude Sonnet 4',
-    provider: 'Anthropic',
-  },
-  'cloud-gpt': {
-    label: 'GPT-4o',
-    provider: 'OpenAI',
-  },
-  'cloud-gpt-cheap': {
-    label: 'GPT-4o Mini',
-    provider: 'OpenAI',
-  },
+/**
+ * Cloud provider configuration — curated models for the "quick pick" section.
+ *
+ * These are organized into two groups:
+ *   1. OpenRouter models (cloud-or-*) — accessible with one OpenRouter key
+ *   2. Direct provider models (cloud-*) — require individual provider keys
+ *
+ * The "Browse All" section (Phase 2) dynamically fetches 500+ models
+ * from OpenRouter's catalog API.
+ */
+const OPENROUTER_MODELS: {
+  id: string
+  label: string
+  description: string
+  pricing: string
+  tags: string[]
+}[] = [
+  { id: 'cloud-or-claude', label: 'Claude Sonnet 4', description: 'Best balance of capability & cost', pricing: '$3 / $15', tags: ['multimodal', 'reasoning'] },
+  { id: 'cloud-or-gpt4o', label: 'GPT-4o', description: 'OpenAI flagship multimodal', pricing: '$2.50 / $10', tags: ['multimodal'] },
+  { id: 'cloud-or-gemini-flash', label: 'Gemini 2.5 Flash', description: 'Very fast, 1M context', pricing: '$0.30 / $2.50', tags: ['multimodal'] },
+  { id: 'cloud-or-deepseek-r1', label: 'DeepSeek R1', description: 'Top reasoning at low cost', pricing: '$0.70 / $2.50', tags: ['reasoning'] },
+  { id: 'cloud-or-deepseek-v3', label: 'DeepSeek V3', description: 'Powerful & extremely affordable', pricing: '$0.38 / $0.89', tags: [] },
+  { id: 'cloud-or-llama-maverick', label: 'Llama 4 Maverick', description: 'Best open-source, 1M context', pricing: '$0.17 / $0.60', tags: ['multimodal'] },
+  { id: 'cloud-or-glm5', label: 'GLM-5', description: 'Near-Opus capability, fraction of the cost', pricing: '$0.95 / $2.55', tags: ['reasoning'] },
+]
+
+const DIRECT_MODELS: { id: string; label: string; provider: string; keyType: 'anthropic' | 'openai' }[] = [
+  { id: 'cloud-claude', label: 'Claude Sonnet 4', provider: 'Anthropic', keyType: 'anthropic' },
+  { id: 'cloud-gpt', label: 'GPT-4o', provider: 'OpenAI', keyType: 'openai' },
+  { id: 'cloud-gpt-cheap', label: 'GPT-4o Mini', provider: 'OpenAI', keyType: 'openai' },
+]
+
+/**
+ * Get display name for any cloud provider (curated or dynamic).
+ * Used in the collapsed section header to show the current selection.
+ */
+function getCloudProviderLabel(providerId: string): string {
+  const orModel = OPENROUTER_MODELS.find(m => m.id === providerId)
+  if (orModel) return orModel.label
+  const directModel = DIRECT_MODELS.find(m => m.id === providerId)
+  if (directModel) return directModel.label
+  if (providerId.startsWith('cloud-or-dynamic-')) {
+    const parts = providerId.replace('cloud-or-dynamic-', '').split('/')
+    return parts[parts.length - 1] || providerId
+  }
+  return providerId
 }
 
 interface SettingsPanelProps {
@@ -205,6 +246,14 @@ export function SettingsPanel({ onExampleQuery }: SettingsPanelProps) {
   const setTavilyApiKey = useSettingsStore((state) => state.setTavilyApiKey)
   const serperApiKey = useSettingsStore((state) => state.serperApiKey)
   const setSerperApiKey = useSettingsStore((state) => state.setSerperApiKey)
+  const openrouterApiKey = useSettingsStore((state) => state.openrouterApiKey)
+  const setOpenrouterApiKey = useSettingsStore((state) => state.setOpenrouterApiKey)
+  const anthropicApiKey = useSettingsStore((state) => state.anthropicApiKey)
+  const setAnthropicApiKey = useSettingsStore((state) => state.setAnthropicApiKey)
+  const openaiApiKey = useSettingsStore((state) => state.openaiApiKey)
+  const setOpenaiApiKey = useSettingsStore((state) => state.setOpenaiApiKey)
+  const favoriteModels = useSettingsStore((state) => state.favoriteModels)
+  const toggleFavoriteModel = useSettingsStore((state) => state.toggleFavoriteModel)
 
   /**
    * Get messages for stats calculation
@@ -262,6 +311,56 @@ export function SettingsPanel({ onExampleQuery }: SettingsPanelProps) {
   const [showTavilyKey, setShowTavilyKey] = useState(false)
   const [showSerperKey, setShowSerperKey] = useState(false)
   const [statsOpen, setStatsOpen] = useState(true)
+
+  // Cloud section — API key visibility toggles and validation state
+  const [showOpenrouterKey, setShowOpenrouterKey] = useState(false)
+  const [showAnthropicKey, setShowAnthropicKey] = useState(false)
+  const [showOpenaiKey, setShowOpenaiKey] = useState(false)
+  const [directKeysOpen, setDirectKeysOpen] = useState(false)
+  const [keyValidation, setKeyValidation] = useState<Record<string, { status: 'idle' | 'checking' | 'valid' | 'invalid'; error?: string }>>({})
+
+  // Model catalog browser state
+  const [catalogOpen, setCatalogOpen] = useState(false)
+  const [catalogModels, setCatalogModels] = useState<CatalogModel[]>([])
+  const [catalogFree, setCatalogFree] = useState<CatalogModel[]>([])
+  const [catalogLoading, setCatalogLoading] = useState(false)
+  const [catalogSearch, setCatalogSearch] = useState('')
+  const [catalogFilter, setCatalogFilter] = useState<'all' | 'free' | 'multimodal' | 'reasoning'>('all')
+
+  // Debounced key validation — validates the key after the user stops typing.
+  // Uses a 1-second debounce to avoid validating on every keystroke.
+  const validationTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const validateKey = useCallback((provider: string, key: string) => {
+    if (validationTimer.current) clearTimeout(validationTimer.current)
+    if (!key || key.length < 10) {
+      setKeyValidation(prev => ({ ...prev, [provider]: { status: 'idle' } }))
+      return
+    }
+    setKeyValidation(prev => ({ ...prev, [provider]: { status: 'checking' } }))
+    validationTimer.current = setTimeout(async () => {
+      const result = await validateApiKey(provider, key)
+      setKeyValidation(prev => ({
+        ...prev,
+        [provider]: {
+          status: result.valid ? 'valid' : 'invalid',
+          error: result.error,
+        },
+      }))
+    }, 1000)
+  }, [])
+
+  // Fetch catalog when the "Browse All" section is expanded
+  useEffect(() => {
+    if (!catalogOpen) return
+    setCatalogLoading(true)
+    fetchModelCatalog(openrouterApiKey || undefined)
+      .then((catalog) => {
+        setCatalogModels(catalog.models)
+        setCatalogFree(catalog.free)
+      })
+      .catch((err) => console.error('Failed to fetch model catalog:', err))
+      .finally(() => setCatalogLoading(false))
+  }, [catalogOpen, openrouterApiKey])
 
   /**
    * Globus authentication state
@@ -488,7 +587,7 @@ export function SettingsPanel({ onExampleQuery }: SettingsPanelProps) {
         )}
       </div>
 
-      {/* Cloud Models */}
+      {/* Cloud Models — redesigned with API keys and model catalog */}
       <div className="border rounded-lg bg-muted/30 overflow-hidden">
         <button
           onClick={() => setCloudOpen(!cloudOpen)}
@@ -497,35 +596,370 @@ export function SettingsPanel({ onExampleQuery }: SettingsPanelProps) {
           <Cloud className="w-5 h-5 flex-shrink-0 text-blue-500" />
           <span className="font-medium">Cloud Models</span>
           <span className="text-xs text-muted-foreground ml-auto mr-2">
-            {CLOUD_PROVIDER_CONFIG[cloudProvider]?.label}
+            {getCloudProviderLabel(cloudProvider)}
           </span>
           {cloudOpen ? <ChevronUp className="w-3.5 h-3.5 text-muted-foreground" /> : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />}
         </button>
         {cloudOpen && (
-          <div className="px-3 pb-3 space-y-1 max-h-48 overflow-y-auto">
-            {(Object.entries(CLOUD_PROVIDER_CONFIG) as [CloudProvider, typeof CLOUD_PROVIDER_CONFIG['cloud-claude']][]).map(
-              ([providerKey, config]) => {
-                const isSelected = cloudProvider === providerKey
-                return (
+          <div className="px-3 pb-3 space-y-3">
+            {/* ---- API Keys Section ---- */}
+            <div className="space-y-2">
+              <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wider pt-1">
+                <Key className="w-3 h-3" />
+                API Keys
+              </div>
+
+              {/* OpenRouter key — primary, recommended */}
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-medium">OpenRouter <span className="text-muted-foreground font-normal">(one key for all models)</span></label>
+                  {keyValidation.openrouter?.status === 'checking' && <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />}
+                  {keyValidation.openrouter?.status === 'valid' && <Check className="w-3 h-3 text-green-500" />}
+                  {keyValidation.openrouter?.status === 'invalid' && <X className="w-3 h-3 text-red-500" />}
+                </div>
+                <div className="relative">
+                  <input
+                    type={showOpenrouterKey ? 'text' : 'password'}
+                    value={openrouterApiKey}
+                    onChange={(e) => {
+                      setOpenrouterApiKey(e.target.value)
+                      validateKey('openrouter', e.target.value)
+                    }}
+                    placeholder="sk-or-v1-..."
+                    className="w-full px-2.5 py-1.5 pr-8 text-xs rounded-md border bg-background focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
                   <button
-                    key={providerKey}
-                    onClick={() => handleCloudProviderChange(providerKey)}
-                    className={`
-                      w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left text-sm
-                      transition-colors
-                      ${isSelected
-                        ? 'bg-primary/10 text-primary border border-primary/30'
-                        : 'hover:bg-muted text-foreground'
-                      }
-                    `}
+                    onClick={() => setShowOpenrouterKey(!showOpenrouterKey)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                   >
-                    <ModelLogo model={providerKey} className="w-4 h-4 flex-shrink-0" />
-                    <span className="font-medium flex-1">{config.label}</span>
-                    <span className="text-xs text-muted-foreground">{config.provider}</span>
+                    {showOpenrouterKey ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
                   </button>
-                )
-              }
-            )}
+                </div>
+                {keyValidation.openrouter?.status === 'invalid' && (
+                  <p className="text-[10px] text-red-500">{keyValidation.openrouter.error}</p>
+                )}
+                <a
+                  href="https://openrouter.ai/keys"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[10px] text-blue-500 hover:underline flex items-center gap-0.5"
+                >
+                  Get a free key at openrouter.ai/keys <ExternalLink className="w-2.5 h-2.5" />
+                </a>
+              </div>
+
+              {/* Direct Provider Keys — collapsible "advanced" section */}
+              <button
+                onClick={() => setDirectKeysOpen(!directKeysOpen)}
+                className="w-full flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground transition-colors pt-1"
+              >
+                {directKeysOpen ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                Direct Provider Keys
+              </button>
+              {directKeysOpen && (
+                <div className="space-y-2 pl-2 border-l-2 border-muted">
+                  {/* Anthropic key */}
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-medium">Anthropic</label>
+                      {keyValidation.anthropic?.status === 'checking' && <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />}
+                      {keyValidation.anthropic?.status === 'valid' && <Check className="w-3 h-3 text-green-500" />}
+                      {keyValidation.anthropic?.status === 'invalid' && <X className="w-3 h-3 text-red-500" />}
+                    </div>
+                    <div className="relative">
+                      <input
+                        type={showAnthropicKey ? 'text' : 'password'}
+                        value={anthropicApiKey}
+                        onChange={(e) => {
+                          setAnthropicApiKey(e.target.value)
+                          validateKey('anthropic', e.target.value)
+                        }}
+                        placeholder="sk-ant-..."
+                        className="w-full px-2.5 py-1.5 pr-8 text-xs rounded-md border bg-background focus:outline-none focus:ring-1 focus:ring-primary"
+                      />
+                      <button
+                        onClick={() => setShowAnthropicKey(!showAnthropicKey)}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      >
+                        {showAnthropicKey ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                      </button>
+                    </div>
+                    {keyValidation.anthropic?.status === 'invalid' && (
+                      <p className="text-[10px] text-red-500">{keyValidation.anthropic.error}</p>
+                    )}
+                    <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer" className="text-[10px] text-blue-500 hover:underline flex items-center gap-0.5">
+                      Get key at console.anthropic.com <ExternalLink className="w-2.5 h-2.5" />
+                    </a>
+                  </div>
+
+                  {/* OpenAI key */}
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-medium">OpenAI</label>
+                      {keyValidation.openai?.status === 'checking' && <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />}
+                      {keyValidation.openai?.status === 'valid' && <Check className="w-3 h-3 text-green-500" />}
+                      {keyValidation.openai?.status === 'invalid' && <X className="w-3 h-3 text-red-500" />}
+                    </div>
+                    <div className="relative">
+                      <input
+                        type={showOpenaiKey ? 'text' : 'password'}
+                        value={openaiApiKey}
+                        onChange={(e) => {
+                          setOpenaiApiKey(e.target.value)
+                          validateKey('openai', e.target.value)
+                        }}
+                        placeholder="sk-..."
+                        className="w-full px-2.5 py-1.5 pr-8 text-xs rounded-md border bg-background focus:outline-none focus:ring-1 focus:ring-primary"
+                      />
+                      <button
+                        onClick={() => setShowOpenaiKey(!showOpenaiKey)}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      >
+                        {showOpenaiKey ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                      </button>
+                    </div>
+                    {keyValidation.openai?.status === 'invalid' && (
+                      <p className="text-[10px] text-red-500">{keyValidation.openai.error}</p>
+                    )}
+                    <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" className="text-[10px] text-blue-500 hover:underline flex items-center gap-0.5">
+                      Get key at platform.openai.com <ExternalLink className="w-2.5 h-2.5" />
+                    </a>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* ---- Divider ---- */}
+            <div className="border-t border-border" />
+
+            {/* ---- Model Selection ---- */}
+            <div className="space-y-2">
+              {/* OpenRouter frontier models */}
+              <div className="flex items-center justify-between">
+                <div className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                  <OpenRouterLogo className="w-3 h-3" />
+                  Via OpenRouter
+                </div>
+                <span className="text-[9px] text-muted-foreground/60 italic">in / out per 1M tokens</span>
+              </div>
+              <div className="space-y-1">
+                {OPENROUTER_MODELS.map((model) => {
+                  const isSelected = cloudProvider === model.id
+                  return (
+                    <button
+                      key={model.id}
+                      onClick={() => handleCloudProviderChange(model.id)}
+                      className={`
+                        w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-left text-xs
+                        transition-colors
+                        ${isSelected
+                          ? 'bg-primary/10 text-primary border border-primary/30'
+                          : 'hover:bg-muted text-foreground'
+                        }
+                      `}
+                    >
+                      <ModelLogo model={model.id} className="w-3.5 h-3.5 flex-shrink-0" />
+                      <span className="font-medium flex-1 truncate">{model.label}</span>
+                      <span className="text-[10px] text-muted-foreground flex-shrink-0">{model.pricing}</span>
+                    </button>
+                  )
+                })}
+              </div>
+
+              {/* Favorite models from catalog (if any) */}
+              {favoriteModels.length > 0 && (
+                <>
+                  <div className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                    <Star className="w-3 h-3" /> Favorites
+                  </div>
+                  <div className="space-y-1">
+                    {favoriteModels.map((modelId) => {
+                      const dynamicId = `cloud-or-dynamic-${modelId}`
+                      const isSelected = cloudProvider === dynamicId
+                      const parts = modelId.split('/')
+                      const displayName = parts[parts.length - 1] || modelId
+                      return (
+                        <button
+                          key={dynamicId}
+                          onClick={() => handleCloudProviderChange(dynamicId)}
+                          className={`
+                            w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-left text-xs
+                            transition-colors
+                            ${isSelected
+                              ? 'bg-primary/10 text-primary border border-primary/30'
+                              : 'hover:bg-muted text-foreground'
+                            }
+                          `}
+                        >
+                          <ModelLogo model={modelId} className="w-3.5 h-3.5 flex-shrink-0" />
+                          <span className="font-medium flex-1 truncate">{displayName}</span>
+                          <Star className="w-3 h-3 flex-shrink-0 text-yellow-500 fill-yellow-500" />
+                        </button>
+                      )
+                    })}
+                  </div>
+                </>
+              )}
+
+              {/* Direct provider models */}
+              {(anthropicApiKey || openaiApiKey) && (
+                <>
+                  <div className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
+                    Direct API
+                  </div>
+                  <div className="space-y-1">
+                    {DIRECT_MODELS
+                      .filter((m) =>
+                        (m.keyType === 'anthropic' && anthropicApiKey) ||
+                        (m.keyType === 'openai' && openaiApiKey)
+                      )
+                      .map((model) => {
+                        const isSelected = cloudProvider === model.id
+                        return (
+                          <button
+                            key={model.id}
+                            onClick={() => handleCloudProviderChange(model.id)}
+                            className={`
+                              w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-left text-xs
+                              transition-colors
+                              ${isSelected
+                                ? 'bg-primary/10 text-primary border border-primary/30'
+                                : 'hover:bg-muted text-foreground'
+                              }
+                            `}
+                          >
+                            <ModelLogo model={model.id} className="w-3.5 h-3.5 flex-shrink-0" />
+                            <span className="font-medium flex-1 truncate">{model.label}</span>
+                            <span className="text-[10px] text-muted-foreground flex-shrink-0">{model.provider} Direct</span>
+                          </button>
+                        )
+                      })}
+                  </div>
+                </>
+              )}
+
+              {/* ---- Browse All Models (catalog) ---- */}
+              <button
+                onClick={() => setCatalogOpen(!catalogOpen)}
+                className="w-full flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground transition-colors pt-1"
+              >
+                {catalogOpen ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                Browse All Models <span className="text-[10px]">({catalogModels.length > 0 ? `${catalogModels.length}+` : '500+'})</span>
+              </button>
+              {catalogOpen && (
+                <div className="space-y-2">
+                  {/* Search bar */}
+                  <div className="relative">
+                    <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground" />
+                    <input
+                      type="text"
+                      value={catalogSearch}
+                      onChange={(e) => setCatalogSearch(e.target.value)}
+                      placeholder="Search models..."
+                      className="w-full pl-7 pr-2.5 py-1.5 text-xs rounded-md border bg-background focus:outline-none focus:ring-1 focus:ring-primary"
+                    />
+                  </div>
+
+                  {/* Filter pills */}
+                  <div className="flex gap-1 flex-wrap">
+                    {([
+                      { key: 'all', label: 'All' },
+                      { key: 'free', label: 'Free' },
+                      { key: 'multimodal', label: 'Multimodal' },
+                      { key: 'reasoning', label: 'Reasoning' },
+                    ] as const).map(({ key, label }) => (
+                      <button
+                        key={key}
+                        onClick={() => setCatalogFilter(key)}
+                        className={`px-2 py-0.5 text-[10px] rounded-full transition-colors ${
+                          catalogFilter === key
+                            ? 'bg-primary text-primary-foreground'
+                            : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Model list */}
+                  {catalogLoading ? (
+                    <div className="flex items-center justify-center py-4">
+                      <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+                      <span className="ml-2 text-xs text-muted-foreground">Loading catalog...</span>
+                    </div>
+                  ) : (
+                    <div className="max-h-80 overflow-y-auto space-y-0.5">
+                      {(catalogFilter === 'free' ? catalogFree : catalogModels)
+                        .filter((m) => {
+                          if (catalogFilter === 'multimodal' && !m.supports_vision) return false
+                          if (catalogFilter === 'reasoning') {
+                            const id = m.id.toLowerCase()
+                            const isReasoning = id.includes('o1') || id.includes('o3') || id.includes('o4') || id.includes('deepseek-r1') || id.includes('qwq') || id.includes('glm') || m.name.toLowerCase().includes('reason')
+                            if (!isReasoning) return false
+                          }
+                          if (!catalogSearch) return true
+                          const q = catalogSearch.toLowerCase()
+                          return m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q) || m.provider.toLowerCase().includes(q)
+                        })
+                        .slice(0, 200)
+                        .map((model) => {
+                          const dynamicId = `cloud-or-dynamic-${model.id}`
+                          const isSelected = cloudProvider === dynamicId
+                          const isFavorited = favoriteModels.includes(model.id)
+                          return (
+                            <div
+                              key={model.id}
+                              className={`
+                                flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs
+                                transition-colors cursor-pointer
+                                ${isSelected
+                                  ? 'bg-primary/10 text-primary border border-primary/30'
+                                  : 'hover:bg-muted text-foreground'
+                                }
+                              `}
+                              onClick={() => handleCloudProviderChange(dynamicId)}
+                            >
+                              <ModelLogo model={model.id} className="w-3.5 h-3.5 flex-shrink-0" />
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-1">
+                                  <span className="font-medium truncate">{model.name}</span>
+                                  {model.is_free && (
+                                    <span className="px-1 py-0 text-[9px] bg-green-500/20 text-green-600 dark:text-green-400 rounded">FREE</span>
+                                  )}
+                                  {model.supports_vision && (
+                                    <span className="px-1 py-0 text-[9px] bg-blue-500/20 text-blue-600 dark:text-blue-400 rounded">Vision</span>
+                                  )}
+                                </div>
+                                <div className="text-[10px] text-muted-foreground flex items-center gap-2">
+                                  <span>{model.provider}</span>
+                                  <span>{model.pricing.prompt_display}/{model.pricing.completion_display}</span>
+                                  {model.context_length > 0 && <span>{Math.round(model.context_length / 1000)}K ctx</span>}
+                                </div>
+                              </div>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  toggleFavoriteModel(model.id)
+                                }}
+                                className="p-0.5 hover:bg-muted rounded flex-shrink-0"
+                                title={isFavorited ? 'Remove from favorites' : 'Add to favorites'}
+                              >
+                                <Star className={`w-3 h-3 ${isFavorited ? 'text-yellow-500 fill-yellow-500' : 'text-muted-foreground'}`} />
+                              </button>
+                            </div>
+                          )
+                        })}
+                      {catalogModels.length === 0 && !catalogLoading && (
+                        <p className="text-[10px] text-muted-foreground text-center py-2">
+                          {openrouterApiKey ? 'No models found' : 'Enter an OpenRouter API key to browse models'}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>

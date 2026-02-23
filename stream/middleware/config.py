@@ -436,33 +436,162 @@ TIERS = {
 # =============================================================================
 # CLOUD PROVIDERS
 # =============================================================================
-# Available cloud providers that users can choose from.
-# Each provider maps to a model_name in litellm_config.yaml
 #
-# Users can switch providers in settings if:
-# - Their current provider's subscription expired
-# - They prefer a different model
-# - One provider is having issues
+# STREAM supports two methods for accessing cloud models:
+#
+# 1. OPENROUTER (aggregator — recommended for most users):
+#    - One API key gives access to 500+ models from all major providers.
+#    - User enters their own key in the STREAM settings panel.
+#    - The key is stored in the browser (localStorage), never on the server.
+#    - LiteLLM natively supports the `openrouter/` prefix for routing.
+#    - Free models available (rate-limited, no payment required).
+#
+# 2. DIRECT PROVIDER KEYS (advanced users):
+#    - User enters their own Anthropic or OpenAI API key.
+#    - Bypasses the aggregator for potentially lower latency.
+#    - Each provider billed separately.
+#
+# KEY SOURCE:
+# -----------
+# The "key_source" field tells the system where to find the API key:
+#   - "user": Key comes from the user's browser (sent in each request body).
+#             Used for OpenRouter and user-provided direct keys.
+#   - "env":  Key comes from server environment variable (legacy/admin mode).
+#             Used when ANTHROPIC_API_KEY or OPENAI_API_KEY is set in .env.
+#
+# When a user provides their own key, it takes priority over env vars.
+# This allows STREAM to work in both personal (user keys) and shared
+# (admin-managed env vars) deployment modes.
 #
 CLOUD_PROVIDERS = {
+    # -----------------------------------------------------------------
+    # OpenRouter models (one API key for all — aggregator)
+    # -----------------------------------------------------------------
+    # These use the `openrouter/` prefix in LiteLLM, which routes to
+    # https://openrouter.ai/api/v1 automatically. The user provides
+    # a single OPENROUTER_API_KEY that unlocks all models.
+    #
+    # CURATED FRONTIER SET — the best 1-2 models from each major provider.
+    # Updated to reflect actual frontier models, not older/cheaper variants.
+    "cloud-or-claude": {
+        "name": "Claude Sonnet 4",
+        "provider": "OpenRouter",
+        "description": "Anthropic's best balance of capability, speed, and cost",
+        "env_key": "OPENROUTER_API_KEY",
+        "key_source": "user",
+        "category": "recommended",
+        "tags": ["multimodal", "reasoning"],
+    },
+    "cloud-or-gpt4o": {
+        "name": "GPT-4o",
+        "provider": "OpenRouter",
+        "description": "OpenAI's flagship multimodal model",
+        "env_key": "OPENROUTER_API_KEY",
+        "key_source": "user",
+        "category": "recommended",
+        "tags": ["multimodal"],
+    },
+    "cloud-or-gemini-pro": {
+        "name": "Gemini 2.5 Pro",
+        "provider": "OpenRouter",
+        "description": "Google's most capable model with 1M context",
+        "env_key": "OPENROUTER_API_KEY",
+        "key_source": "user",
+        "category": "recommended",
+        "tags": ["multimodal", "reasoning"],
+    },
+    "cloud-or-gemini-flash": {
+        "name": "Gemini 2.5 Flash",
+        "provider": "OpenRouter",
+        "description": "Google's fast model — 1M context, very low cost",
+        "env_key": "OPENROUTER_API_KEY",
+        "key_source": "user",
+        "category": "recommended",
+        "tags": ["multimodal"],
+    },
+    "cloud-or-o3-mini": {
+        "name": "o3-mini",
+        "provider": "OpenRouter",
+        "description": "OpenAI's reasoning specialist — great for math & code",
+        "env_key": "OPENROUTER_API_KEY",
+        "key_source": "user",
+        "category": "recommended",
+        "tags": ["reasoning"],
+    },
+    "cloud-or-deepseek-r1": {
+        "name": "DeepSeek R1",
+        "provider": "OpenRouter",
+        "description": "Top reasoning model at a fraction of the cost",
+        "env_key": "OPENROUTER_API_KEY",
+        "key_source": "user",
+        "category": "recommended",
+        "tags": ["reasoning"],
+    },
+    "cloud-or-llama-maverick": {
+        "name": "Llama 4 Maverick",
+        "provider": "OpenRouter",
+        "description": "Meta's best open-source model — 1M context, multimodal",
+        "env_key": "OPENROUTER_API_KEY",
+        "key_source": "user",
+        "category": "recommended",
+        "tags": ["multimodal"],
+    },
+    "cloud-or-deepseek-v3": {
+        "name": "DeepSeek V3",
+        "provider": "OpenRouter",
+        "description": "Powerful and extremely affordable general-purpose model",
+        "env_key": "OPENROUTER_API_KEY",
+        "key_source": "user",
+        "category": "budget",
+        "tags": [],
+    },
+    "cloud-or-glm5": {
+        "name": "GLM-5",
+        "provider": "OpenRouter",
+        "description": "Z.ai's frontier model — near-Opus capability at a fraction of the cost",
+        "env_key": "OPENROUTER_API_KEY",
+        "key_source": "user",
+        "category": "recommended",
+        "tags": ["reasoning"],
+    },
+    # -----------------------------------------------------------------
+    # Direct provider models (user provides their own provider key)
+    # -----------------------------------------------------------------
+    # These call the provider API directly (no aggregator hop).
+    # Lower latency than OpenRouter but requires separate keys.
     "cloud-claude": {
         "name": "Claude Sonnet 4",
         "provider": "Anthropic",
-        "description": "Best for complex reasoning and coding",
-        "env_key": "ANTHROPIC_API_KEY",  # Required env var
+        "description": "Direct Anthropic API — lowest latency",
+        "env_key": "ANTHROPIC_API_KEY",
+        "key_source": "user",
+        "category": "direct",
     },
     "cloud-gpt": {
         "name": "GPT-4o",
         "provider": "OpenAI",
-        "description": "Strong general-purpose model with vision",
+        "description": "Direct OpenAI API — lowest latency",
         "env_key": "OPENAI_API_KEY",
+        "key_source": "user",
+        "category": "direct",
     },
     "cloud-gpt-cheap": {
         "name": "GPT-4o Mini",
         "provider": "OpenAI",
-        "description": "Fast and affordable with vision",
+        "description": "Direct OpenAI API — fast and affordable",
         "env_key": "OPENAI_API_KEY",
+        "key_source": "user",
+        "category": "direct",
     },
+}
+
+# Map cloud provider IDs to the env var key name that holds the API key.
+# Used when the user provides keys via the request body — we need to know
+# which user-provided key field corresponds to which provider.
+CLOUD_PROVIDER_KEY_MAPPING = {
+    "OPENROUTER_API_KEY": "openrouter_api_key",
+    "ANTHROPIC_API_KEY": "anthropic_api_key",
+    "OPENAI_API_KEY": "openai_api_key",
 }
 
 # Default cloud provider (can be overridden by user in settings)
@@ -518,11 +647,22 @@ VISION_CAPABLE_MODELS = {
     "local-vision",
     # Lakeshore: Qwen2.5-VL-72B (vision-language model on H100)
     "lakeshore-qwen-vl-72b",
-    # Cloud: Claude Sonnet 4, GPT-4o, and GPT-4o Mini all support vision
+    # Cloud (direct): Claude Sonnet 4, GPT-4o, and GPT-4o Mini all support vision
     "cloud-claude",
     "cloud-gpt",
     "cloud-gpt-cheap",
+    # Cloud (OpenRouter): frontier models with vision/multimodal support
+    "cloud-or-claude",
+    "cloud-or-gpt4o",
+    "cloud-or-gemini-pro",
+    "cloud-or-gemini-flash",
+    "cloud-or-llama-maverick",
 }
+# Note: Dynamically-selected OpenRouter models may also support vision.
+# The model catalog API includes modality info, and the frontend marks
+# vision-capable models. For static routing, only the curated set above
+# is checked. Dynamic models are assumed vision-capable if the user
+# explicitly selected them for an image query.
 
 # =============================================================================
 # CONTEXT LIMITS
@@ -587,13 +727,31 @@ MODEL_CONTEXT_LIMITS = {
     "lakeshore-qwq": {"total": 32768, "reserve_output": 2048},
     "lakeshore-qwen-vl-72b": {"total": 32768, "reserve_output": 2048},
     "lakeshore-qwen": {"total": 32768, "reserve_output": 2048},  # Legacy
-    # Cloud: Full native context limits
+    # Cloud (direct): Full native context limits
     # max_input = 200000 - 4000 = 196000 tokens (~780KB of text)
     "cloud-claude": {"total": 200000, "reserve_output": 4000},
     "cloud-haiku": {"total": 200000, "reserve_output": 4000},
     "cloud-gpt": {"total": 128000, "reserve_output": 4000},
     "cloud-gpt-cheap": {"total": 128000, "reserve_output": 4000},
+    # Cloud (OpenRouter): context limits match the underlying provider models.
+    # OpenRouter passes through to the actual provider without adding limits.
+    "cloud-or-claude": {"total": 200000, "reserve_output": 4000},
+    "cloud-or-gpt4o": {"total": 128000, "reserve_output": 4000},
+    "cloud-or-gemini-pro": {"total": 1000000, "reserve_output": 8000},
+    "cloud-or-gemini-flash": {"total": 1000000, "reserve_output": 8000},
+    "cloud-or-o3-mini": {"total": 200000, "reserve_output": 4000},
+    "cloud-or-deepseek-r1": {"total": 64000, "reserve_output": 4000},
+    "cloud-or-llama-maverick": {"total": 1000000, "reserve_output": 8000},
+    "cloud-or-deepseek-v3": {"total": 128000, "reserve_output": 4000},
+    "cloud-or-glm5": {"total": 200000, "reserve_output": 4000},
 }
+
+# Default context limits for dynamically-selected OpenRouter models.
+# When a user picks a model from the catalog that isn't in the static
+# list above, we use these safe defaults. The catalog API provides the
+# actual context_length, and the frontend can pass it — but as a safety
+# net, we default to 128K (the most common limit for modern models).
+DEFAULT_CLOUD_CONTEXT_LIMIT = {"total": 128000, "reserve_output": 4000}
 
 # =============================================================================
 # TIMEOUT WARNINGS
@@ -720,6 +878,31 @@ COMPLEXITY_KEYWORDS = {
     ],
     "low": ["what is", "who is", "define", "list", "hello", "hi", "hey", "thanks", "thank you"],
 }
+
+
+# =============================================================================
+# REASONING MODEL DETECTION
+# =============================================================================
+# Models that produce reasoning/thinking content when asked.
+# Used by both desktop mode (litellm_direct.py) and server mode
+# (litellm_client.py) to pass `reasoning_effort` to litellm.
+
+REASONING_MODEL_PATTERNS = [
+    "claude-sonnet-4",
+    "claude-opus",
+    "claude-4",
+    "o1",
+    "o3",
+    "o4",
+    "deepseek-r1",
+    "deepseek/deepseek-r1",
+]
+
+
+def is_reasoning_model(model_name: str) -> bool:
+    """Check if a model supports extended thinking / reasoning output."""
+    lower = model_name.lower()
+    return any(p in lower for p in REASONING_MODEL_PATTERNS)
 
 
 # # =============================================================================

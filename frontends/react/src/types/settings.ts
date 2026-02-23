@@ -70,16 +70,47 @@ export type LakeshoreModel =
   | 'lakeshore-qwq'
 
 /**
- * CloudProvider - Available cloud model providers
+ * CloudProvider - Cloud model provider identifier
  *
- * When using the "cloud" tier, users can choose which provider to use.
- * Each has different capabilities and pricing.
+ * STREAM supports two ways to access cloud models:
  *
- * - "cloud-claude" → Claude Sonnet (Anthropic) - Best for reasoning/coding
- * - "cloud-gpt"    → GPT-4o (OpenAI) - Strong general-purpose with vision
- * - "cloud-gpt-cheap" → GPT-4o Mini (OpenAI) - Fast and affordable with vision
+ * 1. OpenRouter (aggregator) — one API key for 500+ models:
+ *    "cloud-or-claude"       → Claude Sonnet 4 via OpenRouter
+ *    "cloud-or-gpt4o"        → GPT-4o via OpenRouter
+ *    "cloud-or-gpt4o-mini"   → GPT-4o Mini via OpenRouter
+ *    "cloud-or-gemini-flash" → Gemini 2.0 Flash via OpenRouter
+ *    "cloud-or-llama-70b"    → Llama 3.1 70B via OpenRouter
+ *    "cloud-or-dynamic-*"    → Any model from the OpenRouter catalog
+ *
+ * 2. Direct provider keys (advanced):
+ *    "cloud-claude"     → Claude Sonnet via direct Anthropic API
+ *    "cloud-gpt"        → GPT-4o via direct OpenAI API
+ *    "cloud-gpt-cheap"  → GPT-4o Mini via direct OpenAI API
+ *
+ * WHY `string` INSTEAD OF A UNION TYPE?
+ * With OpenRouter's dynamic catalog (500+ models), we can't enumerate
+ * every possible value at compile time. The "cloud-or-dynamic-*" prefix
+ * pattern means any model from the catalog can be selected. We keep
+ * known defaults as constants below for type safety where it matters.
  */
-export type CloudProvider = 'cloud-claude' | 'cloud-gpt' | 'cloud-gpt-cheap'
+export type CloudProvider = string
+
+export const KNOWN_CLOUD_PROVIDERS = [
+  'cloud-or-claude',
+  'cloud-or-gpt4o',
+  'cloud-or-gemini-pro',
+  'cloud-or-gemini-flash',
+  'cloud-or-o3-mini',
+  'cloud-or-deepseek-r1',
+  'cloud-or-llama-maverick',
+  'cloud-or-deepseek-v3',
+  'cloud-or-glm5',
+  'cloud-claude',
+  'cloud-gpt',
+  'cloud-gpt-cheap',
+] as const
+
+export const DEFAULT_CLOUD_PROVIDER: CloudProvider = 'cloud-or-claude'
 
 /**
  * WebSearchProvider - Available web search providers

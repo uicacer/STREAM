@@ -10,7 +10,7 @@ Purpose: Answer "Does this fit in the model's context window?"
 
 import logging
 
-from stream.middleware.config import MODEL_CONTEXT_LIMITS
+from stream.middleware.config import DEFAULT_CLOUD_CONTEXT_LIMIT, MODEL_CONTEXT_LIMITS
 
 logger = logging.getLogger(__name__)
 
@@ -39,11 +39,15 @@ def get_max_input_tokens(model: str) -> int:
     if config:
         return config["total"] - config["reserve_output"]
 
-    # Default: assume large context (Claude-sized) for unknown models
+    # Default for unknown models (e.g., dynamically-selected OpenRouter models).
+    # Uses DEFAULT_CLOUD_CONTEXT_LIMIT (128K total - 4K reserved = 124K input).
+    # This is a safe assumption — most modern models support at least 128K.
+    default = DEFAULT_CLOUD_CONTEXT_LIMIT
     logger.warning(
-        f"No context limit configured for {model}, assuming 196K", extra={"model": model}
+        f"No context limit configured for {model}, " f"using default ({default['total']})",
+        extra={"model": model},
     )
-    return 196000
+    return default["total"] - default["reserve_output"]
 
 
 def check_context_limit(estimated_tokens: int, model: str, correlation_id: str) -> tuple[bool, int]:

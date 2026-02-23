@@ -145,6 +145,22 @@ def _resolve_model(friendly_name: str) -> dict:
         Dict of kwargs to pass to litellm.acompletion() or litellm.completion()
     """
     if friendly_name not in _MODEL_MAP:
+        # =====================================================================
+        # DYNAMIC OPENROUTER MODELS
+        # =====================================================================
+        # When a user picks a model from the OpenRouter catalog browser,
+        # the model ID is something like "cloud-or-dynamic-anthropic/claude-sonnet-4".
+        # This model isn't in litellm_config.yaml (it was discovered at runtime
+        # from OpenRouter's /api/v1/models endpoint).
+        #
+        # We construct the litellm kwargs dynamically:
+        #   - Strip the "cloud-or-dynamic-" prefix to get the OpenRouter model ID
+        #   - Prepend "openrouter/" so LiteLLM routes to OpenRouter's API
+        #   - The API key will be injected by the user key injection code above
+        if friendly_name.startswith("cloud-or-dynamic-"):
+            openrouter_model_id = friendly_name.removeprefix("cloud-or-dynamic-")
+            return {"model": f"openrouter/{openrouter_model_id}"}
+
         raise ValueError(
             f"Unknown model: {friendly_name}. " f"Available: {list(_MODEL_MAP.keys())}"
         )
@@ -241,6 +257,12 @@ async def _forward_lakeshore(
         extra={"correlation_id": correlation_id, "model": model},
     )
 
+    # Emit verified model metadata for lakeshore — the HuggingFace model
+    # running on the GPU. Emitted early so streaming.py captures it
+    # regardless of whether we use relay streaming or batch mode.
+    verified_event = {"stream_verified_model": hf_name}
+    yield f"data: {json.dumps(verified_event)}"
+
     # =====================================================================
     # PATH 1: TRUE STREAMING via WebSocket relay
     # =====================================================================
@@ -324,8 +346,6 @@ async def _forward_lakeshore(
         extra={"correlation_id": correlation_id},
     )
 
-    # Yield the complete response as a single SSE chunk (no artificial delays).
-    # For real token-by-token streaming, configure RELAY_URL (PATH 1 above).
     if content:
         chunk = {
             "choices": [{"index": 0, "delta": {"content": content}}],
@@ -525,6 +545,7 @@ async def forward_direct(
     messages: list[dict],
     temperature: float,
     correlation_id: str,
+    user_api_keys: dict[str, str] | None = None,
 ) -> AsyncGenerator[str, None]:
     """
     Call litellm library directly and stream the response as SSE lines.
@@ -546,12 +567,31 @@ async def forward_direct(
     For Local and Cloud tiers: uses litellm.acompletion() which calls the
     provider API directly (Ollama for local, Anthropic/OpenAI for cloud).
 
+    USER-PROVIDED API KEYS:
+    -----------------------
+    When user_api_keys is provided, the user's key overrides the env var
+    or config-file key for that provider. This is how STREAM supports
+    "bring your own key" without any server-side configuration:
+
+        1. User enters their OpenRouter key in the settings panel
+        2. Frontend stores it in localStorage, sends it with each request
+        3. chat.py extracts it into user_api_keys dict
+        4. streaming.py → litellm_client.py → here
+        5. We inject it as kwargs["api_key"] before calling litellm
+
+    The key mapping works via CLOUD_PROVIDERS[model]["env_key"]:
+        "cloud-or-claude" → env_key = "OPENROUTER_API_KEY"
+        user_api_keys = {"OPENROUTER_API_KEY": "sk-or-v1-abc123"}
+        → kwargs["api_key"] = "sk-or-v1-abc123"
+
     Args:
         model: Friendly model name (e.g., "cloud-claude", "local-llama")
                Gets translated to actual provider model name internally.
         messages: Conversation history (list of {role, content} dicts)
         temperature: 0.0 = deterministic, 2.0 = creative
         correlation_id: Unique request ID for log tracing
+        user_api_keys: Optional dict of user-provided API keys.
+                       Maps env var names → key values.
 
     Yields:
         SSE-formatted lines (same format as LiteLLM HTTP server)
@@ -568,37 +608,109 @@ async def forward_direct(
         {
             "messages": messages,
             "temperature": temperature,
-            "stream": True,  # Enable streaming (returns async generator of chunks)
+            "stream": True,
         }
     )
 
-    logger.debug(
-        f"[{correlation_id}] Direct litellm call: {model} → {kwargs['model']}",
+    # Enable extended thinking/reasoning for models that support it.
+    # `reasoning_effort` only works for direct provider calls (openai/, anthropic/).
+    # OpenRouter-proxied models (openrouter/*) don't support this litellm param —
+    # litellm raises UnsupportedParamsError. For OpenRouter, thinking is handled
+    # natively by the provider if the model supports it.
+    from stream.middleware.config import is_reasoning_model
+
+    actual_model = kwargs["model"]
+    is_openrouter = actual_model.startswith("openrouter/")
+    if not is_openrouter and (is_reasoning_model(actual_model) or is_reasoning_model(model)):
+        kwargs["reasoning_effort"] = "low"
+        logger.info(
+            f"[{correlation_id}] Enabling reasoning (effort=low) for {actual_model}",
+            extra={"correlation_id": correlation_id},
+        )
+
+    # Set max_tokens for curated OpenRouter models from their configured limits.
+    # For dynamic catalog models, we intentionally do NOT set max_tokens so the
+    # model uses its full output capacity.
+    from stream.middleware.config import MODEL_CONTEXT_LIMITS
+
+    if model.startswith("cloud-or-") and not model.startswith("cloud-or-dynamic-"):
+        limits = MODEL_CONTEXT_LIMITS.get(model)
+        if limits:
+            kwargs["max_tokens"] = limits["reserve_output"]
+
+    # -------------------------------------------------------------------------
+    # USER API KEY INJECTION
+    # -------------------------------------------------------------------------
+    # If the user provided their own API key for this model's provider,
+    # inject it into the litellm call. This overrides the env var / config.
+    #
+    # How it works:
+    #   1. Look up the model in CLOUD_PROVIDERS to find its env_key
+    #      e.g., "cloud-or-claude" → env_key = "OPENROUTER_API_KEY"
+    #   2. Check if user_api_keys has a value for that env_key
+    #   3. If yes, set kwargs["api_key"] to the user's key
+    #
+    # This is safe for local models too — they won't match CLOUD_PROVIDERS,
+    # so the injection is skipped.
+    if user_api_keys and model.startswith("cloud"):
+        from stream.middleware.config import CLOUD_PROVIDERS
+
+        provider_info = CLOUD_PROVIDERS.get(model)
+        if provider_info:
+            env_key_name = provider_info.get("env_key", "")
+            user_key = user_api_keys.get(env_key_name)
+            if user_key:
+                kwargs["api_key"] = user_key
+                logger.debug(
+                    f"[{correlation_id}] Using user-provided API key for {env_key_name}",
+                    extra={"correlation_id": correlation_id, "model": model},
+                )
+        elif model.startswith("cloud-or-dynamic-"):
+            # Dynamic OpenRouter model (from catalog browser, not in CLOUD_PROVIDERS).
+            # These always use the user's OpenRouter key.
+            user_key = user_api_keys.get("OPENROUTER_API_KEY")
+            if user_key:
+                kwargs["api_key"] = user_key
+
+    # Log at INFO level so model routing issues are visible in terminal output.
+    logger.info(
+        f"[{correlation_id}] litellm call: {model} → {kwargs['model']} "
+        f"(max_tokens={kwargs.get('max_tokens', 'not set')})",
         extra={"correlation_id": correlation_id, "model": model},
     )
 
     try:
-        # litellm.acompletion() = async version of litellm.completion()
-        # With stream=True, it returns an async generator (CustomStreamWrapper)
-        # that yields ModelResponse chunks as the LLM generates tokens.
         response = await litellm.acompletion(**kwargs)
 
-        # Each chunk is a ModelResponse object with the same structure as
-        # OpenAI's streaming format. We convert to dict → JSON → SSE line.
-        #
-        # Example chunk after model_dump():
-        # {
-        #   "choices": [{"delta": {"content": "Hello"}, "finish_reason": null}],
-        #   "usage": null  (or {"prompt_tokens": X, "completion_tokens": Y} in last chunk)
-        # }
+        first_chunk = True
         async for chunk in response:
-            # model_dump() converts the Pydantic model to a plain dict.
-            # exclude_none=True removes null fields for cleaner output.
             chunk_dict = chunk.model_dump(exclude_none=True)
+            if first_chunk:
+                response_model = chunk_dict.get("model", "unknown")
+                logger.info(
+                    f"[{correlation_id}] Verified response model: {response_model}",
+                    extra={"correlation_id": correlation_id},
+                )
+                verified_event = {
+                    "stream_verified_model": response_model,
+                }
+                yield f"data: {json.dumps(verified_event)}"
+                first_chunk = False
+
+            # Extract reasoning/thinking content from the chunk.
+            # LiteLLM standardizes this in delta.reasoning_content for all
+            # providers (Claude thinking, DeepSeek R1 reasoning, OpenAI o-series).
+            # After extracting, we remove it from the chunk to prevent streaming.py
+            # from extracting the same content again (which caused doubled words).
+            choices = chunk_dict.get("choices", [])
+            if choices:
+                delta = choices[0].get("delta", {})
+                reasoning = delta.pop("reasoning_content", None)
+                if reasoning:
+                    yield f"data: {json.dumps({'thinking': reasoning})}"
+
             yield f"data: {json.dumps(chunk_dict)}"
 
-        # Signal end-of-stream. This is the SSE convention from OpenAI's API.
-        # streaming.py checks for this to know the response is complete.
         yield "data: [DONE]"
 
     except litellm.AuthenticationError as e:
@@ -637,6 +749,32 @@ async def forward_direct(
         raise HTTPException(
             status_code=503,
             detail=f"Cannot connect to AI provider: {str(e)}",
+        ) from e
+
+    except litellm.APIError as e:
+        error_msg = str(e)
+        # OpenRouter returns 402 when the account doesn't have enough credits
+        # for the model's token reservation. This is NOT a context window issue.
+        # Common cause: user set a key spending limit but never added actual
+        # credits to their OpenRouter account (Credits != Key Limit).
+        if "402" in error_msg or "afford" in error_msg or "credits" in error_msg:
+            raise HTTPException(
+                status_code=402,
+                detail={
+                    "error_type": "billing_limit",
+                    "message": (
+                        "Your OpenRouter account doesn't have enough credits for this model. "
+                        'Go to openrouter.ai/settings/credits and click "Add Credits" to '
+                        "add funds. Note: the key limit on the API Keys page is just a "
+                        "spending cap — you also need actual credits in your account."
+                    ),
+                    "raw_error": error_msg,
+                    "provider": "openrouter",
+                },
+            ) from e
+        raise HTTPException(
+            status_code=502,
+            detail=f"LiteLLM direct call failed: {str(e)}",
         ) from e
 
     except Exception as e:

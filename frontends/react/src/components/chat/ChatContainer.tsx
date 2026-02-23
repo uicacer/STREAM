@@ -15,6 +15,7 @@ import { TypingIndicator } from './TypingIndicator'
 import { ChatInput } from '../input/ChatInput'
 import { ContextLimitDialog, parseContextError, type ContextErrorInfo } from './ContextLimitDialog'
 import { AuthErrorMessage, parseAuthError, type AuthErrorInfo } from './AuthErrorMessage'
+import { BillingErrorMessage, parseBillingError, type BillingErrorInfo } from './BillingErrorMessage'
 import { VisionErrorMessage, parseVisionError, type VisionErrorInfo } from './VisionErrorMessage'
 import { getTotalImageBytes, LAKESHORE_MAX_IMAGE_BYTES } from '../input/ImageUpload'
 import { useChatStore } from '../../stores/chatStore'
@@ -60,6 +61,9 @@ export function ChatContainer() {
 
   // Auth error dialog state
   const [authError, setAuthError] = useState<AuthErrorInfo | null>(null)
+
+  // Billing/credit limit error state
+  const [billingError, setBillingError] = useState<BillingErrorInfo | null>(null)
 
   // Vision/multimodal error state
   const [visionError, setVisionError] = useState<VisionErrorInfo | null>(null)
@@ -342,6 +346,13 @@ export function ChatContainer() {
             finishStreaming()
             return
           }
+          // Check if this is a billing/credit limit error
+          const billErr = parseBillingError(err)
+          if (billErr) {
+            setBillingError(billErr)
+            finishStreaming()
+            return
+          }
           // Check if this is a vision/multimodal error
           const visErr = parseVisionError(err)
           if (visErr) {
@@ -558,6 +569,14 @@ export function ChatContainer() {
               error={authError}
               onSwitchTier={handleAuthSwitchTier}
               onDismiss={handleAuthDismiss}
+            />
+          )}
+
+          {/* Billing/credit limit error */}
+          {billingError && (
+            <BillingErrorMessage
+              error={billingError}
+              onDismiss={() => setBillingError(null)}
             />
           )}
 
