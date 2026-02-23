@@ -26,3 +26,9 @@ repos:
       - id: check-added-large-files
         args: ['--maxkb=1000']    # Prevent commits >1MB
       - id: check-merge-conflict  # Detect merge conflict markers
+
+  # Secret detection — catches accidentally committed API keys, passwords, tokens
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets

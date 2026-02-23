@@ -1,0 +1,39 @@
+# Dependabot configuration
+# Automatically checks for vulnerable or outdated dependencies
+# and opens pull requests to update them.
+#
+# Docs: https://docs.github.com/en/code-security/dependabot
+
+version: 2
+updates:
+  # Python dependencies (pyproject.toml, requirements.txt)
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "deps(python):"
+
+  # JavaScript dependencies (package.json)
+  - package-ecosystem: "npm"
+    directory: "/frontends/react"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "deps(js):"
+
+  # Docker (Dockerfile)
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    commit-message:
+      prefix: "deps(docker):"
+
+  # GitHub Actions (if you add CI workflows later)
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    commit-message:
+      prefix: "deps(actions):"
