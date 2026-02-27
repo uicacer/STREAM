@@ -57,7 +57,7 @@ class TestIsReasoningModel:
             "deepseek/deepseek-chat",
             "mistralai/mistral-large",
             "local-llama",
-            "lakeshore-qwen",
+            "lakeshore-qwen-vl-72b",
         ],
     )
     def test_ignores_non_reasoning_models(self, model_name):

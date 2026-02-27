@@ -6,31 +6,30 @@
 
 ## Table of Contents
 
-1. [The Problem: Why Globus Compute Cannot Stream Tokens](#1-the-problem)
-2. [Alternative Approaches Considered](#2-alternatives-considered)
-3. [Our Solution: The WebSocket Relay Pattern](#3-our-solution)
-4. [Architecture: Control Plane vs Data Plane](#4-architecture)
-5. [How WebSockets Work (A Primer)](#5-websocket-primer)
-6. [The Relay Server](#6-relay-server)
-7. [The Producer: Remote Function on Lakeshore](#7-the-producer)
-8. [The Consumer: Middleware Receiving Tokens](#8-the-consumer)
+1. [The Problem: Why Globus Compute Cannot Stream Tokens](#1-the-problem-why-globus-compute-cannot-stream-tokens)
+2. [Alternative Approaches Considered](#2-alternative-approaches-considered)
+3. [Our Solution: The WebSocket Relay Pattern](#3-our-solution-the-websocket-relay-pattern)
+4. [Architecture: Control Plane vs Data Plane](#4-architecture-control-plane-vs-data-plane)
+5. [How WebSockets Work (A Primer)](#5-how-websockets-work-a-primer)
+6. [The Relay Server](#6-the-relay-server)
+7. [The Producer: Remote Function on Lakeshore](#7-the-producer-remote-function-on-lakeshore)
+8. [The Consumer: Middleware Receiving Tokens](#8-the-consumer-middleware-receiving-tokens)
 9. [Message Protocol](#9-message-protocol)
-10. [The Complete Data Flow (Step by Step)](#10-complete-data-flow)
-11. [Fallback Mechanism: Relay → Batch Mode](#11-fallback-mechanism)
-12. [Security Considerations](#12-security)
-13. [Network Topology and Firewall Traversal](#13-network-topology)
-14. [Performance Characteristics](#14-performance)
-15. [Testing Strategy](#15-testing)
-16. [How to Run and Demo](#16-how-to-run)
-17. [Production Deployment](#17-production)
-18. [Code File Reference](#18-code-reference)
-19. [Frequently Asked Questions](#19-faq)
+10. [The Complete Data Flow (Step by Step)](#10-the-complete-data-flow-step-by-step)
+11. [Fallback Mechanism: Relay → Batch Mode](#11-fallback-mechanism-relay--batch-mode)
+12. [Security Considerations](#12-security-considerations)
+13. [Network Topology and Firewall Traversal](#13-network-topology-and-firewall-traversal)
+14. [Performance Characteristics](#14-performance-characteristics)
+15. [Testing Strategy](#15-testing-strategy)
+16. [How to Run and Demo](#16-how-to-run-and-demo)
+17. [Production Deployment](#17-production-deployment)
+18. [Code File Reference](#18-code-file-reference)
+19. [Frequently Asked Questions](#19-frequently-asked-questions)
 20. [References](#20-references)
 
 ---
 
-## 1. The Problem: Why Globus Compute Cannot Stream Tokens {#1-the-problem}
-
+## 1. The Problem: Why Globus Compute Cannot Stream Tokens
 ### What Globus Compute does
 
 Globus Compute (formerly funcX) is a federated function-as-a-service platform that enables remote execution of Python functions on HPC resources [1]. It provides:
@@ -97,8 +96,7 @@ User sends query → [2-3 second Globus routing] → Tokens appear as GPU genera
 
 ---
 
-## 2. Alternative Approaches Considered {#2-alternatives-considered}
-
+## 2. Alternative Approaches Considered
 Before settling on the WebSocket relay, we evaluated several alternatives:
 
 ### Alternative 1: SSH Port Forwarding (Direct vLLM Access)
@@ -176,8 +174,7 @@ We verified that Lakeshore compute nodes can make outbound WebSocket connections
 
 ---
 
-## 3. Our Solution: The WebSocket Relay Pattern {#3-our-solution}
-
+## 3. Our Solution: The WebSocket Relay Pattern
 The WebSocket relay pattern separates job submission from data delivery:
 
 ```
@@ -223,8 +220,7 @@ In our case:
 
 ---
 
-## 4. Architecture: Control Plane vs Data Plane {#4-architecture}
-
+## 4. Architecture: Control Plane vs Data Plane
 ### Before the relay (batch mode)
 
 ```
@@ -270,8 +266,7 @@ The user sees output appear in real-time while the GPU is still generating subse
 
 ---
 
-## 5. How WebSockets Work (A Primer) {#5-websocket-primer}
-
+## 5. How WebSockets Work (A Primer)
 ### HTTP vs WebSocket
 
 **HTTP** (HyperText Transfer Protocol) is request-response: the client sends a request, the server sends one response, and the connection is done. Every new interaction requires a new request. HTTP is like sending letters — you send one, wait for a reply, send another.
@@ -308,8 +303,7 @@ After the 101 response, the HTTP connection is "upgraded" to a WebSocket connect
 
 ---
 
-## 6. The Relay Server {#6-relay-server}
-
+## 6. The Relay Server
 **Source file:** `stream/relay/server.py` (~435 lines)
 
 ### What it does
@@ -396,8 +390,7 @@ A single relay instance can comfortably handle hundreds of concurrent streams.
 
 ---
 
-## 7. The Producer: Remote Function on Lakeshore {#7-the-producer}
-
+## 7. The Producer: Remote Function on Lakeshore
 **Source file:** `stream/middleware/core/globus_compute_client.py` (the `remote_vllm_streaming` function, lines 158-277)
 
 ### What it does
@@ -469,8 +462,7 @@ for line in response.iter_lines(decode_unicode=True):
 
 ---
 
-## 8. The Consumer: Middleware Receiving Tokens {#8-the-consumer}
-
+## 8. The Consumer: Middleware Receiving Tokens
 **Source file:** `stream/middleware/core/litellm_direct.py` (the `_forward_lakeshore_streaming` function, lines 352-458)
 
 ### What it does
@@ -531,8 +523,7 @@ This ensures the user always gets a response, even if the relay is unavailable �
 
 ---
 
-## 9. Message Protocol {#9-message-protocol}
-
+## 9. Message Protocol
 All messages sent through the relay are JSON strings with a `type` field:
 
 ### Producer → Relay → Consumer
@@ -562,8 +553,7 @@ The relay does not interpret these messages — it forwards them verbatim. This 
 
 ---
 
-## 10. The Complete Data Flow (Step by Step) {#10-complete-data-flow}
-
+## 10. The Complete Data Flow (Step by Step)
 Here is every step that happens from the moment the user presses Enter to the moment they see the first token:
 
 ### Step 1: User sends a message (Browser → Middleware)
@@ -616,8 +606,7 @@ Compare with batch mode: the user would see nothing for 10-15 seconds, then the 
 
 ---
 
-## 11. Fallback Mechanism: Relay → Batch Mode {#11-fallback-mechanism}
-
+## 11. Fallback Mechanism: Relay → Batch Mode
 The relay is an enhancement, not a requirement. If the relay is unavailable, STREAM falls back gracefully:
 
 ### Layer 1: Relay pre-check → Batch (before Globus submission)
@@ -662,8 +651,7 @@ When the frontend receives a fallback SSE event, it calls `markTierFailed(tier)`
 
 ---
 
-## 12. Security Considerations {#12-security}
-
+## 12. Security Considerations
 ### Channel ID as access token
 
 The channel ID is a UUID v4 — 122 bits of randomness. Only someone who knows the exact channel ID can connect to a channel as producer or consumer. This provides equivalent security to a bearer token for the ~10-30 second lifetime of a streaming session.
@@ -689,8 +677,7 @@ The relay enforces that each channel has at most one producer and one consumer. 
 
 ---
 
-## 13. Network Topology and Firewall Traversal {#13-network-topology}
-
+## 13. Network Topology and Firewall Traversal
 ### The firewall problem
 
 ```
@@ -725,21 +712,20 @@ Neither the user's machine nor the Lakeshore compute node can accept inbound con
                           ↓                               ↓
                    ┌──────────────────────────────┐
                    │  Relay Server                 │
-                   │  (public IP / ngrok tunnel)   │
+                   │  (public IP / tunnel)          │
                    │                               │
                    │  Accepts INBOUND connections  │
                    │  from both sides ✓            │
                    └──────────────────────────────┘
 ```
 
-Both sides make **outbound** connections to the relay. The relay is the only component that needs to accept inbound connections, so it runs on a publicly accessible server (or behind an ngrok/localhost.run tunnel during development).
+Both sides make **outbound** connections to the relay. The relay is the only component that needs to accept inbound connections, so it runs on a publicly accessible server (or behind a cloudflared tunnel during development).
 
 This is the same principle used by TURN servers in WebRTC video calls, MQTT brokers in IoT systems, and Globus Compute itself (both the user's SDK and the HPC endpoint connect outbound to `compute.amqps.globus.org`).
 
 ---
 
-## 14. Performance Characteristics {#14-performance}
-
+## 14. Performance Characteristics
 ### Latency added by the relay
 
 The relay adds one network hop in each direction:
@@ -774,8 +760,7 @@ This is well within the threshold for a smooth "typing" experience (humans perce
 
 ---
 
-## 15. Testing Strategy {#15-testing}
-
+## 15. Testing Strategy
 We employ a three-layer testing pyramid:
 
 ### Layer 1: Unit Tests — `tests/test_relay_local.py`
@@ -827,7 +812,7 @@ python -m pytest tests/test_relay_integration.py -v
 
 **Prerequisites:**
 - Relay server running (`python -m stream.relay.server`)
-- Tunnel active (e.g., `ssh -4 -R 80:localhost:8765 nokey@localhost.run`)
+- Tunnel active (e.g., `cloudflared tunnel --url http://localhost:8765`)
 - `RELAY_URL` set in `.env` to the tunnel URL
 - Globus Compute authenticated (`globus-compute-endpoint configure`)
 - vLLM running on Lakeshore
@@ -861,8 +846,7 @@ This test was used during development to verify feasibility before writing the r
 
 ---
 
-## 16. How to Run and Demo {#16-how-to-run}
-
+## 16. How to Run and Demo
 ### Development Setup (3 terminals)
 
 **Terminal 1: Start the relay server**
@@ -883,14 +867,17 @@ Starting WebSocket relay on ws://0.0.0.0:8765
 The relay needs to be reachable from Lakeshore. Use one of:
 
 ```bash
-# Option A: localhost.run (free, no signup, force IPv4)
-ssh -4 -R 80:localhost:8765 nokey@localhost.run
+# Option A: cloudflared (recommended, free, no signup, stable)
+cloudflared tunnel --url http://localhost:8765
 
 # Option B: ngrok (free tier, requires signup)
 ngrok http 8765
+
+# Option C: localhost.run (free, no signup, but drops connections frequently)
+ssh -4 -R 80:localhost:8765 nokey@localhost.run
 ```
 
-Copy the HTTPS URL from the tunnel output (e.g., `https://b277bb105f0a5e.lhr.life`).
+Copy the HTTPS URL from the tunnel output (e.g., `https://builders-moderators-genuine-capable.trycloudflare.com`).
 
 Update your `.env`:
 ```
@@ -904,10 +891,16 @@ RELAY_URL=https://b277bb105f0a5e.lhr.life
 # Desktop dev mode
 python -m stream.desktop.main --dev
 
-# Or with separate frontend
+# Or with separate frontend (for hot-reload UI development)
 python -m stream.desktop.main --dev &
 cd frontends/react && npm run dev:vite
 ```
+
+> **Command breakdown:**
+> - `python -m` — runs a Python module by its dotted path instead of a file path (e.g., `stream.desktop.main` maps to `stream/desktop/main.py`)
+> - `--dev` — tells the desktop app to use the live Vite dev server instead of the bundled static frontend
+> - `&` — runs the process in the background so the terminal is free for the next command
+> - `npm run dev:vite` — starts the React frontend dev server separately (hot module replacement for instant UI updates)
 
 ### Verifying it works
 
@@ -957,12 +950,11 @@ python -m pytest tests/test_e2e_globus_streaming.py -v -s
 
 ---
 
-## 17. Production Deployment {#17-production}
-
+## 17. Production Deployment
 ### Current setup (development)
 
 ```
-Relay: localhost:8765 → ngrok/localhost.run tunnel → public URL
+Relay: localhost:8765 → cloudflared tunnel → public URL
 ```
 
 This works for development and demos but has limitations:
@@ -1012,8 +1004,7 @@ WantedBy=multi-user.target
 
 ---
 
-## 18. Code File Reference {#18-code-reference}
-
+## 18. Code File Reference
 ### Core implementation files
 
 | File | Lines | Purpose |
@@ -1052,8 +1043,7 @@ WantedBy=multi-user.target
 
 ---
 
-## 19. Frequently Asked Questions {#19-faq}
-
+## 19. Frequently Asked Questions
 ### Q: Why not use Server-Sent Events (SSE) instead of WebSockets?
 
 SSE is HTTP-based and unidirectional (server → client only). While the relay's data flow is also unidirectional, SSE has a critical limitation: it requires the server to initiate the stream. In our case, the Lakeshore compute node (the "server" side) is behind a firewall and cannot accept inbound HTTP connections. WebSocket works because both sides make outbound connections to the relay.
@@ -1080,7 +1070,7 @@ Yes. The relay is generic — it forwards any JSON messages between a producer a
 
 ### Q: Why does the tunnel URL change every time?
 
-Free tunnel services (ngrok, localhost.run) assign random subdomains per session. This is a development convenience, not a production concern. In production, the relay runs on a server with a fixed domain name (e.g., `relay.stream.example.com`), so the URL never changes.
+Free tunnel services (cloudflared, ngrok, localhost.run) assign random subdomains per session. This is a development convenience, not a production concern. In production, the relay runs on a server with a fixed domain name (e.g., `relay.stream.example.com`), so the URL never changes.
 
 ### Q: What is the `websockets` library and why do we use it?
 
@@ -1092,8 +1082,7 @@ Free tunnel services (ngrok, localhost.run) assign random subdomains per session
 
 ---
 
-## 20. References {#20-references}
-
+## 20. References
 [1] Chard, R., et al. "funcX: A Federated Function Serving Fabric for Science." *Proceedings of the 29th International Symposium on High-Performance Parallel and Distributed Computing (HPDC)*, 2020. https://doi.org/10.1145/3369583.3392683
 
 [2] Globus Compute SDK Documentation and GitHub Repository. https://github.com/funcx-faas/funcX — No streaming API exists as of 2026. The SDK's `Executor.submit()` returns a `Future` that resolves to the complete return value.

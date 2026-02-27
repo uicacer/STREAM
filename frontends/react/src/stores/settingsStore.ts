@@ -118,7 +118,7 @@ export const useSettingsStore = create<SettingsState>()(
       temperature: 0.7,
       theme: 'dark',
       localModel: 'local-llama',          // Default local model (3B)
-      lakeshoreModel: 'lakeshore-qwen-1.5b',   // Default lakeshore model
+      lakeshoreModel: 'lakeshore-qwen-vl-72b',  // Default lakeshore model (multimodal)
       cloudProvider: 'cloud-or-claude',   // Default: Claude via OpenRouter (one key for all)
       webSearch: false,                   // Web search off by default
       webSearchProvider: 'duckduckgo',    // Free, no API key needed
@@ -226,7 +226,7 @@ export const useSettingsStore = create<SettingsState>()(
       /**
        * Version for migrations - increment when storage format changes
        */
-      version: 10,
+      version: 11,
       /**
        * Migration: Runs automatically when storage version changes.
        * Each version upgrade fixes a specific issue with persisted state.
@@ -264,17 +264,17 @@ export const useSettingsStore = create<SettingsState>()(
           return {
             ...state,
             localModel: 'local-llama',
-            lakeshoreModel: 'lakeshore-qwen-1.5b',
+            lakeshoreModel: 'lakeshore-qwen-vl-72b',
           }
         }
 
         if (version < 5) {
           // v4 → v5: Lakeshore multi-model upgrade.
-          // Migrate from legacy "lakeshore-qwen" to new default "lakeshore-qwen-1.5b".
+          // Migrate from legacy "lakeshore-qwen" to new default.
           console.log('[Settings] Migration v5: upgrading lakeshore model default')
           return {
             ...state,
-            lakeshoreModel: 'lakeshore-qwen-1.5b',
+            lakeshoreModel: 'lakeshore-qwen-vl-72b',
           }
         }
 
@@ -363,6 +363,22 @@ export const useSettingsStore = create<SettingsState>()(
           const currentProvider = state.cloudProvider as string
           const updated = retiredMigration[currentProvider] || currentProvider
           return { ...state, cloudProvider: updated }
+        }
+
+        if (version < 11) {
+          // v10 → v11: Lakeshore model cleanup.
+          // Removed all 1.5B demo models and 32B models. Only 72B models remain.
+          // Migrate users on removed models to the VL 72B default.
+          console.log('[Settings] Migration v11: lakeshore model cleanup (72B only)')
+          const state = persistedState as Record<string, unknown>
+          const validLakeshoreModels = ['lakeshore-qwen-vl-72b']
+          const currentLakeshore = state.lakeshoreModel as string
+          return {
+            ...state,
+            lakeshoreModel: validLakeshoreModels.includes(currentLakeshore)
+              ? currentLakeshore
+              : 'lakeshore-qwen-vl-72b',
+          }
         }
 
         return state

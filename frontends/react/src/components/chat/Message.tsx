@@ -111,12 +111,8 @@ export function Message({ message, isStreaming = false }: MessageProps) {
     // Local and Lakeshore models
     if (model === 'local-vision') return 'Gemma 3 4B (Text + Vision)'
     if (model.includes('llama')) return 'Llama 3.2 3B'
-    if (model.includes('qwq')) return 'QwQ 1.5B'
-    if (model.includes('coder') && model.includes('1.5b')) return 'Qwen 2.5 Coder 1.5B'
-    if (model.includes('deepseek')) return 'DeepSeek R1 1.5B'
+    if (model.includes('qwen') && model.includes('vl') && model.includes('72b')) return 'Qwen 2.5 VL 72B'
     if (model.includes('qwen') && model.includes('72b')) return 'Qwen 2.5 72B'
-    if (model.includes('qwen') && model.includes('32b')) return 'Qwen 2.5 32B'
-    if (model.includes('qwen') && model.includes('1.5b')) return 'Qwen 2.5 1.5B'
     if (model.includes('qwen')) return 'Qwen 2.5'
     return model
   }

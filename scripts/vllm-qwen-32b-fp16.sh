@@ -17,16 +17,20 @@
 #
 # WHY FP16 INSTEAD OF AWQ?
 # -------------------------
-# The H100's CUDA driver (535 / CUDA 12.2) doesn't support the Marlin
-# quantization kernels (compiled for CUDA 12.4+). Without Marlin, the
-# plain AWQ kernel only gets ~3 tok/s — 10x slower than expected.
+# NOTE: The driver has been updated to 550.163.01 (CUDA 12.4) on 2026-02-25.
+# Marlin AWQ kernels now work. Consider using vllm-qwen-72b.sh (72B AWQ with
+# Marlin) instead — it's a larger model with fast quantized inference.
 #
-# FP16 avoids quantization kernels entirely. It uses standard cuBLAS GEMM
-# (matrix multiplication) which is universally supported. The H100 has
-# enough VRAM (96 GiB) to fit 32B FP16 (~64 GiB) with room for KV cache.
+# This FP16 script was originally created as a workaround when the old driver
+# (535 / CUDA 12.2) didn't support Marlin kernels. FP16 avoids quantization
+# kernels entirely, using standard cuBLAS GEMM instead.
+#
+# This script still works and may be useful if you want 32B FP16 specifically
+# (no quantization loss), but the 72B AWQ is now the recommended default.
 #
 # Performance: ~40-60 tok/s (FP16 on H100 tensor cores)
-# Quality:     Higher than 72B AWQ — no quantization loss
+# Quality:     Higher per-token quality than 72B AWQ (no quantization loss)
+#              but 72B AWQ has more parameters overall
 #
 # Memory budget:
 #   Total GPU:             93.2 GiB (usable by CUDA)
@@ -127,23 +131,23 @@ echo "Service: http://${NODE_IP}:${PORT}"
 # vLLM downloads from HuggingFace on first use, which can exceed the job's
 # time limit. Pre-download in an interactive session:
 #
-#   srun --partition=batch --account=ts_acer_chi --time=02:00:00 --pty bash
+#   srun --partition=batch_gpu2 --gres=gpu:1 --time=01:00:00 --pty bash
 #   module load apptainer
-#   apptainer exec /home/nassar/STREAM/containers/vllm-0.15.1 \
+#   apptainer exec /projects/acer_hpc_admin/nassar/containers/vllm-0.15.1 \
 #       huggingface-cli download Qwen/Qwen2.5-32B-Instruct
 #
 # After downloading once, subsequent runs start immediately from the cache.
 # =============================================================================
 
 # =============================================================================
-# NOTE: Requires CUDA driver 550+ (CUDA 12.4+)
+# CUDA driver requirement: 550+ (CUDA 12.4+) — SATISFIED
 # =============================================================================
-# vLLM 0.15.1's V1 engine uses torch.compile + Triton kernels that need
-# CUDA 12.4+ PTX support. The current H100 driver (535 / CUDA 12.2) causes
-# these kernels to fall back to slow paths (~1.7 tok/s instead of ~40-60).
+# Driver 550.163.01 (CUDA 12.4) was installed on ghi2-002 on 2026-02-25.
 #
-# This script is ready to go once Steve updates the CUDA driver to 550+.
-# Expected performance after driver update: ~40-60 tok/s (BF16 on H100).
+# vLLM 0.15.1's V1 engine uses torch.compile + Triton kernels that need
+# CUDA 12.4+ PTX support. This is now satisfied.
+#
+# Expected performance: ~40-60 tok/s (FP16 on H100).
 # =============================================================================
 
 apptainer exec --nv ${CONTAINER} \

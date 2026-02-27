@@ -144,9 +144,9 @@ def get_tier_context_limits() -> dict:
             "note": "Ollama default (models capable of 128k if reconfigured)",
         },
         "lakeshore": {
-            "max_input": get_max_input_tokens("lakeshore-qwen"),
-            "total": MODEL_CONTEXT_LIMITS["lakeshore-qwen"]["total"],
-            "note": "vLLM conservative (models capable of 128k)",
+            "max_input": get_max_input_tokens("lakeshore-qwen-vl-72b"),
+            "total": MODEL_CONTEXT_LIMITS["lakeshore-qwen-vl-72b"]["total"],
+            "note": "vLLM on H100 NVL (64K context)",
         },
         "cloud": {
             "max_input": get_max_input_tokens("cloud-claude"),

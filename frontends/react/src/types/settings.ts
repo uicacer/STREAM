@@ -56,18 +56,11 @@ export type LocalModel = 'local-llama' | 'local-vision'
 /**
  * LakeshoreModel - Available models for the Lakeshore tier (Campus GPU)
  *
- * Each model runs as a separate vLLM instance on a different GPU (3g.40gb MIG slice).
- * All 32B models use AWQ 4-bit quantization for quality + efficiency.
+ * Runs on the H100 NVL GPU (96 GiB VRAM) on ghi2-002.
+ * AWQ 4-bit quantization with Marlin kernels, ~25 tok/s.
  */
 export type LakeshoreModel =
-  | 'lakeshore-qwen-1.5b'
-  | 'lakeshore-qwen-32b-fp16'
-  | 'lakeshore-qwen-72b'
   | 'lakeshore-qwen-vl-72b'
-  | 'lakeshore-qwen-32b'
-  | 'lakeshore-coder-1.5b'
-  | 'lakeshore-deepseek-r1'
-  | 'lakeshore-qwq'
 
 /**
  * CloudProvider - Cloud model provider identifier

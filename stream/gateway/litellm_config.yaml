@@ -42,7 +42,7 @@ model_list:
   - model_name: cloud-or-claude
     litellm_params:
       model: openrouter/anthropic/claude-sonnet-4
-      api_key: os.environ/OPENROUTER_API_KEY
+      api_key: os.environ/OPENROUTER_API_KEY  # pragma: allowlist secret
     model_info:
       input_cost_per_token: 0.000003    # $3 per 1M input tokens
       output_cost_per_token: 0.000015   # $15 per 1M output tokens
@@ -50,7 +50,7 @@ model_list:
   - model_name: cloud-or-gpt4o
     litellm_params:
       model: openrouter/openai/gpt-4o
-      api_key: os.environ/OPENROUTER_API_KEY
+      api_key: os.environ/OPENROUTER_API_KEY  # pragma: allowlist secret
     model_info:
       input_cost_per_token: 0.0000025   # $2.50 per 1M input tokens
       output_cost_per_token: 0.00001    # $10 per 1M output tokens
@@ -58,7 +58,7 @@ model_list:
   - model_name: cloud-or-gemini-pro
     litellm_params:
       model: openrouter/google/gemini-2.5-pro
-      api_key: os.environ/OPENROUTER_API_KEY
+      api_key: os.environ/OPENROUTER_API_KEY  # pragma: allowlist secret
     model_info:
       input_cost_per_token: 0.00000125  # $1.25 per 1M input tokens
       output_cost_per_token: 0.00001    # $10 per 1M output tokens
@@ -66,7 +66,7 @@ model_list:
   - model_name: cloud-or-gemini-flash
     litellm_params:
       model: openrouter/google/gemini-2.5-flash
-      api_key: os.environ/OPENROUTER_API_KEY
+      api_key: os.environ/OPENROUTER_API_KEY  # pragma: allowlist secret
     model_info:
       input_cost_per_token: 0.0000003   # $0.30 per 1M input tokens
       output_cost_per_token: 0.0000025  # $2.50 per 1M output tokens
@@ -74,7 +74,7 @@ model_list:
   - model_name: cloud-or-o3-mini
     litellm_params:
       model: openrouter/openai/o3-mini
-      api_key: os.environ/OPENROUTER_API_KEY
+      api_key: os.environ/OPENROUTER_API_KEY  # pragma: allowlist secret
     model_info:
       input_cost_per_token: 0.0000011   # $1.10 per 1M input tokens
       output_cost_per_token: 0.0000044  # $4.40 per 1M output tokens
@@ -82,7 +82,7 @@ model_list:
   - model_name: cloud-or-deepseek-r1
     litellm_params:
       model: openrouter/deepseek/deepseek-r1
-      api_key: os.environ/OPENROUTER_API_KEY
+      api_key: os.environ/OPENROUTER_API_KEY  # pragma: allowlist secret
     model_info:
       input_cost_per_token: 0.0000007   # $0.70 per 1M input tokens
       output_cost_per_token: 0.0000025  # $2.50 per 1M output tokens
@@ -90,7 +90,7 @@ model_list:
   - model_name: cloud-or-llama-maverick
     litellm_params:
       model: openrouter/meta-llama/llama-4-maverick
-      api_key: os.environ/OPENROUTER_API_KEY
+      api_key: os.environ/OPENROUTER_API_KEY  # pragma: allowlist secret
     model_info:
       input_cost_per_token: 0.00000017  # $0.17 per 1M input tokens
       output_cost_per_token: 0.0000006  # $0.60 per 1M output tokens
@@ -98,7 +98,7 @@ model_list:
   - model_name: cloud-or-deepseek-v3
     litellm_params:
       model: openrouter/deepseek/deepseek-chat
-      api_key: os.environ/OPENROUTER_API_KEY
+      api_key: os.environ/OPENROUTER_API_KEY  # pragma: allowlist secret
     model_info:
       input_cost_per_token: 0.00000038  # $0.38 per 1M input tokens
       output_cost_per_token: 0.00000089 # $0.89 per 1M output tokens
@@ -106,7 +106,7 @@ model_list:
   - model_name: cloud-or-glm5
     litellm_params:
       model: openrouter/z-ai/glm-5
-      api_key: os.environ/OPENROUTER_API_KEY
+      api_key: os.environ/OPENROUTER_API_KEY  # pragma: allowlist secret
     model_info:
       input_cost_per_token: 0.00000095  # $0.95 per 1M input tokens
       output_cost_per_token: 0.00000255 # $2.55 per 1M output tokens
@@ -121,7 +121,7 @@ model_list:
   - model_name: cloud-claude
     litellm_params:
       model: claude-sonnet-4-20250514
-      api_key: os.environ/ANTHROPIC_API_KEY
+      api_key: os.environ/ANTHROPIC_API_KEY  # pragma: allowlist secret
     model_info:
       input_cost_per_token: 0.000003    # $3 per 1M input tokens
       output_cost_per_token: 0.000015   # $15 per 1M output tokens
@@ -130,7 +130,7 @@ model_list:
   - model_name: cloud-haiku
     litellm_params:
       model: claude-3-5-haiku-20241022
-      api_key: os.environ/ANTHROPIC_API_KEY
+      api_key: os.environ/ANTHROPIC_API_KEY  # pragma: allowlist secret
     model_info:
       input_cost_per_token: 0.0000008   # $0.80 per 1M input tokens
       output_cost_per_token: 0.000004   # $4 per 1M output tokens
@@ -138,7 +138,7 @@ model_list:
   - model_name: cloud-gpt
     litellm_params:
       model: gpt-4o
-      api_key: os.environ/OPENAI_API_KEY
+      api_key: os.environ/OPENAI_API_KEY  # pragma: allowlist secret
     model_info:
       input_cost_per_token: 0.0000025   # $2.50 per 1M input tokens
       output_cost_per_token: 0.00001    # $10 per 1M output tokens
@@ -146,7 +146,7 @@ model_list:
   - model_name: cloud-gpt-cheap
     litellm_params:
       model: gpt-4o-mini
-      api_key: os.environ/OPENAI_API_KEY
+      api_key: os.environ/OPENAI_API_KEY  # pragma: allowlist secret
     model_info:
       input_cost_per_token: 0.00000015  # $0.15 per 1M input tokens
       output_cost_per_token: 0.0000006  # $0.60 per 1M output tokens
@@ -160,89 +160,12 @@ model_list:
   # correct vLLM instance via Globus Compute (preferred) or SSH (fallback).
   # $0 per token — runs on university-owned GPUs.
 
-  # 1.5B models (fast demo)
-  - model_name: lakeshore-qwen-1.5b
-    litellm_params:
-      model: openai/Qwen/Qwen2.5-1.5B-Instruct
-      api_base: http://lakeshore-proxy:8001/v1
-      api_key: dummy
-    model_info:
-      input_cost_per_token: 0.0
-      output_cost_per_token: 0.0
-
-  - model_name: lakeshore-coder-1.5b
-    litellm_params:
-      model: openai/Qwen/Qwen2.5-Coder-1.5B-Instruct
-      api_base: http://lakeshore-proxy:8001/v1
-      api_key: dummy
-    model_info:
-      input_cost_per_token: 0.0
-      output_cost_per_token: 0.0
-
-  - model_name: lakeshore-deepseek-r1
-    litellm_params:
-      model: openai/deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B
-      api_base: http://lakeshore-proxy:8001/v1
-      api_key: dummy
-    model_info:
-      input_cost_per_token: 0.0
-      output_cost_per_token: 0.0
-
-  - model_name: lakeshore-qwq
-    litellm_params:
-      model: openai/Qwen/Qwen2.5-1.5B-Instruct
-      api_base: http://lakeshore-proxy:8001/v1
-      api_key: dummy
-    model_info:
-      input_cost_per_token: 0.0
-      output_cost_per_token: 0.0
-
-  # 32B FP16 model (high quality, runs on H100 NVL — no quantization)
-  - model_name: lakeshore-qwen-32b-fp16
-    litellm_params:
-      model: openai/Qwen/Qwen2.5-32B-Instruct
-      api_base: http://lakeshore-proxy:8001/v1
-      api_key: dummy
-    model_info:
-      input_cost_per_token: 0.0
-      output_cost_per_token: 0.0
-
-  # 72B AWQ model (flagship, runs on H100 NVL)
-  - model_name: lakeshore-qwen-72b
-    litellm_params:
-      model: openai/Qwen/Qwen2.5-72B-Instruct-AWQ
-      api_base: http://lakeshore-proxy:8001/v1
-      api_key: dummy
-    model_info:
-      input_cost_per_token: 0.0
-      output_cost_per_token: 0.0
-
-  # 72B VL AWQ model (multimodal flagship, runs on H100 NVL)
+  # 72B VL AWQ model (multimodal flagship, runs on H100 NVL, ~25 tok/s)
   - model_name: lakeshore-qwen-vl-72b
     litellm_params:
       model: openai/Qwen/Qwen2.5-VL-72B-Instruct-AWQ
       api_base: http://lakeshore-proxy:8001/v1
-      api_key: dummy
-    model_info:
-      input_cost_per_token: 0.0
-      output_cost_per_token: 0.0
-
-  # 32B AWQ model (high quality)
-  - model_name: lakeshore-qwen-32b
-    litellm_params:
-      model: openai/Qwen/Qwen2.5-32B-Instruct-AWQ
-      api_base: http://lakeshore-proxy:8001/v1
-      api_key: dummy
-    model_info:
-      input_cost_per_token: 0.0
-      output_cost_per_token: 0.0
-
-  # Legacy — kept for backwards compatibility during testing
-  - model_name: lakeshore-qwen
-    litellm_params:
-      model: openai/Qwen/Qwen2.5-1.5B-Instruct
-      api_base: http://lakeshore-proxy:8001/v1
-      api_key: dummy
+      api_key: dummy  # pragma: allowlist secret
     model_info:
       input_cost_per_token: 0.0
       output_cost_per_token: 0.0
@@ -255,15 +178,7 @@ router_settings:
   model_timeout:
     local-llama: 90
     local-vision: 120
-    lakeshore-qwen: 120
-    lakeshore-qwen-1.5b: 120
-    lakeshore-qwen-32b-fp16: 120
-    lakeshore-qwen-72b: 180
     lakeshore-qwen-vl-72b: 180
-    lakeshore-qwen-32b: 120
-    lakeshore-coder-1.5b: 120
-    lakeshore-deepseek-r1: 120
-    lakeshore-qwq: 120
     cloud-claude: 120
     cloud-gpt: 120
     cloud-gpt-cheap: 120

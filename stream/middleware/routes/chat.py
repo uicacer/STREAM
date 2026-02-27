@@ -159,7 +159,7 @@ class ChatCompletionRequest(BaseModel):
 
     lakeshore_model: str | None = Field(
         default=None,
-        description="Model to use for lakeshore tier (lakeshore-qwen). Default: lakeshore-qwen",
+        description="Model to use for lakeshore tier. Default: lakeshore-qwen-vl-72b",
     )
 
     cloud_provider: str | None = Field(
@@ -629,8 +629,8 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
     # This format lets litellm_direct.py look up the right key for any model
     # by checking the model's `env_key` field in CLOUD_PROVIDERS.
     #
-    # Example: If the user sends openrouter_api_key="sk-or-v1-abc123",
-    #          the dict becomes {"OPENROUTER_API_KEY": "sk-or-v1-abc123"}.
+    # Example: If the user sends openrouter_api_key="sk-or-v1-abc123",  # pragma: allowlist secret
+    #          the dict becomes {"OPENROUTER_API_KEY": "sk-or-v1-abc123"}.  # pragma: allowlist secret
     #          When litellm_direct resolves "cloud-or-claude" (which needs
     #          OPENROUTER_API_KEY), it finds the user's key in this dict.
     user_api_keys: dict[str, str] = {}

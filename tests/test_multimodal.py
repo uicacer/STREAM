@@ -465,7 +465,7 @@ class TestVisionConfig:
         from stream.middleware.config import VISION_CAPABLE_MODELS
 
         assert "local-llama" not in VISION_CAPABLE_MODELS
-        assert "lakeshore-qwen-1.5b" not in VISION_CAPABLE_MODELS
+        assert "lakeshore-qwen-vl-72b" in VISION_CAPABLE_MODELS
 
     def test_default_vision_models_exist(self):
         """DEFAULT_VISION_MODELS should have entries for all tiers."""

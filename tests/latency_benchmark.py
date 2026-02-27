@@ -785,7 +785,7 @@ def load_models_from_litellm_config(config_path: Path = LITELLM_CONFIG_PATH) -> 
 
 def get_default_models() -> list:
     """Return default models for benchmarking (one per tier)."""
-    return ["local-llama", "lakeshore-qwen", "cloud-claude"]
+    return ["local-llama", "lakeshore-qwen-vl-72b", "cloud-claude"]
 
 
 # =============================================================================

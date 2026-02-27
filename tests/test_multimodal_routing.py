@@ -77,9 +77,9 @@ class TestGetModelForTierMultimodal:
         from stream.middleware.core.query_router import get_model_for_tier
 
         model = get_model_for_tier(
-            "lakeshore", lakeshore_model="lakeshore-qwen-1.5b", has_images=True
+            "lakeshore", lakeshore_model="lakeshore-qwen-vl-72b", has_images=True
         )
-        assert model == "lakeshore-qwen-1.5b"
+        assert model == "lakeshore-qwen-vl-72b"
 
     def test_explicit_cloud_provider_overrides(self):
         """Explicit cloud provider should be returned as-is."""
@@ -100,7 +100,7 @@ class TestGetModelForTierMultimodal:
         from stream.middleware.core.query_router import get_model_for_tier
 
         model = get_model_for_tier("lakeshore", has_images=False)
-        assert model == "lakeshore-qwen-1.5b"
+        assert model == "lakeshore-qwen-vl-72b"
 
 
 # =============================================================================

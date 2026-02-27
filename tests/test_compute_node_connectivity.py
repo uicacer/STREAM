@@ -89,9 +89,7 @@ def test_compute_node_connectivity(relay_test_url="https://httpbin.org/get"):
         results["outbound_tcp_443"] = False
         results["outbound_tcp_443_error"] = str(e)
 
-    # ----- Test 5: Outbound TCP socket (port 8765 - typical WebSocket) -----
-    # We test connecting to httpbin on 443 above; this tests a non-standard port.
-    # Most relays would run on 443 (wss://) anyway, but let's check.
+    # ----- Test 5: Outbound TCP socket (port 80) -----
     try:
         s = socket.create_connection(("httpbin.org", 80), timeout=10)
         s.close()

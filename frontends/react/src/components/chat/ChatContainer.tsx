@@ -228,34 +228,28 @@ export function ChatContainer() {
     const settings = getSettings()
     console.log('[ChatContainer] Sending with settings:', settings)
 
-    // Check if images + document content exceed the Lakeshore limit (6 MB).
-    // Globus Compute has a 10 MB payload limit (see globus_compute_client.py).
-    // We use 6 MB as a safe threshold, leaving room for text and serialization.
-    const imageBytes = images ? getTotalImageBytes(images) : 0
-    const docBytes = documents
-      ? documents.reduce((sum, doc) => {
-          // Estimate payload size: all base64 image data + text content
-          return sum + doc.contentParts.reduce((partSum, part) => {
-            if (part.type === 'image' && part.image_base64) {
-              return partSum + part.image_base64.length  // base64 chars ≈ bytes
-            }
-            if (part.type === 'text' && part.text) {
-              return partSum + part.text.length
-            }
-            return partSum
-          }, 0)
-        }, 0)
+    // Check Lakeshore image size limit (6 MB for images only, text doesn't count).
+    // Globus Compute has a 10 MB payload limit; we reserve 6 MB for images and
+    // ~2 MB for text/serialization overhead. Text from documents (PDFs, DOCX)
+    // does NOT count — only actual image data, because that's what consumes
+    // the payload and vLLM's visual encoder VRAM.
+    const directImageBytes = images ? getTotalImageBytes(images) : 0
+    const docImageBytes = documents
+      ? documents.reduce((sum, doc) =>
+          sum + doc.contentParts.reduce((partSum, part) =>
+            part.type === 'image' && part.image_base64
+              ? partSum + part.image_base64.length
+              : partSum, 0), 0)
       : 0
-    const totalMediaBytes = imageBytes + docBytes
-
-    if (totalMediaBytes > LAKESHORE_MAX_IMAGE_BYTES) {
-      const sizeMB = (totalMediaBytes / (1024 * 1024)).toFixed(1)
+    const totalImageBytes = directImageBytes + docImageBytes
+    if (totalImageBytes > LAKESHORE_MAX_IMAGE_BYTES) {
+      const sizeMB = (totalImageBytes / (1024 * 1024)).toFixed(1)
 
       if (settings.tier === 'lakeshore') {
         setPayloadWarning(
-          `The attached content totals ${sizeMB} MB, which exceeds the 6 MB limit ` +
+          `Attached images total ${sizeMB} MB, which exceeds the 6 MB image limit ` +
           `for Lakeshore via Globus Compute. Please switch to Local or Cloud tier ` +
-          `for this message, or reduce the number of attachments.`
+          `for this message, or reduce the number of images.`
         )
         finishStreaming()
         return
@@ -263,7 +257,7 @@ export function ChatContainer() {
 
       if (settings.tier === 'auto') {
         setLakeshoreSkippedInfo(
-          `Attachments total ${sizeMB} MB (over 6 MB) — Lakeshore will be skipped ` +
+          `Image data totals ${sizeMB} MB (over 6 MB limit) — Lakeshore will be skipped ` +
           `for this message. Routing to Local or Cloud instead.`
         )
       }

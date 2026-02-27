@@ -13,15 +13,18 @@
 # =============================================================================
 # Hardware: H100 NVL full GPU (95.8 GiB VRAM) on ghi2-002
 # Weights:  ~36 GiB (72B params, AWQ 4-bit quantization)
-# Context:  32K tokens (--max-model-len 32768)
+# Context:  64K tokens (--max-model-len 65536)
 #
-# Memory budget (actual measurements from H100 NVL):
+# Memory budget (estimated for H100 NVL with --enforce-eager, 0.90 util):
 #   Total GPU:             93.2 GiB (usable by CUDA)
-#   Pre-allocated (0.85):  ~79.2 GiB
+#   Pre-allocated (0.90):  ~83.9 GiB
 #   Model weights:         38.8 GiB (actual — slightly more than theoretical ~36)
-#   CUDA graphs:            6.3 GiB (captured at startup for fast inference)
-#   KV cache:             ~34 GiB (pre-allocated for concurrent sequences)
-#   Reserved:             ~14 GiB (PyTorch overhead, sampler warmup, CUDA context)
+#   CUDA graphs:            0 GiB (disabled by --enforce-eager)
+#   KV cache:             ~45 GiB (pre-allocated for concurrent sequences)
+#   Reserved:              ~9 GiB (PyTorch overhead, sampler warmup, CUDA context)
+#
+#   NOTE: 0.90 was previously untested with --enforce-eager. If OOM occurs
+#   at startup, revert to 0.85 (which had a proven 14 GiB reserve).
 #
 # --max-num-seqs 256: Maximum concurrent sequences per batch.
 #   Default is 1024, but the sampler warmup allocates vocab_size x max_num_seqs
@@ -30,10 +33,11 @@
 #   256 is still generous for a campus service (256 simultaneous requests
 #   on one GPU). The real throughput bottleneck is inference speed, not concurrency.
 #
-# IF THIS STILL FAILS:
-#   1. Reduce context: --max-model-len 16384
-#   2. Lower utilization: --gpu-memory-utilization 0.80
-#   3. Add --enforce-eager (saves ~6 GiB from CUDA graph capture)
+# IF OOM OCCURS AT STARTUP:
+#   1. Lower utilization: --gpu-memory-utilization 0.85 (proven safe)
+#   2. Reduce context: --max-model-len 32768 (halves KV per sequence)
+#
+# NOTE: --enforce-eager is already enabled (see container note below).
 # =============================================================================
 
 MODEL="Qwen/Qwen2.5-72B-Instruct-AWQ"
@@ -62,7 +66,10 @@ module load apptainer
 # usage. The container is stored in the ACER project space (/projects/)
 # rather than the home directory to conserve the 100 GiB home quota.
 # =============================================================================
-CONTAINER="/projects/acer_hpc_admin/nassar/containers/vllm-0.15.1"
+# Use the CUDA 12.4 custom container (Marlin AWQ works with driver 550).
+# The old vllm-0.15.1 container has CUDA 12.9 Marlin kernels that crash
+# with cudaErrorUnsupportedPtxVersion on driver 550.
+CONTAINER="/projects/acer_hpc_admin/nassar/containers/vllm-cu124"
 export CUDA_VISIBLE_DEVICES=0
 
 # =============================================================================
@@ -152,24 +159,42 @@ echo "Service: http://${NODE_IP}:${PORT}"
 # time limit. Pre-download in an interactive session:
 #
 #   srun --partition=batch_gpu2 --gres=gpu:1 --time=01:00:00 --pty bash
-#   apptainer exec --nv /home/nassar/STREAM/containers/vllm-openai_v0.13.0.sif \
+#   apptainer exec --nv /projects/acer_hpc_admin/nassar/containers/vllm-0.15.1 \
 #       huggingface-cli download Qwen/Qwen2.5-72B-Instruct-AWQ
 #
 # After downloading once, subsequent runs start immediately from the cache.
 # =============================================================================
 
 # =============================================================================
-# NOTE: Requires CUDA driver 550+ (CUDA 12.4+)
+# CUDA driver and container compatibility
 # =============================================================================
-# vLLM 0.15.1's V1 engine uses torch.compile + Triton kernels that need
-# CUDA 12.4+ PTX support. The current H100 driver (535 / CUDA 12.2) causes
-# these kernels to fall back to slow paths.
+# Driver: 550.163.01 (supports CUDA ≤ 12.4), installed 2026-02-25.
 #
-# Additionally, --quantization awq_marlin uses Marlin kernels which also
-# require CUDA 12.4+ PTX. Without the driver update, Marlin fails entirely.
+# We use the vllm-cu124 custom container (built from source with CUDA 12.4).
+# The official vllm-0.15.1 container has CUDA 12.9 Marlin kernels that crash
+# with cudaErrorUnsupportedPtxVersion on driver 550.
 #
-# This script is ready to go once Steve updates the CUDA driver to 550+.
-# Expected performance after driver update: ~30-40 tok/s (AWQ Marlin on H100).
+# --enforce-eager is required because torch.compile crashes with an illegal
+# memory access during Triton autotuning in this container build. See
+# scripts/vllm-qwen-vl-72b.sh for full details.
+#
+# Measured performance with vllm-cu124 + --enforce-eager + optimizations: ~25 tok/s
+#   (prefix caching + chunked prefill + 0.90 GPU util + 64K context)
+#   Baseline enforce-eager without optimizations: ~6-8 tok/s
+# Fallback with vllm-0.15.1 --quantization awq: ~3 tok/s
+# =============================================================================
+
+# =============================================================================
+# Triton workaround experiments (uncomment to test torch.compile)
+# =============================================================================
+# The torch.compile crash occurs during Triton kernel autotuning. These env
+# vars may bypass the crash, enabling full ~30-40 tok/s throughput.
+# To test: uncomment ONE set of env vars below, remove --enforce-eager from
+# the serve command, and submit the job.
+#
+# export TRITON_DISABLE_AUTOTUNE=1
+# export TRITON_CACHE_DIR=/tmp/triton_${SLURM_JOB_ID}
+# export VLLM_USE_TRITON_FLASH_ATTN=0
 # =============================================================================
 
 apptainer exec --nv ${CONTAINER} \
@@ -177,10 +202,13 @@ apptainer exec --nv ${CONTAINER} \
     --host 0.0.0.0 \
     --port ${PORT} \
     --tensor-parallel-size 1 \
-    --max-model-len 32768 \
-    --gpu-memory-utilization 0.85 \
+    --max-model-len 65536 \
+    --gpu-memory-utilization 0.90 \
     --max-num-seqs 256 \
     --dtype auto \
-    --quantization awq_marlin
+    --quantization awq_marlin \
+    --enforce-eager \
+    --enable-prefix-caching \
+    --enable-chunked-prefill
 
 echo "Service stopped: $(date)"

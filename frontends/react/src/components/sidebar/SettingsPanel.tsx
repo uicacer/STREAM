@@ -135,40 +135,9 @@ const LOCAL_MODEL_CONFIG: Record<LocalModel, { label: string; description: strin
 }
 
 const LAKESHORE_MODEL_CONFIG: Record<LakeshoreModel, { label: string; description: string }> = {
-  // Demo config: all keys point to Qwen 1.5B on the backend (single SLURM job).
-  // Labels reflect what's actually running. To switch to 32B production models,
-  // update these labels AND the LAKESHORE_MODELS dict in config.py.
-  'lakeshore-qwen-1.5b': {
-    label: 'Qwen 2.5 1.5B',
-    description: 'General purpose',
-  },
-  'lakeshore-qwen-32b-fp16': {
-    label: 'Qwen 2.5 32B',
-    description: 'High quality (FP16, H100)',
-  },
-  'lakeshore-qwen-72b': {
-    label: 'Qwen 2.5 72B',
-    description: 'Flagship quality (AWQ)',
-  },
   'lakeshore-qwen-vl-72b': {
     label: 'Qwen 2.5 VL 72B',
     description: 'Text + Vision multimodal (AWQ)',
-  },
-  'lakeshore-qwen-32b': {
-    label: 'Qwen 2.5 32B',
-    description: 'General purpose (AWQ)',
-  },
-  'lakeshore-coder-1.5b': {
-    label: 'Qwen 2.5 Coder 1.5B',
-    description: 'Coding specialist',
-  },
-  'lakeshore-deepseek-r1': {
-    label: 'DeepSeek R1 1.5B',
-    description: 'Deep reasoning',
-  },
-  'lakeshore-qwq': {
-    label: 'QwQ 1.5B',
-    description: 'Reasoning (o1-style)',
   },
 }
 
@@ -558,7 +527,7 @@ export function SettingsPanel({ onExampleQuery }: SettingsPanelProps) {
         </button>
         {lakeshoreOpen && (
           <div className="px-3 pb-3 space-y-1 max-h-48 overflow-y-auto">
-            {(Object.entries(LAKESHORE_MODEL_CONFIG) as [LakeshoreModel, typeof LAKESHORE_MODEL_CONFIG['lakeshore-qwen-1.5b']][]).map(
+            {(Object.entries(LAKESHORE_MODEL_CONFIG) as [LakeshoreModel, typeof LAKESHORE_MODEL_CONFIG['lakeshore-qwen-vl-72b']][]).map(
               ([modelKey, config]) => {
                 const isSelected = lakeshoreModel === modelKey
                 return (

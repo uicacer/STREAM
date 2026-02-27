@@ -84,11 +84,10 @@ def mark_tier_unavailable(
     The next on-demand health check (e.g., user changes tier or model in
     settings) will re-check and restore the indicator if the tier recovers.
 
-    For Lakeshore, each model runs on a separate vLLM port on the HPC cluster
-    (e.g., qwen-1.5b on :8000, coder-1.5b on :8001, qwen-32b on :8004).
-    A single model being down (e.g., 32B not running) should NOT mark
-    the entire Lakeshore tier red — other models may still work.
-    So we use per-model cache keys: "lakeshore:lakeshore-qwen-32b".
+    For Lakeshore, each model runs as a vLLM instance on the HPC cluster.
+    A single model being down should NOT mark the entire Lakeshore tier red
+    — other models may still work.
+    So we use per-model cache keys: "lakeshore:lakeshore-qwen-vl-72b".
 
     Args:
         tier: The tier to mark ("local", "lakeshore", or "cloud")
@@ -133,7 +132,7 @@ def check_tier_health(
         local_model: For local tier, test a specific model (e.g., "local-vision")
                     instead of the default. Verifies the model is installed in Ollama.
         lakeshore_model: For lakeshore tier, the specific model to test
-                        (e.g., "lakeshore-qwen-32b"). We can't ping vLLM ports
+                        (e.g., "lakeshore-qwen-vl-72b"). We can't ping vLLM ports
                         directly (they're behind Globus on the HPC), so this is
                         used to check if a previous inference attempt failed for
                         this specific model.
@@ -194,7 +193,7 @@ def check_tier_health(
         # When does Level 2 run?
         #   - When the frontend sends lakeshore_model in the health poll
         #     (happens when user changes model selection in settings)
-        #   - Results are cached with a per-model key ("lakeshore:lakeshore-qwen-32b")
+        #   - Results are cached with a per-model key ("lakeshore:lakeshore-qwen-vl-72b")
         #   - Subsequent polls use the cached result until TTL expires
         #   - So the slow check only happens once per model change, not every 30s
         #
@@ -522,7 +521,7 @@ def is_tier_available(
         local_model: For local tier, the specific model to test (e.g., "local-vision").
                     If None, uses DEFAULT_MODELS["local"].
         lakeshore_model: For lakeshore tier, the specific model to test
-                        (e.g., "lakeshore-qwen-32b"). Each Lakeshore model runs on
+                        (e.g., "lakeshore-qwen-vl-72b"). Each Lakeshore model runs on
                         a separate vLLM port, so we track availability per-model.
                         If None, uses the base "lakeshore" cache key.
 
@@ -531,7 +530,7 @@ def is_tier_available(
     Each tier supports per-model health tracking:
       - Cloud:     "cloud:{provider}"      e.g., "cloud:cloud-gpt"
       - Local:     "local:{model}"         e.g., "local:local-llama-quality"
-      - Lakeshore: "lakeshore:{model}"     e.g., "lakeshore:lakeshore-qwen-32b"
+      - Lakeshore: "lakeshore:{model}"     e.g., "lakeshore:lakeshore-qwen-vl-72b"
 
     This ensures that one model being down doesn't incorrectly mark the
     entire tier as unavailable. For example, if the 32B model isn't running
@@ -541,7 +540,7 @@ def is_tier_available(
     # Use model-specific cache keys so each model is tracked independently.
     # This allows Claude to be "unhealthy" while GPT is "healthy",
     # local-llama to be installed while local-llama-quality is not,
-    # and lakeshore-qwen-1.5b to be running while lakeshore-qwen-32b is not.
+    # and lakeshore-qwen-vl-72b to be running while lakeshore-qwen-vl-72b is not.
     cache_key = tier
     if tier == "cloud" and cloud_provider:
         cache_key = f"cloud:{cloud_provider}"
@@ -619,7 +618,7 @@ def get_tier_error(
         cloud_provider: For cloud tier, the specific provider (e.g., "cloud-gpt").
                        This must match what was passed to is_tier_available(),
                        otherwise we'll look up the wrong cache entry.
-        lakeshore_model: For lakeshore tier, the specific model (e.g., "lakeshore-qwen-32b").
+        lakeshore_model: For lakeshore tier, the specific model (e.g., "lakeshore-qwen-vl-72b").
                         Same logic as cloud_provider — must match is_tier_available()
                         so we look up the correct per-model cache entry.
 
@@ -629,7 +628,7 @@ def get_tier_error(
     - "cloud" key has errors from default provider (Claude)
     - "cloud:cloud-gpt" key has errors from GPT
     - "lakeshore" key has errors from base tier check
-    - "lakeshore:lakeshore-qwen-32b" key has errors from the 32B model check
+    - "lakeshore:lakeshore-qwen-vl-72b" key has errors from the 32B model check
 
     If we test the 32B model but look up the "lakeshore" key, we'd get the
     base tier status (which may be "healthy") even though 32B is down.

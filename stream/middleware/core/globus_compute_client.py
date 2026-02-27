@@ -638,7 +638,7 @@ class GlobusComputeClient:
             messages: Chat messages in OpenAI format
             temperature: Sampling temperature (0.0-2.0)
             max_tokens: Maximum tokens to generate. If None, reads from
-                        MODEL_CONTEXT_LIMITS["lakeshore-qwen"]["reserve_output"]
+                        MODEL_CONTEXT_LIMITS for the model's "reserve_output"
                         in config.py (single source of truth for all context
                         window settings).
             model: Model identifier on vLLM server
@@ -732,8 +732,8 @@ class GlobusComputeClient:
             vllm_url = get_lakeshore_vllm_url(model)
 
             # Resolve the HuggingFace model name that vLLM expects.
-            # STREAM uses internal names like "lakeshore-qwen-1.5b", but the vLLM
-            # instance is loaded with the HF name (e.g., "Qwen/Qwen2.5-32B-Instruct-AWQ").
+            # STREAM uses internal names like "lakeshore-qwen-vl-72b", but the vLLM
+            # instance is loaded with the HF name (e.g., "Qwen/Qwen2.5-72B-Instruct-AWQ").
             model_info = LAKESHORE_MODELS.get(model)
             hf_model = model_info["hf_name"] if model_info else model
 
@@ -1004,9 +1004,9 @@ class GlobusComputeClient:
             messages: Chat messages in OpenAI format
             temperature: Sampling temperature
             max_tokens: Maximum tokens to generate
-            model: STREAM model key (e.g., "lakeshore-qwen-1.5b", "lakeshore-qwen-32b").
+            model: STREAM model key (e.g., "lakeshore-qwen-vl-72b", "lakeshore-qwen-vl-72b").
                    Resolved to the HuggingFace model name internally.
-            relay_url: WebSocket URL of the relay server (e.g., wss://abc.ngrok-free.app)
+            relay_url: WebSocket URL of the relay server (e.g., wss://abc.trycloudflare.com)
 
         Returns:
             {"channel_id": "uuid-string"} on success
@@ -1159,7 +1159,7 @@ class GlobusComputeClient:
         request so it wastes negligible resources.
 
         Args:
-            model: STREAM model key (e.g., "lakeshore-qwen-32b").
+            model: STREAM model key (e.g., "lakeshore-qwen-vl-72b").
                    Used to look up the correct vLLM port and HuggingFace name.
             timeout: Max seconds to wait for the Globus round-trip.
                     Default 20s — long enough for slow models, short enough
@@ -1184,12 +1184,12 @@ class GlobusComputeClient:
             gce = self._get_executor()
 
             # Resolve model-specific vLLM URL (each model runs on a different port).
-            # Example: "lakeshore-qwen-32b" → "http://ga-002:8004"
+            # Example: "lakeshore-qwen-vl-72b" → "http://ghi2-002:8000"
             vllm_url = get_lakeshore_vllm_url(model)
 
             # Resolve the HuggingFace model name that vLLM expects in API calls.
-            # STREAM uses internal names (e.g., "lakeshore-qwen-1.5b"), but vLLM
-            # was started with the HF name (e.g., "Qwen/Qwen2.5-1.5B-Instruct").
+            # STREAM uses internal names (e.g., "lakeshore-qwen-vl-72b"), but vLLM
+            # was started with the HF name (e.g., "Qwen/Qwen2.5-72B-Instruct-AWQ").
             model_info = LAKESHORE_MODELS.get(model)
             if not model_info:
                 return False, f"Unknown model: {model}"

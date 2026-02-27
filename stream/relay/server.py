@@ -96,24 +96,27 @@ WHY BOTH SIDES CONNECT OUTBOUND
 - The user's laptop is behind a home NAT/router
   → Also can't accept inbound connections
 
-- The relay runs on a public server (or localhost + ngrok for development)
+- The relay runs on a public server (or localhost + tunnel for development)
   → Both sides connect OUT to the relay
   → The relay just forwards bytes between matched connections
   → Same principle as TURN servers for video calls
 
 =============================================================================
-WHAT IS NGROK? (Development Only)
+TUNNELING (Development Only)
 =============================================================================
-ngrok is a tool that creates a temporary public URL for a server running on
-your laptop. When you run `ngrok http 8765`, it gives you a URL like:
-  https://abc123.ngrok-free.app
-that tunnels to localhost:8765 on your machine.
+A tunnel creates a temporary public URL for a server running on your laptop.
+This is needed because the relay runs locally but Lakeshore needs to reach it.
 
-WHY we use it now:
-  - During development, the relay runs on your laptop (localhost:8765)
-  - But Lakeshore needs to reach it from outside your network
-  - ngrok creates a public tunnel so Lakeshore can connect to your laptop
-  - Free tier is sufficient (we only need one tunnel, low bandwidth)
+Recommended: Cloudflare Tunnel (cloudflared)
+  cloudflared tunnel --url http://localhost:8765
+  → Gives you a URL like: https://random-words.trycloudflare.com
+  → Stable connections, persists across multiple requests
+  → Free, no account required
+
+Alternatives:
+  ngrok http 8765                                    → https://abc123.ngrok-free.app
+  ssh -4 -R 80:localhost:8765 nokey@localhost.run     → https://xxxx.lhr.life
+  (localhost.run drops connections after ~30s of inactivity — not recommended)
 
 WHAT we need for production:
   - A real server with a public IP (options):
@@ -121,7 +124,7 @@ WHAT we need for production:
     2. A small cloud VM ($5/month on DigitalOcean/Hetzner)
     3. A dedicated machine in the ACER lab
   - The relay uses ~10 MB RAM and near-zero CPU — any server works
-  - Replace the ngrok URL with the server's real URL in STREAM's config
+  - Replace the tunnel URL with the server's real URL in STREAM's config
   - Add TLS (wss://) via reverse proxy (nginx/caddy) for encrypted transit
 
 =============================================================================
@@ -149,8 +152,8 @@ SECURITY NOTES
 USAGE
 =============================================================================
   Development:
-    python -m stream.relay.server                # starts on ws://0.0.0.0:8765
-    ngrok http 8765                              # creates public URL
+    python -m stream.relay.server                                # starts on ws://0.0.0.0:8765
+    cloudflared tunnel --url http://localhost:8765                # creates public URL
 
   Production:
     python -m stream.relay.server --host 0.0.0.0 --port 8765
@@ -208,38 +211,49 @@ async def handle_connection(websocket):
     The relay is completely stateless — it doesn't interpret the messages,
     just forwards them from producer to consumer.
     """
+    # Extract the URL path from the incoming WebSocket request.
+    # Examples: "/health", "/produce/abc123", "/consume/abc123"
     path = websocket.request.path
 
     # ---- Health check endpoint ----
+    # Monitoring tools (or STREAM's tier_health.py) hit /health to verify the
+    # relay is running. We respond with a JSON status and immediately close —
+    # health checks are not real producer/consumer connections, so there's
+    # nothing more to do. The `return` exits the handler early.
     if path == "/health":
         await websocket.send(
             json.dumps(
                 {
                     "status": "healthy",
-                    "active_channels": len(channels),
+                    "active_channels": len(channels),  # how many streams are active right now
                     "timestamp": datetime.now(UTC).isoformat(),
                 }
             )
         )
-        await websocket.close()
-        return
+        await websocket.close()  # done — health check is a one-shot request
+        return  # exit early: don't try to parse this as a produce/consume path
 
     # ---- Parse the path to determine role and channel ----
+    # Valid paths: /produce/{channel_id} or /consume/{channel_id}
+    # Split "/produce/abc123" → ["produce", "abc123"]
     parts = path.strip("/").split("/")
     if len(parts) != 2 or parts[0] not in ("produce", "consume"):
+        # Invalid path — reject with WebSocket close code 4000 (custom error code)
         await websocket.close(4000, "Invalid path. Use /produce/{id} or /consume/{id}")
-        return
+        return  # exit early: can't proceed without a valid role and channel
 
-    role = parts[0]  # "produce" or "consume"
-    channel_id = parts[1]  # UUID string
+    role = parts[0]  # "produce" (Lakeshore sending tokens) or "consume" (proxy receiving)
+    channel_id = parts[1]  # UUID that pairs this producer with its consumer
 
-    logger.info(f"[{channel_id[:8]}] {role}r connected")
+    logger.info(f"[{channel_id[:8]}] {role}r connected")  # log first 8 chars for readability
 
     # ---- Initialize the channel if it doesn't exist ----
+    # The first side to connect (usually consumer) creates the channel entry.
+    # The second side (usually producer) finds it already here.
     if channel_id not in channels:
         channels[channel_id] = {
-            "producer": None,
-            "consumer": None,
+            "producer": None,  # will hold the producer's WebSocket connection
+            "consumer": None,  # will hold the consumer's WebSocket connection
             # Messages queued before the consumer connects.
             # If the producer starts sending tokens before the proxy/litellm_direct
             # connects, we buffer them here so nothing is lost.
@@ -249,18 +263,21 @@ async def handle_connection(websocket):
     channel = channels[channel_id]
 
     # ---- Register this connection in the channel ----
+    # Each channel allows exactly ONE producer and ONE consumer. If a second
+    # producer (or consumer) tries to connect to the same channel_id, reject
+    # it — something is wrong (duplicate request, stale connection, etc.)
     if role == "produce":
         if channel["producer"] is not None:
             await websocket.close(4001, "Producer already connected for this channel")
-            return
-        channel["producer"] = websocket
-        await _handle_producer(websocket, channel, channel_id)
+            return  # exit early: don't overwrite the existing producer
+        channel["producer"] = websocket  # register this connection as the producer
+        await _handle_producer(websocket, channel, channel_id)  # blocks until producer disconnects
     else:  # consume
         if channel["consumer"] is not None:
             await websocket.close(4001, "Consumer already connected for this channel")
-            return
-        channel["consumer"] = websocket
-        await _handle_consumer(websocket, channel, channel_id)
+            return  # exit early: don't overwrite the existing consumer
+        channel["consumer"] = websocket  # register this connection as the consumer
+        await _handle_consumer(websocket, channel, channel_id)  # blocks until consumer disconnects
 
 
 async def _handle_producer(websocket, channel, channel_id):
@@ -274,24 +291,31 @@ async def _handle_producer(websocket, channel, channel_id):
     When the producer disconnects (or sends {"type": "done"}), we clean up.
     """
     try:
+        # Loop over every message the producer sends (each message = one token
+        # or a control signal like "done" or "error"). This loop runs until
+        # the producer disconnects or we break out.
         async for message in websocket:
             consumer = channel.get("consumer")
 
             if consumer is not None:
                 # Consumer is connected — forward the message immediately.
-                # This is the fast path during normal operation.
+                # This is the fast path during normal operation: producer sends
+                # a token → relay forwards it → consumer receives it instantly.
                 try:
                     await consumer.send(message)
                 except websockets.ConnectionClosed:
-                    # Consumer disconnected mid-stream (e.g., user navigated away).
-                    # The producer keeps running on Lakeshore (we can't stop GPU
-                    # inference mid-generation), but we stop forwarding.
+                    # Consumer disconnected mid-stream (e.g., user navigated away
+                    # or closed the browser tab). The producer keeps running on
+                    # Lakeshore (we can't stop GPU inference mid-generation),
+                    # but there's no one to forward to, so we stop.
                     logger.warning(
                         f"[{channel_id[:8]}] consumer disconnected, " "dropping remaining tokens"
                     )
-                    break
+                    break  # stop the loop — no point reading more tokens
             else:
-                # Consumer hasn't connected yet — buffer the message.
+                # Consumer hasn't connected yet — buffer the message so it's
+                # not lost. When the consumer connects, _handle_consumer()
+                # will flush these buffered messages first.
                 channel["buffer"].append(message)
                 logger.debug(
                     f"[{channel_id[:8]}] buffered message "
@@ -299,8 +323,12 @@ async def _handle_producer(websocket, channel, channel_id):
                 )
 
     except websockets.ConnectionClosed:
+        # Producer's WebSocket connection dropped (network issue, Lakeshore
+        # job ended, etc.). This is normal — not an error.
         logger.info(f"[{channel_id[:8]}] producer disconnected")
     finally:
+        # Always clean up: unregister the producer and try to remove the
+        # channel if both sides are done.
         channel["producer"] = None
         _maybe_cleanup_channel(channel_id)
 
@@ -319,21 +347,25 @@ async def _handle_consumer(websocket, channel, channel_id):
     """
     try:
         # ---- Flush buffered messages ----
-        # If the producer already sent some tokens before we connected,
-        # deliver them now so no tokens are lost.
+        # If the producer already sent some tokens before we connected
+        # (race condition: producer was faster), deliver them now so the
+        # consumer doesn't miss the beginning of the response.
         if channel["buffer"]:
             logger.debug(
                 f"[{channel_id[:8]}] flushing {len(channel['buffer'])} "
                 f"buffered messages to consumer"
             )
             for msg in channel["buffer"]:
-                await websocket.send(msg)
-            channel["buffer"].clear()
+                await websocket.send(msg)  # deliver each buffered token
+            channel["buffer"].clear()  # buffer is now empty — future tokens go direct
 
         # ---- Keep the connection alive ----
-        # The consumer stays connected, receiving messages forwarded by
-        # _handle_producer(). We listen for any messages FROM the consumer
-        # (like a cancel request), though currently we don't act on them.
+        # The consumer doesn't actively receive tokens here — that's done by
+        # _handle_producer() calling `consumer.send()` directly. This loop
+        # just keeps the WebSocket alive and listens for any messages FROM
+        # the consumer (e.g., a future "cancel" command). When the producer
+        # closes the connection and sends the final "done" message, the
+        # consumer's WebSocket will also close, ending this loop.
         async for message in websocket:
             # Future: handle cancel requests from the consumer
             # e.g., {"type": "cancel"} → tell producer to stop
@@ -343,8 +375,11 @@ async def _handle_consumer(websocket, channel, channel_id):
             )
 
     except websockets.ConnectionClosed:
+        # Consumer disconnected (user closed tab, network dropped, etc.)
         logger.info(f"[{channel_id[:8]}] consumer disconnected")
     finally:
+        # Always clean up: unregister the consumer and try to remove the
+        # channel if both sides are done.
         channel["consumer"] = None
         _maybe_cleanup_channel(channel_id)
 
@@ -363,16 +398,22 @@ def _maybe_cleanup_channel(channel_id):
     eventually connects.
     """
     channel = channels.get(channel_id)
+    # Only clean up if BOTH producer and consumer have disconnected.
+    # If one side is still connected, the channel is still in use.
     if channel and channel["producer"] is None and channel["consumer"] is None:
         if channel["buffer"]:
-            # There are still undelivered messages — keep the channel alive
-            # so the consumer can receive them when it connects.
+            # Edge case: producer sent tokens and disconnected, but consumer
+            # hasn't connected yet. Those tokens are sitting in the buffer.
+            # We MUST keep the channel alive so the consumer can still receive
+            # them when it eventually connects. Deleting now = lost tokens.
             logger.info(
                 f"[{channel_id[:8]}] both sides disconnected but "
                 f"{len(channel['buffer'])} buffered messages remain — "
                 f"keeping channel alive for consumer"
             )
-            return
+            return  # don't delete — consumer still needs these messages
+        # Both sides done, no buffered messages — safe to remove.
+        # This prevents the `channels` dict from growing forever.
         del channels[channel_id]
         logger.info(f"[{channel_id[:8]}] channel cleaned up")
 
@@ -388,19 +429,24 @@ async def start_relay(host: str = "0.0.0.0", port: int = 8765):
 
     Args:
         host: Bind address. "0.0.0.0" = accept connections from anywhere
-              (needed for ngrok and production). "127.0.0.1" = local only.
+              (needed for tunnels and production). "127.0.0.1" = local only.
         port: Port to listen on. 8765 is the conventional WebSocket dev port.
     """
+    # Print connection info so the operator knows what URLs to use
     logger.info(f"Starting WebSocket relay on ws://{host}:{port}")
     logger.info(f"  Producer URL: ws://<host>:{port}/produce/{{channel_id}}")
     logger.info(f"  Consumer URL: ws://<host>:{port}/consume/{{channel_id}}")
     logger.info(f"  Health check: ws://<host>:{port}/health")
     logger.info("")
-    logger.info("For development with ngrok:")
-    logger.info(f"  ngrok http {port}")
-    logger.info("  Then use the ngrok URL as RELAY_URL in STREAM's .env")
+    logger.info("For development, create a public tunnel:")
+    logger.info(f"  cloudflared tunnel --url http://localhost:{port}   (recommended)")
+    logger.info(f"  ngrok http {port}                                  (alternative)")
+    logger.info("  Then use the tunnel URL as RELAY_URL in STREAM's .env")
     logger.info("")
 
+    # Start the WebSocket server. `serve()` returns an async context manager
+    # that listens on host:port and calls `handle_connection` for every new
+    # WebSocket connection. `serve_forever()` blocks until the process is killed.
     async with serve(handle_connection, host, port) as server:
         await server.serve_forever()
 
@@ -431,6 +477,8 @@ def main():
     )
     args = parser.parse_args()
 
+    # Configure Python's logging system. DEBUG shows every buffered message,
+    # INFO shows connections and disconnections, WARNING+ for errors only.
     logging.basicConfig(
         level=getattr(logging, args.log_level),
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -438,8 +486,11 @@ def main():
     )
 
     try:
+        # asyncio.run() starts the event loop and runs our async server.
+        # This blocks until the server is stopped (Ctrl+C or kill signal).
         asyncio.run(start_relay(host=args.host, port=args.port))
     except KeyboardInterrupt:
+        # Ctrl+C — graceful shutdown. Not an error.
         logger.info("Relay server stopped (Ctrl+C)")
 
 

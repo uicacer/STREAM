@@ -207,8 +207,11 @@ async def _search_duckduckgo(query: str) -> list[SearchResult]:
 
     Uses the duckduckgo-search library which scrapes DuckDuckGo's results.
     This is NOT an official API — DuckDuckGo could change their format at
-    any time. However, the library is actively maintained (v8.0+) and
-    handles retries/fallbacks internally.
+    any time. However, the library is actively maintained and handles
+    retries/fallbacks internally.
+
+    NOTE: The old `duckduckgo_search` package was renamed to `ddgs` in 2025.
+    We import from `ddgs` (new name) with fallback to `duckduckgo_search` (old name).
 
     RATE LIMITING:
       DuckDuckGo may throttle or block requests from a single IP if too
@@ -222,24 +225,24 @@ async def _search_duckduckgo(query: str) -> list[SearchResult]:
         List of SearchResult objects (up to WEB_SEARCH_MAX_RESULTS).
     """
     try:
-        from duckduckgo_search import DDGS
+        try:
+            from ddgs import DDGS
+        except ImportError:
+            from duckduckgo_search import DDGS  # type: ignore[no-redef]
 
         results: list[SearchResult] = []
-        with DDGS() as ddgs:
-            for r in ddgs.text(query, max_results=WEB_SEARCH_MAX_RESULTS):
-                results.append(
-                    SearchResult(
-                        title=r.get("title", ""),
-                        url=r.get("href", ""),
-                        content=r.get("body", ""),
-                    )
+        for r in DDGS().text(query, max_results=WEB_SEARCH_MAX_RESULTS):
+            results.append(
+                SearchResult(
+                    title=r.get("title", ""),
+                    url=r.get("href", ""),
+                    content=r.get("body", ""),
                 )
+            )
         return results
 
     except ImportError:
-        logger.error(
-            "[WebSearch] duckduckgo-search not installed. Run: pip install duckduckgo-search"
-        )
+        logger.error("[WebSearch] ddgs not installed. Run: pip install ddgs")
         return []
     except Exception as e:
         logger.warning(f"[WebSearch] DuckDuckGo search failed: {e}")

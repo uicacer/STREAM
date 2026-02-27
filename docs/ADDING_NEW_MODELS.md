@@ -126,7 +126,7 @@ Model params > 100B
 **AWQ 4-bit** reduces model size 4x by compressing weights from FP16 (2 bytes) to INT4 (0.5 bytes) while preserving quality for "salient" weights. However:
 
 - **Use `awq_marlin`, not `awq`**. The plain AWQ kernel is ~10x slower (~3 tok/s vs ~30+ tok/s). Marlin kernels are optimized for NVIDIA tensor cores and deliver dramatically better throughput.
-- Marlin requires CUDA 12.4+ drivers. The H100 on ghi2-002 has CUDA 12.2 (driver 535), which causes PTX compilation errors with Marlin. If you hit this, either wait for a driver update or **use FP16 instead** (no quantization kernels needed, just standard cuBLAS).
+- Marlin requires CUDA 12.4+ drivers. The H100 on ghi2-002 now has driver 550.163.01 (CUDA 12.4), installed on 2026-02-25, so Marlin works correctly.
 - AWQ models are published separately on HuggingFace (e.g., `Qwen/Qwen2.5-32B-Instruct-AWQ`). Not every model has an official AWQ variant -- community quantizations exist (e.g., `casperhansen/DeepSeek-R1-Distill-Qwen-32B-AWQ`).
 
 **FP16** avoids all kernel compatibility issues. It uses standard cuBLAS GEMM (matrix multiply) which works everywhere. The tradeoff is 4x more VRAM for weights. Use FP16 when: the GPU has enough VRAM, or when AWQ kernels cause problems.

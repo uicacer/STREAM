@@ -66,7 +66,7 @@ litellm.suppress_debug_info = True
 # Example entries after loading:
 #   "cloud-claude"    → {model: "claude-sonnet-4-20250514", api_base: None}
 #   "local-llama"     → {model: "ollama/llama3.2:3b", api_base: "http://ollama:11434"}
-#   "lakeshore-qwen"  → {model: "openai/Qwen/Qwen2.5-1.5B-Instruct", api_base: "http://lakeshore-proxy:8001/v1"}
+#   "lakeshore-qwen-vl-72b" → {model: "openai/Qwen/Qwen2.5-VL-72B-Instruct-AWQ", api_base: "http://lakeshore-proxy:8001/v1"}
 #
 
 _MODEL_MAP: dict[str, dict] = {}
@@ -515,8 +515,8 @@ async def _forward_lakeshore_streaming(
 
         # Translate cryptic WebSocket errors into actionable messages
         if "did not receive a valid HTTP response" in error_str:
-            cause = "SSH tunnel expired"
-            fix = "ssh -4 -R 80:localhost:8765 nokey@localhost.run  then update RELAY_URL in .env"
+            cause = "Tunnel expired"
+            fix = "cloudflared tunnel --url http://localhost:8765  then update RELAY_URL in .env"
         elif "Connect call failed" in error_str or "ConnectionRefused" in error_str:
             cause = "Relay server not running"
             fix = "python -m stream.relay.server"
@@ -581,8 +581,8 @@ async def forward_direct(
 
     The key mapping works via CLOUD_PROVIDERS[model]["env_key"]:
         "cloud-or-claude" → env_key = "OPENROUTER_API_KEY"
-        user_api_keys = {"OPENROUTER_API_KEY": "sk-or-v1-abc123"}
-        → kwargs["api_key"] = "sk-or-v1-abc123"
+        user_api_keys = {"OPENROUTER_API_KEY": "sk-or-v1-abc123"}  # pragma: allowlist secret
+        → kwargs["api_key"] = "sk-or-v1-abc123"  # pragma: allowlist secret
 
     Args:
         model: Friendly model name (e.g., "cloud-claude", "local-llama")

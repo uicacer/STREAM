@@ -154,12 +154,12 @@ async def proxy_chat_completions(request: Request):
     # (desktop mode). Having one definition prevents mismatches where
     # different files use different defaults (e.g., 512 vs 1024 vs 2048).
     #
-    #   config.py:  "lakeshore-qwen": {"total": 32768, "reserve_output": 2048}
-    #                                                    ↑ used as max_tokens
+    #   config.py:  "lakeshore-qwen-vl-72b": {"total": 65536, "reserve_output": 4096}
+    #                                                         ↑ used as max_tokens
     #
-    # With 32768 context and reserve_output=2048:
-    #   - ~30720 tokens for conversation history ≈ 23,000 words of chat
-    #   - ~2048 tokens for model response ≈ 1,500 words per response
+    # With 65536 context and reserve_output=4096:
+    #   - ~61440 tokens for conversation history ≈ 46,000 words of chat
+    #   - ~4096 tokens for model response ≈ 3,000 words per response
     #
     # This allows:
     #   - Long conversations with many back-and-forth messages
@@ -170,9 +170,9 @@ async def proxy_chat_completions(request: Request):
     # If a user explicitly requests a larger max_tokens, we use their value.
     # vLLM will return an error if input + max_tokens > context_window.
     # =========================================================================
-    # Look up context limits for the specific model, fall back to generic lakeshore-qwen
+    # Look up context limits for the specific model, fall back to lakeshore-qwen-vl-72b
     lakeshore_limits = MODEL_CONTEXT_LIMITS.get(
-        model, MODEL_CONTEXT_LIMITS.get("lakeshore-qwen", {})
+        model, MODEL_CONTEXT_LIMITS.get("lakeshore-qwen-vl-72b", {})
     )
     default_max_tokens = lakeshore_limits.get("reserve_output", 2048)
     max_tokens = body.get("max_tokens", default_max_tokens)

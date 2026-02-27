@@ -90,7 +90,7 @@ async def test_e2e_streaming():
         messages=[{"role": "user", "content": "Say hello in one short sentence."}],
         temperature=0.7,
         max_tokens=50,
-        model="lakeshore-qwen",  # Uses the default Lakeshore model
+        model="lakeshore-qwen-vl-72b",  # Uses the default Lakeshore model
         relay_url=RELAY_URL,
     )
 

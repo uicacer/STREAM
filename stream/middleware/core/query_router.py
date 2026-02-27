@@ -159,7 +159,7 @@ def get_tier_for_query(
         query: The user's query text
         user_preference: "auto", "local", "lakeshore", or "cloud"
         cloud_provider: For cloud tier, the specific provider (e.g., "cloud-gpt")
-        lakeshore_model: For lakeshore tier, the specific model (e.g., "lakeshore-qwen-32b")
+        lakeshore_model: For lakeshore tier, the specific model (e.g., "lakeshore-qwen-vl-72b")
 
     Returns a RoutingResult with:
     - tier: The actual tier to use

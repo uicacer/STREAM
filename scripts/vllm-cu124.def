@@ -1,0 +1,467 @@
+# =============================================================================
+# WHAT IS THIS FILE?
+# =============================================================================
+# This is an Apptainer Definition File (.def). Think of it as a recipe or
+# blueprint for building a software container.
+#
+# WHAT IS A CONTAINER?
+#   A container is like a self-contained computer-inside-your-computer. It
+#   packages an operating system (Ubuntu), programming languages (Python),
+#   libraries (PyTorch, CUDA), and applications (vLLM) into a single portable
+#   unit. When you "run" the container, it uses these bundled versions instead
+#   of whatever is installed on the host machine. This guarantees the software
+#   works the same way every time, on any machine.
+#
+# WHAT IS APPTAINER?
+#   Apptainer (formerly Singularity) is the container system used on HPC
+#   clusters like Lakeshore. It's similar to Docker but designed for shared
+#   multi-user environments where users don't have root (admin) access.
+#   Key difference from Docker: you don't need admin privileges to RUN
+#   Apptainer containers — only to BUILD them (which is why we use --fakeroot
+#   during the build step).
+#
+# WHAT IS A .def FILE?
+#   The .def extension is a convention for Apptainer definition files, just
+#   like "Dockerfile" is for Docker. This file tells Apptainer:
+#     1. What base image to start from (like choosing an operating system)
+#     2. What software to install inside the container (%post section)
+#     3. What environment variables to set when running (%environment section)
+#     4. What command to run by default (%runscript section)
+#
+# WHAT IS THE OUTPUT?
+#   After building, the result is a "sandbox" — a regular directory (~20-30
+#   GiB) that contains a complete Linux filesystem with Ubuntu, Python, CUDA,
+#   PyTorch, and vLLM all installed. You can then use this sandbox with
+#   "apptainer exec" to run any command inside the container.
+#
+# =============================================================================
+# WHY DO WE NEED A NEW CONTAINER?
+# =============================================================================
+# Our current vLLM container (vllm-0.15.1) was built from the official Docker
+# image vllm/vllm-openai:v0.15.1, which ships with CUDA 12.9.
+#
+# The problem: Marlin AWQ kernels. These are highly optimized GPU programs
+# that make quantized model inference fast (~30-40 tokens/second). They were
+# compiled with CUDA 12.9, producing something called "PTX code" that
+# targets CUDA 12.9.
+#
+# WHAT IS PTX?
+#   PTX (Parallel Thread Execution) is NVIDIA's intermediate instruction set.
+#   Think of it as "assembly language for GPUs." When you compile CUDA code,
+#   the CUDA compiler (nvcc) doesn't produce final machine code directly.
+#   Instead, it produces PTX — a portable intermediate format.
+#
+# WHAT IS JIT (Just-In-Time) COMPILATION?
+#   When a GPU program runs, the NVIDIA driver translates PTX instructions
+#   into the actual machine code for your specific GPU (e.g., H100). This
+#   translation happens "just in time" — right when the code is first needed,
+#   not ahead of time. This is called JIT compilation.
+#
+#   The key rule: the GPU driver must UNDERSTAND the PTX version being used.
+#   A driver that knows CUDA 12.4 PTX cannot JIT-compile CUDA 12.9 PTX —
+#   it's like trying to read a book in a language you don't know.
+#
+# OUR SITUATION:
+#   - GPU driver on ghi2-002: 550.163.01 → understands PTX up to CUDA 12.4
+#   - Current container's Marlin kernels: compiled with CUDA 12.9 PTX
+#   - Result: cudaErrorUnsupportedPtxVersion (driver can't understand the PTX)
+#   - Fallback: plain AWQ kernel (--quantization awq) works but is ~10x slower
+#
+# THE FIX:
+#   Build vLLM from source inside a CUDA 12.4 environment. This compiles the
+#   Marlin kernels with CUDA 12.4 PTX, which the 550 driver can JIT into
+#   H100 machine code.
+#
+# WHAT DOES "BUILD FROM SOURCE" MEAN?
+#   Normally, "pip install vllm" downloads pre-built binary packages (called
+#   "wheels") from PyPI (Python Package Index). These wheels contain code that
+#   was already compiled by the vLLM developers on THEIR machines — using
+#   THEIR CUDA version (12.9).
+#
+#   "Building from source" means we skip the pre-built package. Instead, we:
+#     1. Download the raw Python and C++ source code from GitHub
+#     2. Compile it ourselves on OUR machine, using OUR CUDA toolkit (12.4)
+#     3. Install the result
+#
+#   This way, all CUDA kernels (including Marlin) produce CUDA 12.4 PTX,
+#   which our driver understands. The tradeoff: compilation takes ~1.5-2
+#   hours (lots of C++ and CUDA code to compile), but the result is a
+#   container perfectly matched to our driver.
+#
+# PERFORMANCE RESULT:
+#   --quantization awq_marlin --enforce-eager → ~6-8 tok/s (Marlin + eager mode)
+#   --quantization awq_marlin                 → ~30-40 tok/s (Marlin + torch.compile, if working)
+#   --quantization awq                        → ~3 tok/s (plain AWQ kernel, slow fallback)
+#
+#   NOTE: torch.compile crashes with this dev build (illegal memory access
+#   during Triton autotuning), so --enforce-eager is required. The Marlin
+#   kernel itself still provides a 2x speedup over plain AWQ.
+#
+# =============================================================================
+# HOW TO BUILD THIS CONTAINER
+# =============================================================================
+# The build takes ~1.5-2 hours. You have two options:
+#
+# OPTION 1: Submit as a batch job (RECOMMENDED)
+#   The build runs as a SLURM job. It won't die if your SSH disconnects.
+#   Use the companion script:
+#
+#     sbatch scripts/build-vllm-cu124.sh
+#
+#   Check progress with: tail -f logs/build-vllm-cu124-<jobid>.log
+#
+# OPTION 2: Run interactively
+#   If you want to watch the output in real-time, use a screen or tmux
+#   session first! Without screen/tmux, the build will be killed if your
+#   SSH connection drops (and 1.5 hours of work will be lost).
+#
+#   WHAT IS screen?
+#     screen is a program that keeps your terminal session alive even if
+#     you disconnect from SSH. Think of it as a "virtual terminal" that
+#     runs on the server. You can detach from it (Ctrl+A, then D), close
+#     your laptop, reconnect to SSH later, and reattach (screen -r) to
+#     find everything still running.
+#
+#   Interactive build with screen:
+#     ssh lakeshore
+#     screen -S vllm-build            # Start a named screen session
+#     module load apptainer
+#     apptainer build --fakeroot --sandbox \
+#         /projects/acer_hpc_admin/nassar/containers/vllm-cu124 \
+#         scripts/vllm-cu124.def
+#     # Ctrl+A, D to detach (safe to disconnect SSH)
+#     # screen -r vllm-build to reattach later
+#
+# WHAT IS --fakeroot?
+#   --fakeroot lets you run commands as "fake root" inside the container
+#   build. This is needed because installing software (apt-get install)
+#   requires root privileges. --fakeroot emulates root without actually
+#   giving you real root access on the host machine — a security feature
+#   designed for HPC. If --fakeroot is not available on your cluster,
+#   ask the admins to enable it (it's a common Apptainer feature).
+#
+# WHAT IS --sandbox?
+#   --sandbox creates an unpacked directory tree instead of a compressed
+#   .sif file. Sandboxes are larger on disk (~26 GiB vs ~7 GiB) but
+#   faster to build because they skip the SquashFS compression step.
+#
+# =============================================================================
+# AFTER BUILDING: PRODUCTION DEPLOYMENT
+# =============================================================================
+# Once the container is built and tested, it becomes the production container
+# for serving models to STREAM users. To deploy:
+#
+#   1. Update scripts/vllm-qwen-vl-72b.sh:
+#      - Change CONTAINER path from "vllm-0.15.1" to "vllm-cu124"
+#      - Change --quantization awq to --quantization awq_marlin
+#      - Remove --dtype float16 (Marlin handles dtype automatically)
+#
+#   2. Submit the model serving job as usual:
+#        sbatch scripts/vllm-qwen-vl-72b.sh
+#
+#   3. Add --enforce-eager (torch.compile crashes in this build)
+#
+#   4. STREAM users automatically get faster inference (~6-8 tok/s,
+#      up from ~3 tok/s with plain AWQ) through the existing Globus
+#      Compute pipeline. No STREAM code changes needed — the vLLM API
+#      is identical, just faster.
+#
+# The old container (vllm-0.15.1) can be kept as a backup. Both containers
+# can coexist in /projects/acer_hpc_admin/nassar/containers/.
+# =============================================================================
+
+
+# =============================================================================
+# CONTAINER BASE IMAGE
+# =============================================================================
+# "Bootstrap: docker" tells Apptainer to build this container starting from a
+# Docker image. Apptainer can pull Docker images from Docker Hub (or any
+# Docker registry) and convert them into its own format. This is the most
+# common way to create Apptainer containers because Docker Hub has a huge
+# library of pre-built base images.
+#
+# We use the official PyTorch Docker image as our base instead of the raw
+# nvidia/cuda image. This is important because:
+#
+#   1. It already includes Python, pip, conda, gcc, git, and build tools
+#      → We don't need apt-get install, which fails under partial fakeroot
+#        on Lakeshore (the cluster's fakeroot doesn't support apt-get's
+#        privilege-dropping mechanism)
+#
+#   2. It has the CUDA 12.4 development toolkit (nvcc, headers, libraries)
+#      → nvcc will compile Marlin kernels with CUDA 12.4 PTX
+#
+#   3. It includes a pre-installed PyTorch with CUDA 12.4 support
+#      → We'll upgrade it to the version vLLM needs via pip
+#
+# Image name breakdown:
+#   pytorch/pytorch  = Official PyTorch Docker images on Docker Hub
+#   2.5.1            = PyTorch version (we'll upgrade this for vLLM)
+#   cuda12.4         = CUDA toolkit 12.4 — the KEY to our fix
+#   cudnn9           = cuDNN 9 (deep learning acceleration library)
+#   devel            = Development variant with nvcc compiler (needed to
+#                      compile vLLM's CUDA kernels from source)
+# =============================================================================
+Bootstrap: docker
+From: pytorch/pytorch:2.5.1-cuda12.4-cudnn9-devel
+
+
+# =============================================================================
+# METADATA LABELS
+# =============================================================================
+# These are informational tags stored inside the container. They don't affect
+# behavior — they're for documentation. You can view them by running:
+#   apptainer inspect <container>
+# =============================================================================
+%labels
+    Author nassar@uic.edu
+    Description vLLM 0.8.5.post1 compiled with CUDA 12.4 for driver 550 compatibility
+    vLLM.Version 0.8.5.post1
+    CUDA.Version 12.4.1
+
+
+# =============================================================================
+# ENVIRONMENT VARIABLES (set automatically every time the container runs)
+# =============================================================================
+# These are exported whenever you run any command with:
+#   apptainer exec --nv <container> <command>
+# =============================================================================
+%environment
+    # The PyTorch Docker image uses conda. The conda environment's bin
+    # directory is already on PATH by default, so "python", "pip", and
+    # "vllm" commands work automatically.
+
+    # Tell PyTorch and vLLM where the CUDA toolkit lives inside the container.
+    # Some CUDA operations need this to find the nvcc compiler and CUDA
+    # libraries at runtime (e.g., for torch.compile JIT compilation).
+    export CUDA_HOME=/usr/local/cuda
+
+    # Control how vLLM creates worker processes for multi-GPU inference.
+    # "spawn" is safer than "fork" in containerized environments because
+    # fork() can cause issues with CUDA contexts that were initialized
+    # in the parent process.
+    export VLLM_WORKER_MULTIPROC_METHOD=spawn
+
+
+# =============================================================================
+# BUILD COMMANDS (run once during container build)
+# =============================================================================
+# Everything in %post runs inside the container during the build process.
+# These commands install software, compile code, and configure the
+# environment. They run with root privileges (via --fakeroot).
+#
+# After the build finishes, all installed software is "baked into" the
+# container and available every time you run it. You never need to
+# reinstall anything.
+# =============================================================================
+%post
+
+    # =========================================================================
+    # STEP 1: Upgrade PyTorch to the version vLLM v0.8.5.post1 needs
+    # =========================================================================
+    # The base image (pytorch/pytorch:2.5.1-cuda12.4-cudnn9-devel) already
+    # includes Python, pip, conda, gcc, and PyTorch 2.5.1 with CUDA 12.4.
+    #
+    # NO APT-GET NEEDED! This is important because Lakeshore's partial
+    # fakeroot doesn't support apt-get (it fails with "setgroups: Operation
+    # not permitted"). By using a base image that already has everything,
+    # we only need pip/conda commands which work fine under partial fakeroot.
+    #
+    # HOWEVER: the base image does NOT include git. We need git because:
+    #   1. We use "git clone" to download vLLM's source code
+    #   2. vLLM's build system (CMake) uses git to download CUTLASS, a
+    #      NVIDIA CUDA template library needed to compile the kernels
+    #
+    # We install git via conda (not apt-get). Conda is a package manager
+    # that comes pre-installed in the PyTorch Docker image. Unlike apt-get,
+    # conda installs packages into its own directory (/opt/conda/) and
+    # doesn't need root access, so it works fine under partial fakeroot.
+    #
+    # We upgrade PyTorch to 2.6.0 (the version vLLM v0.8.5.post1 was designed
+    # for). The --index-url flag tells pip to download from PyTorch's CUDA 12.4
+    # package index, ensuring we get PyTorch built for CUDA 12.4.
+    #
+    # WHY v0.8.5.post1 AND NOT v0.15.1?
+    #   vLLM v0.15.1 requires PyTorch 2.9.1, which is only available for
+    #   CUDA 12.9. The latest PyTorch for CUDA 12.4 is 2.6.0. vLLM v0.8.5.post1
+    #   was natively designed for PyTorch 2.6.0, making it the latest vLLM
+    #   version compatible with our CUDA 12.4 constraint. It has full support
+    #   for Qwen2.5-VL and Marlin AWQ kernels.
+    #
+    # torchvision is included because vLLM's vision-language model support
+    # (like Qwen2.5-VL) uses it for image preprocessing.
+    # =========================================================================
+    conda install -y git
+    pip install --upgrade pip setuptools wheel packaging
+    pip install --upgrade torch torchvision --index-url https://download.pytorch.org/whl/cu124
+
+    # =========================================================================
+    # STEP 2: Build vLLM v0.8.5.post1 from source
+    # =========================================================================
+    # This is the most important step, and the reason this container exists.
+    # We compile vLLM ourselves so that all CUDA kernels — especially the
+    # Marlin AWQ kernels — produce CUDA 12.4 PTX.
+    #
+    # STEP-BY-STEP EXPLANATION:
+    #
+    # git clone --branch v0.8.5.post1 --depth 1 <url>:
+    #   Downloads vLLM's source code from GitHub.
+    #   --branch v0.8.5.post1: gets the exact v0.8.5.post1 release (not the latest
+    #     development code which might be unstable)
+    #   --depth 1: "shallow clone" — only downloads the latest commit,
+    #     not the full git history (saves time and ~500 MB of space)
+    #
+    # export MAX_JOBS=4:
+    #   Limits the number of parallel compilation processes. Most nvcc
+    #   (CUDA compiler) processes use ~2-4 GiB of RAM each. However,
+    #   FlashAttention 3 Hopper kernels are outliers — each one uses
+    #   8-16 GiB. With MAX_JOBS=4 and 64 GiB RAM, we have enough
+    #   headroom even when multiple FA3 kernels compile simultaneously.
+    #   Reducing MAX_JOBS lowers memory but increases build time.
+    #
+    # export CUDA_HOME=/usr/local/cuda:
+    #   Tells the build system where the CUDA 12.4 toolkit is installed
+    #   in this container. The build system uses this to find:
+    #     - nvcc: the CUDA compiler that produces PTX code
+    #     - CUDA headers: #include files for CUDA programming
+    #     - CUDA libraries: libcudart, libcublas, etc.
+    #   Since this points to CUDA 12.4, nvcc produces CUDA 12.4 PTX.
+    #
+    # python use_existing_torch.py:
+    #   A vLLM helper script that says "don't download PyTorch — use
+    #   the one we already installed in Step 3." Without this, the build
+    #   might pull a different PyTorch version with the wrong CUDA.
+    #
+    # pip install -r requirements/build.txt:
+    #   Installs build-time tools: cmake (generates build files), ninja
+    #   (fast build executor), and other C++/CUDA compilation helpers.
+    #
+    # pip install --no-build-isolation .:
+    #   Compiles and installs vLLM from the source code in the current
+    #   directory (.). The --no-build-isolation flag tells pip:
+    #     "Use the packages already in this venv (our cu124 PyTorch, cmake,
+    #      ninja) instead of creating a temporary isolated environment."
+    #   This is critical — isolation would download a fresh PyTorch wheel
+    #   with the wrong CUDA version, defeating the whole purpose.
+    #
+    #   This step takes ~60-90 minutes. It compiles:
+    #     - Marlin kernels (the fast AWQ quantization kernels we need)
+    #     - FlashAttention kernels (fast attention computation)
+    #     - Various other CUDA extensions
+    #   All with CUDA 12.4 PTX, compatible with our driver 550.
+    # =========================================================================
+    rm -rf /tmp/vllm
+    git clone --branch v0.8.5.post1 --depth 1 https://github.com/vllm-project/vllm.git /tmp/vllm
+    cd /tmp/vllm
+    export MAX_JOBS=4
+    export CUDA_HOME=/usr/local/cuda
+
+    # WHAT IS TORCH_CUDA_ARCH_LIST?
+    #   This variable controls which GPU "compute capability" architectures
+    #   nvcc compiles CUDA kernels for. Every NVIDIA GPU has a compute
+    #   capability version that identifies its architecture:
+    #
+    #     A100 = 8.0 (Ampere)
+    #     H100 = 9.0 (Hopper)
+    #
+    #   Without this variable, the build system tries to auto-detect GPUs
+    #   on the machine. On the CPU-only "batch" partition (where we build),
+    #   there are NO GPUs, so auto-detection fails and defaults to compiling
+    #   for ALL common architectures: 5.0, 8.0, 8.6, 8.9, 9.0, 9.0a.
+    #   That's 6 targets — every CUDA kernel gets compiled 6 times!
+    #
+    #   By setting this to "8.0;9.0", we tell nvcc: "only compile for A100
+    #   and H100." This cuts compilation by ~3x (2 targets instead of 6)
+    #   and dramatically reduces peak memory usage.
+    #
+    # WHY DOES THIS MATTER FOR MEMORY?
+    #   The FlashAttention 3 (FA3) Hopper kernels are EXTREMELY memory-
+    #   hungry during compilation — each nvcc process uses 8-16 GiB of RAM
+    #   (vs 2-4 GiB for typical kernels). With MAX_JOBS=4 and 6 architectures,
+    #   multiple FA3 kernels compile simultaneously and can exceed 64 GiB total.
+    #   Restricting to 2 architectures reduces the number of FA3 kernel variants,
+    #   keeping peak memory within the 64 GiB SLURM allocation.
+    #
+    # IF YOU ADD NEW GPU TYPES TO LAKESHORE:
+    #   Add their compute capability here. For example, if B100 (sm_100)
+    #   is added: export TORCH_CUDA_ARCH_LIST="8.0;9.0;10.0"
+    export TORCH_CUDA_ARCH_LIST="8.0;9.0"
+    python use_existing_torch.py
+    pip install -r requirements/build.txt
+    pip install --no-build-isolation .
+
+    # =========================================================================
+    # STEP 3: Pin transformers to avoid breaking changes
+    # =========================================================================
+    # vLLM's build installs whatever transformers version pip resolves to.
+    # As of Feb 2026, that's transformers 5.x, which removed the
+    # `all_special_tokens_extended` attribute from tokenizers. This breaks
+    # vLLM at runtime with:
+    #   AttributeError: Qwen2Tokenizer has no attribute all_special_tokens_extended
+    #
+    # vLLM v0.8.5.post1 requires transformers>=4.51.1. We pin to <5.0 to
+    # stay on the 4.x series which is known to work. As of this build,
+    # the resolved version is 4.57.6.
+    # =========================================================================
+    pip install "transformers>=4.51.1,<5.0"
+
+    # =========================================================================
+    # STEP 4: Install flash-attn for vision-language model support
+    # =========================================================================
+    # vLLM's vision module (used by Qwen2.5-VL) requires either flash-attn
+    # or xformers for memory-efficient attention. Without either, vLLM fails:
+    #   ModuleNotFoundError: No module named 'xformers'
+    #
+    # We install flash-attn (preferred over xformers) from a pre-built wheel
+    # that matches our exact PyTorch + CUDA + Python versions. Building
+    # flash-attn from source would take ~30 min and can hit cross-device
+    # link errors in container builds.
+    #
+    # IMPORTANT: --no-deps prevents pip from pulling in a different PyTorch
+    # version (flash-attn depends on torch, and pip would "helpfully" upgrade
+    # to torch 2.10+ which breaks our CUDA 12.4 setup).
+    #
+    # Wheel version breakdown:
+    #   flash_attn-2.7.4.post1  = flash-attn version
+    #   cu12                    = CUDA 12.x
+    #   torch2.6                = PyTorch 2.6.x
+    #   cxx11abiFALSE           = C++ ABI setting (matches PyTorch's default)
+    #   cp311                   = CPython 3.11
+    #
+    # If you upgrade PyTorch or Python, you MUST find the matching wheel at:
+    #   https://github.com/Dao-AILab/flash-attention/releases
+    # =========================================================================
+    pip install https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.6cxx11abiFALSE-cp311-cp311-linux_x86_64.whl --no-deps
+
+    # =========================================================================
+    # STEP 5: Cleanup build artifacts
+    # =========================================================================
+    # Remove files that were only needed during the build:
+    #   - /tmp/vllm: the source code (already compiled and installed)
+    #   - pip cache: downloaded .whl files no longer needed
+    # This saves ~5-10 GiB in the final container.
+    # =========================================================================
+    # Change directory BEFORE deleting /tmp/vllm. The build ran "cd /tmp/vllm"
+    # earlier, so our current working directory is /tmp/vllm. If we delete it
+    # first, any subsequent command (like pip cache purge) fails with:
+    #   "The folder you are executing pip from can no longer be found."
+    # because the shell's cwd no longer exists. Moving to / first avoids this.
+    cd /
+    rm -rf /tmp/vllm
+    pip cache purge
+
+
+# =============================================================================
+# DEFAULT COMMAND (runs when you do: apptainer run <container> <args>)
+# =============================================================================
+# This sets "vllm serve" as the default command. You can run the container
+# two ways — both are equivalent:
+#
+#   apptainer run --nv <container> Qwen/Qwen2.5-VL-72B-Instruct-AWQ --port 8000
+#   apptainer exec --nv <container> vllm serve Qwen/Qwen2.5-VL-72B-Instruct-AWQ --port 8000
+#
+# The "exec" form is more explicit and used in our SBATCH scripts.
+# The "run" form is a convenient shortcut for interactive testing.
+# =============================================================================
+%runscript
+    exec vllm serve "$@"

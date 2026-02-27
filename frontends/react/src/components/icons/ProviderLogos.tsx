@@ -531,7 +531,7 @@ const MODEL_PATTERNS: [string, ProviderKey][] = [
  * Get provider info for a model key or name.
  *
  * Works with any format:
- *   - Config keys: "cloud-claude", "local-llama", "local-vision", "lakeshore-qwen"
+ *   - Config keys: "cloud-claude", "local-llama", "local-vision", "lakeshore-qwen-vl-72b"
  *   - Raw model names: "llama3.2:3b", "claude-sonnet-4", "gpt-4o"
  *   - Display names: "Claude Sonnet 4", "GPT-4o", "Llama 3.2 3B"
  *

@@ -92,6 +92,7 @@ const JPEG_QUALITY = 0.85
  */
 export const LAKESHORE_MAX_IMAGE_BYTES = 6 * 1024 * 1024  // 6 MB
 
+
 async function compressImage(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const img = new Image()
