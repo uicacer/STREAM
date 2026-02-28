@@ -313,4 +313,21 @@ export interface StreamMetadata {
    * Example: ["cloud", "lakeshore"] means both were tried and unavailable
    */
   unavailable_tiers?: string[]
+
+  /**
+   * Status event from the backend's streaming pipeline.
+   * Used for live UX feedback during multi-step operations:
+   *   - "summarizing_context": Rolling summarization is in progress
+   *     (compressing older messages to fit tier's context window)
+   *   - "summarization_complete": Summarization finished, normal
+   *     streaming will begin
+   */
+  status?: string
+
+  /**
+   * Whether the conversation context was compressed before inference.
+   * Sent with status="summarization_complete" after rolling
+   * summarization reduces the message history.
+   */
+  context_compressed?: boolean
 }

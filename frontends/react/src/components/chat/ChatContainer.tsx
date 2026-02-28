@@ -81,6 +81,17 @@ export function ChatContainer() {
   // NOTE: Auth error dialog only shows when a request actually fails,
   // not proactively on startup based on health checks.
 
+  // Rolling summarization: true while the backend is compressing conversation
+  // history to fit the target tier's context window. Shows a banner in the
+  // TypingIndicator so the user knows why there's a brief pause.
+  // We enforce a minimum display time (5s) so the user can actually read the
+  // banner — otherwise fast summarizations (~1-2s for short histories) would
+  // flash the banner too quickly to register.
+  const [isCompressingContext, setIsCompressingContext] = useState(false)
+  const compressionStartRef = useRef<number>(0)
+  const compressionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const COMPRESSION_MIN_DISPLAY_MS = 5000 // Minimum banner visibility
+
   // Pipeline animation: keeps TypingIndicator visible during phase transitions
   // even after the first token arrives (otherwise transitions get cancelled)
   const [forceShowIndicator, setForceShowIndicator] = useState(false)
@@ -279,6 +290,11 @@ export function ChatContainer() {
     setVisionError(null)
     setPayloadWarning(null)
     setLakeshoreSkippedInfo(null)
+    setIsCompressingContext(false)
+    if (compressionTimerRef.current) {
+      clearTimeout(compressionTimerRef.current)
+      compressionTimerRef.current = null
+    }
 
     try {
       await streamChat(allMessages, settings, {
@@ -287,6 +303,34 @@ export function ChatContainer() {
         },
         onMetadata: (meta) => {
           setMetadata(meta)
+
+          // Rolling summarization status events:
+          // The backend sends these while compressing conversation history
+          // to fit the target tier's context window (~1-3 seconds).
+          // We enforce a minimum display time so the user can read the banner —
+          // fast summarizations (short histories) would otherwise flash too quickly.
+          if (meta.status === 'summarizing_context') {
+            setIsCompressingContext(true)
+            compressionStartRef.current = Date.now()
+            // Clear any pending hide timer from a previous summarization
+            if (compressionTimerRef.current) {
+              clearTimeout(compressionTimerRef.current)
+              compressionTimerRef.current = null
+            }
+          } else if (meta.status === 'summarization_complete' || meta.tier) {
+            // Ensure the banner stays visible for at least COMPRESSION_MIN_DISPLAY_MS.
+            // If summarization was fast, delay hiding until the minimum time elapses.
+            const elapsed = Date.now() - compressionStartRef.current
+            const remaining = COMPRESSION_MIN_DISPLAY_MS - elapsed
+            if (remaining > 0 && compressionStartRef.current > 0) {
+              compressionTimerRef.current = setTimeout(() => {
+                setIsCompressingContext(false)
+                compressionTimerRef.current = null
+              }, remaining)
+            } else {
+              setIsCompressingContext(false)
+            }
+          }
 
           // When the backend auto-switches to a vision model (e.g. images
           // detected in Auto mode), update the sidebar selector so the user
@@ -640,6 +684,7 @@ export function ChatContainer() {
                   originalTier={streamMetadata?.original_tier}
                   unavailableTiers={streamMetadata?.unavailable_tiers}
                   userMessageCount={userMessageCount}
+                  isCompressingContext={isCompressingContext}
                 />
               )}
 

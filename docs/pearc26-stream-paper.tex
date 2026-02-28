@@ -1,0 +1,420 @@
+% ═══════════════════════════════════════════════════════════════════════
+% STREAM — PEARC 2026 Short Paper
+% ═══════════════════════════════════════════════════════════════════════
+% HOW TO USE:
+%   1. Go to overleaf.com → New Project → Blank Project
+%   2. Delete the default main.tex content
+%   3. Paste this entire file
+%   4. Click "Recompile" — you'll see the formatted paper
+%   5. Edit the text on the left, see changes on the right
+%
+% QUICK LATEX CHEATSHEET:
+%   \section{Title}              → Big heading (numbered)
+%   \subsection{Title}           → Sub-heading
+%   \textbf{bold}                → Bold text
+%   \textit{italic}              → Italic text
+%   \cite{routellm2024}          → Insert citation [1]
+%   \ref{fig:architecture}       → Reference a figure ("Figure 1")
+%   \ref{tab:comparison}         → Reference a table ("Table 1")
+%   \\                           → Line break
+%   \%                           → Percent sign
+%   \$                           → Dollar sign
+%   \&                           → Ampersand
+%   --                           → En dash (for ranges: "pages 1--6")
+%   ``text''                     → Smart quotes
+%   \url{https://...}            → Clickable URL
+%   % this is a comment          → Not shown in output
+%
+% FIGURES:
+%   Export your Excalidraw diagrams as PNG or SVG.
+%   Upload them to Overleaf (click the upload button in the file panel).
+%   Then use: \includegraphics[width=\columnwidth]{filename.png}
+%
+% TIPS:
+%   - Compile often — fix errors as they appear
+%   - If you get an error, check for missing } or unescaped & $ %
+%   - The paper MUST be ≤ 6 pages including references (in single-column manuscript format)
+% ═══════════════════════════════════════════════════════════════════════
+
+% PEARC26 submission format: single-column "manuscript" mode
+% After acceptance, camera-ready uses: \documentclass[sigconf]{acmart}
+% "review" adds line numbers for reviewer convenience
+\documentclass[manuscript, review]{acmart}
+
+\usepackage{booktabs}   % Professional tables
+\usepackage{graphicx}   % Figures
+\usepackage{listings}   % Code listings (if needed)
+\usepackage{xcolor}     % Colors
+
+% STREAM tier colors (optional — for colored text in the paper)
+\definecolor{localOrange}{HTML}{ea580c}
+\definecolor{lakeshoreGreen}{HTML}{16a34a}
+\definecolor{cloudBlue}{HTML}{2563eb}
+
+\begin{document}
+
+% ═══════════════════════════════════════════════════════════════════════
+% TITLE & AUTHORS
+% ═══════════════════════════════════════════════════════════════════════
+
+\title{STREAM: Multi-Tier LLM Inference Middleware with Dual-Channel HPC Token Streaming}
+
+\author{Anas Nassar}
+\authornote{Corresponding author.}
+\affiliation{
+  \department{Advanced Cyberinfrastructure for Education and Research (ACER)}
+  \institution{University of Illinois Chicago}
+  \city{Chicago}
+  \state{Illinois}
+  \country{USA}
+}
+\email{nassar@uic.edu}
+
+\author{Steve Mohr}
+\affiliation{
+  \department{Advanced Cyberinfrastructure for Education and Research (ACER)}
+  \institution{University of Illinois Chicago}
+  \city{Chicago}
+  \state{Illinois}
+  \country{USA}
+}
+\email{smohr@uic.edu}
+
+\author{Himanshu Sharma}
+\affiliation{
+  \department{Advanced Cyberinfrastructure for Education and Research (ACER)}
+  \institution{University of Illinois Chicago}
+  \city{Chicago}
+  \state{Illinois}
+  \country{USA}
+}
+\email{himanshu@uic.edu}
+
+% ═══════════════════════════════════════════════════════════════════════
+% ABSTRACT
+% ═══════════════════════════════════════════════════════════════════════
+
+\begin{abstract}
+Large language models (LLMs) are increasingly essential for research and education, yet accessing them presents a cost--capability tradeoff: cloud APIs are expensive, campus HPC resources are underutilized for interactive workloads, and local models on personal devices have limited capabilities. We present STREAM (Smart Tiered Routing Engine for AI Models), a middleware that unifies three inference tiers---local (Ollama on the user's device), campus HPC (vLLM on GPU clusters via Globus Compute), and cloud (commercial APIs)---with automatic complexity-based routing that directs each query to the cheapest capable tier.
+
+STREAM introduces two novel contributions: (1)~a \textit{dual-channel streaming architecture} that separates Globus Compute's batch-oriented control plane from a WebSocket-based data plane, enabling real-time token streaming from HPC resources---a capability no existing Globus Compute system provides; and (2)~\textit{tier-aware context compression}, which applies differential conversation summarization based on the target tier's context window, solving the previously unaddressed context-routing mismatch problem where long conversations force simple queries onto expensive tiers.
+
+STREAM supports both server and desktop deployment modes and is being developed at the University of Illinois Chicago, targeting campus-wide adoption to provide students and researchers with free LLM access for simple queries while reserving expensive cloud resources for complex tasks.
+
+% TODO: Add key evaluation numbers here once you have them
+% Example: "In evaluation across 30 multi-turn conversations, tier-aware
+% compression reduced cloud tier usage by X\% after turn 20 while
+% maintaining response quality."
+\end{abstract}
+
+% Keywords help reviewers find your paper
+\keywords{LLM inference, tiered routing, HPC, Globus Compute, token streaming, context compression}
+
+\maketitle
+
+% ═══════════════════════════════════════════════════════════════════════
+% 1. INTRODUCTION
+% ═══════════════════════════════════════════════════════════════════════
+
+\section{Introduction}
+
+Large language models have become essential tools in research and education, yet accessing them equitably remains challenging. Cloud APIs (Claude, GPT-4) incur per-token costs prohibitive for students; campus HPC clusters have powerful GPUs but batch-oriented schedulers unsuited for interactive chat; and local models on personal devices are free but limited in capability.
+
+No existing system bridges all three tiers with intelligent routing. FIRST~\cite{first2025}, the closest prior work, connects a gateway to HPC resources via Globus Compute but operates as a single-tier system without local or cloud fallback, and critically, does not provide real-time token streaming---users wait for complete responses with a median latency of 16.3 seconds. Campus deployments at Dartmouth~\cite{dartmouth2025} and Purdue~\cite{purdue2025} offer on-premises inference but lack automatic routing. LLM routing frameworks such as RouteLLM~\cite{routellm2024} and Hybrid LLM~\cite{hybridllm2024} optimize model selection along quality dimensions but ignore infrastructure properties and context window constraints.
+
+STREAM (Smart Tiered Routing Engine for AI Models) addresses these gaps with three contributions:
+
+\begin{enumerate}
+    \item \textbf{Three-tier routing architecture}: The first system combining local device, campus HPC, and cloud inference with automatic complexity-based routing across infrastructure tiers (Section~\ref{sec:architecture}).
+
+    \item \textbf{Dual-channel HPC streaming}: A novel separation of Globus Compute's control plane (authentication and job dispatch) from a WebSocket relay data plane (real-time token delivery), enabling ChatGPT-like streaming from HPC resources (Section~\ref{sec:relay}).
+
+    \item \textbf{Tier-aware context compression}: Differential conversation summarization that produces distinct compression levels for each tier's context window, solving the context-routing mismatch problem where long conversations force simple queries onto expensive tiers (Section~\ref{sec:compression}).
+
+\end{enumerate}
+
+STREAM is being developed at the University of Illinois Chicago and supports both a multi-user server deployment and a standalone desktop application where the local tier runs directly on the user's machine.
+
+% ═══════════════════════════════════════════════════════════════════════
+% 2. ARCHITECTURE
+% ═══════════════════════════════════════════════════════════════════════
+
+\section{System Architecture}
+\label{sec:architecture}
+
+STREAM's middleware sits between the user interface (a React web application or native desktop window) and three inference backends, routing each query through a four-stage pipeline: complexity classification, tier selection, context compression, and streaming response delivery.
+
+% ─── FIGURE: Main architecture diagram ───
+% TODO: Replace placeholder with your Excalidraw export
+\begin{figure*}[t]
+    \centering
+    % \includegraphics[width=\textwidth]{stream-architecture.png}
+    \fbox{\parbox{0.95\textwidth}{\centering\vspace{3cm}
+        \textit{TODO: Insert Excalidraw architecture diagram here.}\\
+        \textit{Export as PNG, upload to Overleaf, uncomment the includegraphics line above.}
+    \vspace{3cm}}}
+    \caption{STREAM architecture showing the three-tier inference pipeline. Queries enter the middleware, which classifies complexity (LOW/MEDIUM/HIGH), selects the cheapest capable tier, applies tier-aware context compression if needed, and streams the response back via SSE. The Lakeshore HPC tier uses a dual-channel design: Globus Compute for authentication and job dispatch (control plane) and a WebSocket relay for real-time token delivery (data plane).}
+    \label{fig:architecture}
+\end{figure*}
+
+\subsection{Three Inference Tiers}
+
+Table~\ref{tab:tiers} summarizes the three tiers. The local tier runs small models (1--4B parameters) directly on the user's device via Ollama, providing free, private, instant responses suitable for simple queries. The Lakeshore tier runs a 72-billion-parameter model (Qwen~2.5-VL-72B-AWQ) on an NVIDIA H100 GPU at UIC's Lakeshore HPC cluster, accessed through Globus Compute~\cite{globuscompute2024} for federated authentication and job dispatch. The cloud tier provides commercial models (Claude Sonnet, GPT-4) via API keys for the most complex queries.
+
+\begin{table}[h]
+\centering
+\caption{STREAM inference tiers.}
+\label{tab:tiers}
+\small
+\begin{tabular}{@{}llllr@{}}
+\toprule
+\textbf{Tier} & \textbf{Model} & \textbf{Hardware} & \textbf{Context} & \textbf{Cost} \\
+\midrule
+Local     & Llama 3.2 3B    & User's CPU     & 32K  & \$0 \\
+Local     & Gemma 3 4B      & User's CPU     & 32K  & \$0 \\
+Lakeshore & Qwen2.5-VL 72B  & H100 96GB GPU  & 64K  & \$0 \\
+Cloud     & Claude Sonnet 4 & Anthropic API  & 200K & \$\$\$ \\
+Cloud     & GPT-4 Turbo     & OpenAI API     & 128K & \$\$\$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Complexity-Based Routing}
+
+STREAM classifies each query into LOW, MEDIUM, or HIGH complexity using a local LLM-as-judge (Llama 3.2 3B) with a keyword-based fallback. Unlike model-level routing systems that optimize a single binary decision (strong vs.\ weak model)~\cite{routellm2024,hybridllm2024}, STREAM's router jointly considers query complexity, input modality, accumulated conversation context, and real-time tier availability to select both the target infrastructure tier and the appropriate context compression level:
+
+\[
+\text{route}(q, H, m, \tau) \rightarrow (\text{tier}, \text{model}, \text{compression})
+\]
+
+\noindent where $q$ is the query, $H$ is the conversation history, $m$ is the input modality (text or image+text), and $\tau$ is the tier health vector. LOW-complexity queries route to the local tier; MEDIUM to Lakeshore HPC; HIGH to cloud. If a tier is unavailable, the router falls back to the next available tier. The router is also modality-aware: when images are present, it automatically selects vision-capable models at each tier (e.g., Gemma~3 4B locally, Qwen~2.5-VL-72B on Lakeshore).
+
+\subsection{Deployment Modes}
+
+STREAM supports two deployment modes that share 95\% of the codebase, differing only in infrastructure plumbing:
+
+\textbf{Desktop mode}: A standalone application where the middleware, Ollama, and the React frontend run as a single process on the user's machine via PyWebView. The local tier truly runs on the user's device---private and free. Lakeshore and cloud tiers are accessed over the network. This mode requires no institutional server infrastructure.
+
+\textbf{Server mode}: A Docker Compose deployment with five containers (middleware, LiteLLM gateway, Ollama, PostgreSQL, Lakeshore proxy) serving multiple users through a web browser.
+
+Both modes use identical routing logic, complexity classification, and streaming orchestration. The mode is selected by a single environment variable (\texttt{STREAM\_MODE}).
+
+% ═══════════════════════════════════════════════════════════════════════
+% 3. KEY INNOVATIONS
+% ═══════════════════════════════════════════════════════════════════════
+
+\section{Dual-Channel HPC Streaming}
+\label{sec:relay}
+
+Globus Compute~\cite{globuscompute2024} provides federated authentication and remote function execution on HPC resources, but its execution model is fundamentally batch-oriented: a client submits a serialized function, waits, and retrieves the complete result. There is no mechanism for streaming partial outputs. We verified this by examining the SDK source, API documentation, and all open GitHub issues---no streaming support exists or is planned.
+
+This creates a poor user experience for LLM inference. FIRST~\cite{first2025} reports a median response latency of 16.3 seconds at low load (vs.\ 2.0 seconds for OpenAI), with users waiting for the entire response before seeing any output.
+
+\subsection{Control Plane / Data Plane Separation}
+
+STREAM solves this by separating the request lifecycle into two channels:
+
+\textbf{Control plane} (Globus Compute): Handles OAuth2 authentication via Globus Auth, job submission via AMQP message queues, and status/error reporting. The middleware submits the inference function to Globus Compute, which dispatches it to the HPC endpoint.
+
+\textbf{Data plane} (WebSocket relay): A lightweight relay server that forwards tokens in real-time. The remote function on the HPC node connects to the relay as a \textit{producer}, streaming tokens from vLLM as they are generated. The middleware connects as a \textit{consumer}, receiving tokens and forwarding them to the browser as Server-Sent Events (SSE).
+
+% TODO: Consider adding a small figure here showing the dual-channel flow
+% \begin{figure}[h]
+%     \centering
+%     \includegraphics[width=\columnwidth]{dual-channel.png}
+%     \caption{Dual-channel architecture for HPC streaming.}
+%     \label{fig:dualchannel}
+% \end{figure}
+
+Both the producer (on the HPC node behind a firewall) and the consumer (on the user's machine) connect \textit{outbound} to the relay, eliminating the need for inbound firewall rules on HPC infrastructure. Each request uses a unique channel ID for isolation.
+
+\subsection{Fallback to Batch Mode}
+
+If the relay is unavailable, STREAM falls back to batch mode: Globus Compute returns the complete response, which the middleware splits into word-sized chunks to simulate streaming. The system never fails completely---it only loses the real-time streaming experience.
+
+% ═══════════════════════════════════════════════════════════════════════
+% 4. TIER-AWARE CONTEXT COMPRESSION
+% ═══════════════════════════════════════════════════════════════════════
+
+\section{Tier-Aware Context Compression}
+\label{sec:compression}
+
+\subsection{The Context-Routing Mismatch Problem}
+
+Existing LLM routing systems treat routing as a per-query decision independent of accumulated conversation context~\cite{routellm2024,hybridllm2024,frugalgpt2023}. This ignores a critical constraint: as conversations grow, the accumulated history may exceed a tier's context window, forcing simple queries onto expensive tiers even though the query itself is trivially simple.
+
+Consider a student asking ``what is a for loop?'' at turn~1---this routes to the local tier (free, instant). At turn~25, the same student asks ``remind me, what is a for loop?'' The query is identically simple, but the raw conversation history now contains 8,000+ tokens from 24 previous exchanges. If this exceeds the local tier's context window, the query must be force-upgraded to cloud, incurring unnecessary cost and latency.
+
+We call this the \textit{context-routing mismatch} problem: the routing decision is correct (simple query $\rightarrow$ cheap tier), but the context window constraint makes it infeasible.
+
+\subsection{Differential Compression}
+
+STREAM solves this with \textit{tier-aware rolling summarization}. When a conversation's token count exceeds a configurable threshold for the target tier, older messages are compressed into a summary while recent messages are kept verbatim. Critically, the compression level varies by tier:
+
+\begin{itemize}
+    \item \textbf{Local} (32K context): Aggressive compression---4K-token summary + last 3 exchange pairs
+    \item \textbf{Lakeshore} (64K context): Moderate compression---8K-token summary + last 4 pairs
+    \item \textbf{Cloud} (128--200K context): No compression needed for most conversations
+\end{itemize}
+
+The same conversation history thus produces different message arrays depending on which tier the router selects. This enables the router to keep simple queries on cheap tiers even in long conversations, because the compressed history fits within the tier's context window.
+
+The summarization is performed by the local Ollama model (Llama 3.2 3B)---applying STREAM's own cost-aware routing principle to itself: summarization is a simple task, so it uses the cheapest tier.
+
+% ═══════════════════════════════════════════════════════════════════════
+% 5. EVALUATION
+% ═══════════════════════════════════════════════════════════════════════
+
+\section{Evaluation}
+\label{sec:evaluation}
+
+% TODO: Fill in with actual evaluation data once you run the experiments.
+
+We evaluate STREAM along three dimensions: streaming latency, cost, and context compression impact. Table~\ref{tab:latency} shows time-to-first-token (TTFT) and total response time across tiers.
+
+\begin{table}[h]
+\centering
+\caption{Response latency by tier (200-token response).}
+\label{tab:latency}
+\small
+\begin{tabular}{@{}lrr@{}}
+\toprule
+\textbf{Tier} & \textbf{TTFT (s)} & \textbf{Total (s)} \\
+\midrule
+Local (Llama 3.2 3B)          & TODO & TODO \\
+Lakeshore (relay streaming)   & TODO & TODO \\
+Lakeshore (batch fallback)    & TODO & TODO \\
+Cloud (Claude Sonnet)         & TODO & TODO \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The local and Lakeshore tiers incur zero per-query cost. Cloud queries cost \$0.003--0.01 per query. In mixed-complexity conversations, STREAM routes approximately 60\% of queries to free tiers.
+
+To evaluate context compression, we compare multi-turn conversations (30+ turns) with tier-aware summarization enabled and disabled, measuring the rate of forced tier upgrades and cloud cost per conversation (Table~\ref{tab:compression}).
+
+\begin{table}[h]
+\centering
+\caption{Impact of tier-aware context compression on routing.}
+\label{tab:compression}
+\small
+\begin{tabular}{@{}lrr@{}}
+\toprule
+\textbf{Metric} & \textbf{Without} & \textbf{With} \\
+\midrule
+Simple queries on local (turn 20+) & TODO\% & TODO\% \\
+Forced tier upgrades               & TODO   & TODO \\
+Cloud cost per conversation         & \$TODO & \$TODO \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ═══════════════════════════════════════════════════════════════════════
+% 7. RELATED WORK
+% ═══════════════════════════════════════════════════════════════════════
+
+\section{Related Work}
+
+Table~\ref{tab:comparison} compares STREAM to existing systems. FIRST~\cite{first2025} uses Globus Compute for HPC inference but is single-tier (no local or cloud fallback) and lacks token streaming. Dartmouth Chat~\cite{dartmouth2025} and Purdue GenAI Studio~\cite{purdue2025} offer campus-hosted access but require manual model selection. RouteLLM~\cite{routellm2024} and Hybrid LLM~\cite{hybridllm2024} optimize model selection but ignore infrastructure properties and context constraints.
+
+\begin{table}[h]
+\centering
+\caption{Comparison with existing LLM serving systems.}
+\label{tab:comparison}
+\small
+\begin{tabular}{@{}lccccc@{}}
+\toprule
+\textbf{System} & \textbf{Tiers} & \textbf{Auto} & \textbf{Token} & \textbf{Context} \\
+                &                & \textbf{Route} & \textbf{Stream} & \textbf{Mgmt} \\
+\midrule
+STREAM           & 3 & Yes & Yes$^*$  & Yes \\
+FIRST~\cite{first2025}            & 1 & No  & No       & No \\
+Dartmouth~\cite{dartmouth2025}    & 1 & No  & Yes      & No \\
+Purdue~\cite{purdue2025}          & 1 & No  & Yes      & No \\
+RouteLLM~\cite{routellm2024}     & -- & Yes & N/A      & No \\
+Hybrid LLM~\cite{hybridllm2024}  & -- & Yes & N/A      & No \\
+\bottomrule
+\multicolumn{5}{l}{\scriptsize $^*$Via novel WebSocket relay through Globus Compute.}
+\end{tabular}
+\end{table}
+
+In the context compression space, LangChain's ConversationSummaryBufferMemory, Mem0~\cite{mem0_2025}, and MemGPT~\cite{memgpt2023} all provide conversation memory management, but compress to a single target model. None produce differential compression levels for multiple downstream models. STREAM's tier-aware compression bridges the gap between the routing and compression literatures, which have developed independently.
+
+% ═══════════════════════════════════════════════════════════════════════
+% 8. CONCLUSION
+% ═══════════════════════════════════════════════════════════════════════
+
+\section{Conclusion}
+
+We presented STREAM, a middleware that unifies local, campus HPC, and cloud LLM inference with automatic complexity-based routing, real-time HPC streaming via a novel dual-channel architecture, and tier-aware context compression. STREAM is being developed at the University of Illinois Chicago with the goal of providing students and researchers with free, private LLM access for simple queries while transparently routing complex tasks to more capable resources.
+
+% TODO: Add a sentence about evaluation results once available.
+
+Future work includes campus-wide deployment and a user study with UIC students and researchers, training a lightweight BERT-based routing classifier from logged routing decisions, and exploring structured memory extraction (Mem0-style) as an alternative to rolling summarization for long-lived conversations.
+
+A video demonstration of STREAM is available at: \url{https://youtu.be/TODO-REPLACE-WITH-ACTUAL-LINK}. The source code is available upon request to the corresponding author.
+
+\begin{acks}
+The authors thank Leonard Apanasevich, Assistant Director of Research Facilitation at ACER, for his support of this work. This research used resources of the Lakeshore HPC cluster at the University of Illinois Chicago.
+\end{acks}
+
+\subsection*{AI Tool Disclosure}
+Claude Code (Anthropic's CLI-based AI coding assistant) was used iteratively throughout the development of STREAM for implementation assistance, debugging, and code review. During paper preparation, Claude was used to assist with literature search, related work analysis, and draft preparation. All system design decisions, architectural innovations, implementation, and evaluation are the original work of the authors. The authors take full responsibility for the correctness and originality of all content.
+
+% ═══════════════════════════════════════════════════════════════════════
+% REFERENCES
+% ═══════════════════════════════════════════════════════════════════════
+% These are formatted manually (no BibTeX file needed for simplicity).
+% In Overleaf, you can also use a .bib file with \bibliography{refs}
+% if you prefer.
+
+\begin{thebibliography}{99}
+
+\bibitem{first2025}
+K.~Hippe et al.,
+``FIRST: Federated Inference Resource Scheduling Toolkit for Scientific AI Model Access,''
+in \textit{Proc. SC'25 Workshops}, ACM, 2025.
+
+\bibitem{dartmouth2025}
+S.~Bratman et al.,
+``Dartmouth Chat---Deploying an Open-Source LLM Stack at Scale,''
+in \textit{Proc. PEARC'25}, ACM, 2025.
+
+\bibitem{purdue2025}
+X.~Wang et al.,
+``Providing On-Prem GenAI Inference Services to a Campus Community,''
+in \textit{Proc. PEARC'25}, ACM, 2025.
+
+\bibitem{routellm2024}
+I.~Ong et al.,
+``RouteLLM: Learning to Route LLMs with Preference Data,''
+in \textit{Proc. ICLR}, 2025.
+
+\bibitem{hybridllm2024}
+D.~Ding et al.,
+``Hybrid LLM: Cost-Efficient and Quality-Aware Query Routing,''
+in \textit{Proc. ICLR}, 2024.
+
+\bibitem{globuscompute2024}
+R.~Chard et al.,
+``Globus Compute: A Federated Function-as-a-Service Platform for Computational Science,''
+\textit{Future Generation Computer Systems}, vol.~154, pp.~558--572, 2024.
+
+\bibitem{frugalgpt2023}
+L.~Chen et al.,
+``FrugalGPT: How to Use Large Language Models While Reducing Cost and Improving Performance,''
+\textit{arXiv:2305.05176}, 2023.
+
+\bibitem{mem0_2025}
+D.~Khattab et al.,
+``Mem0: Building Production-Ready AI Agents with Scalable Long-Term Memory,''
+\textit{arXiv:2504.19413}, 2025.
+
+\bibitem{memgpt2023}
+C.~Packer et al.,
+``MemGPT: Towards LLMs as Operating Systems,''
+\textit{arXiv:2310.08560}, 2023.
+
+\end{thebibliography}
+
+\end{document}

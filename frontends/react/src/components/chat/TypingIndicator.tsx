@@ -17,7 +17,7 @@
  */
 
 import { useState, useEffect, useMemo, useRef } from 'react'
-import { Laptop, Building2, Cloud, Bot, Sparkles, AlertTriangle, Brain, Router, Zap } from 'lucide-react'
+import { Laptop, Building2, Cloud, Bot, Sparkles, AlertTriangle, Brain, Router, Zap, Archive } from 'lucide-react'
 
 // Tier icon mapping
 const tierIcons = {
@@ -94,6 +94,8 @@ interface TypingIndicatorProps {
   unavailableTiers?: string[]
   /** Number of user messages sent so far (controls pause duration - longer at start, faster over time) */
   userMessageCount?: number
+  /** Whether the backend is currently compressing conversation history (rolling summarization) */
+  isCompressingContext?: boolean
 }
 
 export function TypingIndicator({
@@ -105,6 +107,7 @@ export function TypingIndicator({
   originalTier,
   unavailableTiers = [],
   userMessageCount = 1,
+  isCompressingContext = false,
 }: TypingIndicatorProps) {
   const [elapsedMs, setElapsedMs] = useState(0)
   const isAutoMode = userSelectedTier === 'auto'
@@ -271,6 +274,16 @@ export function TypingIndicator({
               ? `${unavailableTiers.map(t => tierNames[t] || t).join(' and ')} unavailable — using ${tierNames[displayTier] || displayTier} instead`
               : `${tierNames[originalTier] || originalTier} unavailable — using ${tierNames[displayTier] || displayTier} instead`
             }
+          </span>
+        </div>
+      )}
+
+      {/* Context compression banner — shown while rolling summarization is in progress */}
+      {isCompressingContext && (
+        <div className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-indigo-500/10 border border-indigo-500/30 text-indigo-600 dark:text-indigo-400">
+          <Archive className="w-4 h-4 flex-shrink-0 animate-pulse" />
+          <span className="text-sm font-medium">
+            Compressing conversation history to fit context window...
           </span>
         </div>
       )}

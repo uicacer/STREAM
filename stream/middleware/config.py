@@ -646,6 +646,80 @@ MODEL_CONTEXT_LIMITS = {
 DEFAULT_CLOUD_CONTEXT_LIMIT = {"total": 128000, "reserve_output": 4000}
 
 # =============================================================================
+# ROLLING SUMMARIZATION (Tier-Aware Context Compression)
+# =============================================================================
+#
+# THE PROBLEM:
+# As conversations grow longer, the accumulated history can exceed a cheap
+# tier's context window, forcing simple queries onto expensive tiers.
+# Example: "what is a for loop?" at turn 50 might get force-upgraded to
+# Cloud because LOCAL's 32K context is 80% full — even though a 3B model
+# could answer it perfectly with a compressed history.
+#
+# THE SOLUTION:
+# Compress older conversation turns into a concise summary, keeping
+# recent turns raw. The compression level varies by tier because each
+# tier has a different context window size and model capability.
+#
+# HOW TO USE FOR A/B EVALUATION (for the paper):
+#   1. Run 30 multi-turn conversations with ROLLING_SUMMARIZATION_ENABLED=true
+#   2. Run 30 identical conversations with ROLLING_SUMMARIZATION_ENABLED=false
+#   3. Compare: tier distribution, cost, forced tier upgrades, response quality
+#
+# Master toggle — set to False to disable summarization entirely.
+# Can be set via environment variable or .env file.
+ROLLING_SUMMARIZATION_ENABLED = os.getenv("ROLLING_SUMMARIZATION_ENABLED", "true").lower() == "true"
+
+# Per-tier compression settings.
+# Each tier has different parameters because of their different context
+# windows and model capabilities:
+#
+#   threshold_ratio: When to trigger summarization. 0.8 means "when the
+#     conversation fills 80% of the model's max input capacity." This gives
+#     plenty of room before compressing while leaving 20% headroom.
+#
+#   max_summary_tokens: Safety cap on the summary length (in tokens).
+#     Actual summaries are usually much shorter (300-1,000 tokens).
+#     This cap just prevents the summarizer LLM from rambling.
+#     Rough equivalents: 2,048 ≈ 1.5 pages, 4,096 ≈ 3 pages.
+#
+#   keep_recent_pairs: Number of recent user+assistant exchanges to
+#     keep raw (not summarized). These preserve conversational continuity.
+#     Lakeshore keeps more (6) than LOCAL (3) because it has 2x the
+#     context window and its 72B model benefits from more raw context.
+#
+#   enabled: Whether summarization is active for this tier. Cloud is
+#     disabled by default — its context window (128-200K) is huge.
+#
+SUMMARIZATION_CONFIG = {
+    "local": {
+        "enabled": True,
+        "threshold_ratio": 0.8,
+        "max_summary_tokens": 2048,
+        "keep_recent_pairs": 3,
+    },
+    "lakeshore": {
+        "enabled": True,
+        "threshold_ratio": 0.8,
+        "max_summary_tokens": 4096,
+        "keep_recent_pairs": 6,
+    },
+    "cloud": {
+        "enabled": False,  # Cloud has enough context for most conversations
+        "threshold_ratio": 0.8,
+        "max_summary_tokens": 8192,
+        "keep_recent_pairs": 8,
+    },
+}
+
+# Model used for generating summaries.
+# Uses local Ollama (free, private, always available) — consistent with
+# STREAM's cost-aware philosophy: summarization is a simple task, so
+# use the cheapest tier. The "ollama/" prefix is the LiteLLM format;
+# the summarization module strips it when calling Ollama's REST API directly.
+SUMMARIZATION_MODEL = os.getenv("SUMMARIZATION_MODEL", "ollama/llama3.2:3b")
+
+# =============================================================================
 # TIMEOUT WARNINGS
 # =============================================================================
 # Warn users when response takes too long (in seconds)
