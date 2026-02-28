@@ -23,7 +23,10 @@ from collections.abc import AsyncGenerator
 
 from fastapi import HTTPException
 
-from stream.middleware.config import STREAM_MODE, TIER_TIMEOUT_WARNING
+from stream.middleware.config import (
+    STREAM_MODE,
+    TIER_TIMEOUT_WARNING,
+)
 from stream.middleware.core.database_sqlite import log_cost
 from stream.middleware.core.litellm_client import forward_to_litellm
 from stream.middleware.core.metrics import MetricsTracker
@@ -227,6 +230,7 @@ async def create_streaming_response(
     cloud_provider: str | None = None,
     local_model: str | None = None,
     lakeshore_model: str | None = None,
+    needs_summarization: bool = False,
 ) -> AsyncGenerator[str, None]:
     """
     Create a streaming Server-Sent Events (SSE) response with metrics tracking and automatic fallback.
@@ -293,6 +297,66 @@ async def create_streaming_response(
     current_tier = tier  # The tier we're currently trying
     current_model = model  # The model we're currently trying
     verified_model = None  # Actual model from the provider's response metadata
+
+    # =========================================================================
+    # STEP 0: Rolling Summarization (if needed)
+    # =========================================================================
+    # When the conversation is long relative to the target tier's context
+    # window, we compress older messages before starting inference.
+    #
+    # WHY HERE (inside the generator) INSTEAD OF chat.py?
+    # Because this is an SSE generator — it starts sending events to the
+    # client as soon as FastAPI begins iterating it. By running summarization
+    # HERE, we can send a "summarizing_context" status event FIRST, giving
+    # the user immediate visual feedback ("Compressing history...") while
+    # Ollama generates the summary (~1-3 seconds). If we ran summarization
+    # in chat.py (before the generator), the user would see nothing during
+    # that time — just a frozen UI with no explanation.
+    #
+    # The flow is:
+    #   1. Yield {"status": "summarizing_context"} → frontend shows banner
+    #   2. Call Ollama to summarize old messages (~1-3 seconds)
+    #   3. Yield {"status": "summarization_complete"} → frontend clears banner
+    #   4. Continue with normal metadata + token streaming
+    if needs_summarization:
+        # Tell the frontend to show "Compressing history..." immediately.
+        # This event is sent before any metadata, so the TypingIndicator
+        # can display it while the user waits for the summary to complete.
+        summarize_status_event = {
+            "stream_metadata": {
+                "status": "summarizing_context",
+                "message": "Compressing conversation history...",
+            }
+        }
+        yield f"data: {json.dumps(summarize_status_event)}\n\n"
+
+        logger.info(
+            f"[{correlation_id}] Starting rolling summarization for {tier} tier",
+            extra={"correlation_id": correlation_id, "tier": tier},
+        )
+
+        # Run the actual summarization — this calls local Ollama to compress
+        # older messages into a concise summary. Takes ~1-3 seconds on CPU.
+        # On failure, it falls back to naive truncation (non-fatal).
+        from stream.middleware.utils.summarization import apply_rolling_summarization
+
+        messages = await apply_rolling_summarization(
+            messages=messages,
+            model=model,
+            tier=tier,
+            correlation_id=correlation_id,
+        )
+
+        # Notify the frontend that summarization is done.
+        # The frontend uses this to clear the "Compressing..." banner
+        # and transition to the normal "Generating..." state.
+        summarize_done_event = {
+            "stream_metadata": {
+                "status": "summarization_complete",
+                "context_compressed": True,
+            }
+        }
+        yield f"data: {json.dumps(summarize_done_event)}\n\n"
 
     # =========================================================================
     # STEP 1: Send Initial Metadata

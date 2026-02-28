@@ -31,6 +31,7 @@ from stream.middleware.config import (
     DEFAULT_JUDGE_STRATEGY,
     DEFAULT_VISION_MODELS,
     JUDGE_STRATEGIES,
+    ROLLING_SUMMARIZATION_ENABLED,
     VISION_CAPABLE_MODELS,
 )
 from stream.middleware.core.complexity_judge import judge_complexity
@@ -568,15 +569,52 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
     messages = messages_as_dicts
 
     # =========================================================================
+    # STEP 5b: Rolling Summarization — Check Only (Deferred Execution)
+    # =========================================================================
+    # We CHECK whether summarization is needed here, but DON'T run it yet.
+    # The actual summarization happens inside the streaming generator
+    # (streaming.py, Step 0) so that we can send a "Compressing history..."
+    # status event to the frontend BEFORE the 1-3 second summarization
+    # runs. This gives the user immediate visual feedback instead of a
+    # frozen UI with no explanation.
+    #
+    # Why defer? Because chat.py runs entirely before the SSE stream opens.
+    # If we summarized here, the user would see nothing during the wait.
+    # By deferring to the generator, the SSE connection is already open
+    # and we can push status events in real-time.
+    #
+    # The flag `needs_summarization` is passed to create_streaming_response()
+    # which handles the actual summarization inside the generator.
+    #
+    # Toggle: ROLLING_SUMMARIZATION_ENABLED in config.py / env var.
+    # See docs/ROLLING_SUMMARIZATION.md for the full design.
+    needs_summarization = False
+    if ROLLING_SUMMARIZATION_ENABLED:
+        from stream.middleware.utils.summarization import should_summarize
+
+        needs_summarization = should_summarize(messages, model, tier)
+        if needs_summarization:
+            logger.info(
+                f"[{correlation_id}] Summarization needed for {tier} tier "
+                f"(will run inside streaming generator for live UX feedback)",
+                extra={"correlation_id": correlation_id, "tier": tier},
+            )
+
+    # =========================================================================
     # STEP 6: Validate Context Window
     # =========================================================================
-    # Check if conversation fits in the model's context window
-    # This prevents crashes and truncation
+    # Check if conversation fits in the model's context window.
+    # This prevents crashes and truncation.
+    #
+    # EXCEPTION: If summarization is pending (needs_summarization=True),
+    # we skip this check because summarization will reduce the token count
+    # inside the streaming generator. The post-summarization messages will
+    # be smaller and should fit within the context window.
 
     estimated_input = estimate_tokens(messages)
     within_limit, max_allowed = check_context_limit(estimated_input, model, correlation_id)
 
-    if not within_limit:
+    if not within_limit and not needs_summarization:
         # Conversation is too long for this model
         logger.error(
             f"[{correlation_id}] Context window exceeded: "
@@ -663,6 +701,7 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
                 cloud_provider=request_body.cloud_provider,
                 local_model=request_body.local_model,
                 lakeshore_model=request_body.lakeshore_model,
+                needs_summarization=needs_summarization,
             ),
             media_type="text/event-stream",  # SSE content type
             headers={
