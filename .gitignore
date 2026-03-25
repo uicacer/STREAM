@@ -105,16 +105,13 @@ docs/pearc26-stream-paper.tex
 docs/pearc26-stream-poster.tex
 docs/reference-verification.md
 
-# Internal/unpublished documents
-docs/PUBLICATION_STRATEGY.md
-docs/ADAPTIVE_LOCAL_MODEL_SELECTION.md
-docs/STREAM_PEARC26_Poster_Abstract.pdf
-docs/pearc26-stream-paper-extended.tex
-docs/references.bib
-docs/PEARC_PAPER_OUTLINE.md
-docs/PRESENTATION_SLIDES.md
-docs/DESKTOP_PACKAGING_PLAN.md
-docs/DRIVER_UPGRADE_PROPOSAL.md
+# Internal/unpublished documents (kept locally, not in public repo)
+docs/*.md
+!docs/relay-security.md
+docs/*.pdf
+docs/*.tex
+docs/*.bib
+docs/image/
 
 # Claude Code memory
 .claude/

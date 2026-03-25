@@ -83,7 +83,7 @@ The UI is available at `http://localhost:5000`.
 - **Cloud tier**: Add your OpenRouter API key in the UI settings panel (get one free at [openrouter.ai/keys](https://openrouter.ai/keys))
 - **Lakeshore HPC tier**: Requires UIC Lakeshore cluster access and Globus Compute authentication (click "Authenticate with Globus" in the UI)
 
-See the [Setup Guide](docs/SETUP_GUIDE.md) for detailed step-by-step instructions.
+
 
 ## Demo
 
