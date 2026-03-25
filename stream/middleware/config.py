@@ -180,13 +180,17 @@ elif _raw_relay_url.startswith("http://"):
     _raw_relay_url = "ws://" + _raw_relay_url[7:]
 RELAY_URL = _raw_relay_url
 
+# Shared secret for relay authentication. Must match --secret on the relay server.
+# Leave empty to disable auth (development only).
+RELAY_SECRET = os.getenv("RELAY_SECRET", "")
+
 # =============================================================================
 # LAKESHORE MODELS
 # =============================================================================
 # Each Lakeshore model runs as a vLLM instance on the H100 NVL GPU (ghi2-002).
 # The Globus Compute client uses this mapping to route to the correct vLLM URL.
 #
-# GPU: Full H100 NVL (96 GiB VRAM) on ghi2-002 in batch_gpu2 partition.
+# GPU: Full H100 NVL (94 GB / 95,830 MiB VRAM) on ghi2-002 in batch_gpu2 partition.
 # Only one model can run at a time (same port on same node).
 #
 # hf_name: The HuggingFace model ID that vLLM loads. This MUST match the model

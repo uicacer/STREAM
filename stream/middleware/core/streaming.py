@@ -460,10 +460,20 @@ async def create_streaming_response(
                 user_api_keys=user_api_keys,
             )
             async for line in stream_with_gap_warnings(raw_stream, current_tier, correlation_id):
-                # Record TTFT on first chunk
-                if first_chunk:
-                    tracker.record_first_token()
-                    first_chunk = False
+                # Record TTFT on first chunk that contains actual model content.
+                # Skip stream_metadata events (status messages like "processing...")
+                # — only trigger on delta.content to match what the user sees.
+                if first_chunk and line.startswith("data: "):
+                    try:
+                        _ttft_data = json.loads(line[6:])
+                        _ttft_choices = _ttft_data.get("choices", [])
+                        if _ttft_choices:
+                            _ttft_content = _ttft_choices[0].get("delta", {}).get("content")
+                            if _ttft_content:
+                                tracker.record_first_token()
+                                first_chunk = False
+                    except (json.JSONDecodeError, TypeError):
+                        pass
 
                 # ---------------------------------------------------------------------
                 # TIMEOUT WARNING: Check if response is taking too long

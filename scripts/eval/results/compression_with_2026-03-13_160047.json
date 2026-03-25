@@ -1,0 +1,41 @@
+{
+  "timestamp": "2026-03-13T16:00:47.661552",
+  "stream_url": "http://localhost:5000",
+  "summary": {
+    "label": "with",
+    "num_conversations": 5,
+    "num_turns": 40,
+    "compression_threshold_tokens": 26214,
+    "local_context_hard_limit": 32768,
+    "filler_pair_tokens_avg": 1050,
+    "probe_turns": [],
+    "probe_query": "What is 2 + 2?",
+    "per_turn": {},
+    "total_probes": 0,
+    "total_stayed_local": 0,
+    "forced_upgrades": 0,
+    "local_retention_pct": 0,
+    "conversations": [
+      {
+        "conversation_id": 1,
+        "probes": []
+      },
+      {
+        "conversation_id": 2,
+        "probes": []
+      },
+      {
+        "conversation_id": 3,
+        "probes": []
+      },
+      {
+        "conversation_id": 4,
+        "probes": []
+      },
+      {
+        "conversation_id": 5,
+        "probes": []
+      }
+    ]
+  }
+}

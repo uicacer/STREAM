@@ -112,10 +112,10 @@ services:
       - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
 
       # Database connection (internal Docker network). LiteLLM needs DATABASE_URL to know where to log
-      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:${POSTGRES_PORT}/${POSTGRES_DB}
 
       # Ollama connection (internal Docker network)
-      - OLLAMA_API_BASE=${OLLAMA_URL}
+      - OLLAMA_API_BASE=http://ollama:${OLLAMA_PORT}
     command: ["--config", "/app/config.yaml", "--port", "${LITELLM_PORT}", "--detailed_debug"]
     depends_on:
       postgres:
@@ -147,10 +147,10 @@ services:
     env_file:
       - .env
     environment:
-      - OLLAMA_HOST=${OLLAMA_HOST}
+      - OLLAMA_HOST=ollama
       - OLLAMA_PORT=${OLLAMA_PORT}
-      # LiteLLM connection (internal Docker network)
-      - LITELLM_BASE_URL=${LITELLM_URL}
+      # LiteLLM connection (internal Docker network — override .env localhost defaults)
+      - LITELLM_BASE_URL=http://litellm:${LITELLM_PORT}
       - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
 
       # Lakeshore vLLM connection (via SSH tunnel on host)
@@ -158,13 +158,13 @@ services:
 
       - MIDDLEWARE_PORT=${MIDDLEWARE_PORT}
 
-      # Database connection (internal Docker network)
-      - POSTGRES_HOST=${POSTGRES_HOST}
+      # Database connection (internal Docker network — override .env localhost defaults)
+      - POSTGRES_HOST=postgres
       - POSTGRES_PORT=${POSTGRES_PORT}
       - POSTGRES_USER=${POSTGRES_USER}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - POSTGRES_DB=${POSTGRES_DB}
-      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:${POSTGRES_PORT}/${POSTGRES_DB}
     depends_on:
       litellm:
         condition: service_healthy

@@ -333,7 +333,7 @@ STEP 8: Stream response to user → create_streaming_response()
 
 ### Why this two-step architecture?
 
-1. **Live UX feedback**: If summarization ran in `chat.py` (before the SSE stream opens), the user would see a frozen UI for 1-3 seconds with no explanation. By deferring to the streaming generator, the SSE connection is already open and we can push status events in real-time — the user sees "Compressing conversation history..." immediately.
+1. **Live UX feedback**: If summarization ran in `chat.py` (before the SSE stream opens), the user would see a frozen UI for 1-3 seconds with no explanation. By deferring to the streaming generator, the SSE connection is already open and we can push status events in real-time — the user sees "Compressing conversation history..." immediately. The frontend enforces a **5-second minimum display time** for this banner so the user can read it even when summarization is fast (e.g., short histories that compress in ~1-2 seconds).
 2. **After tier selection (Step 4)**: We know which tier will handle the request, so we can apply the correct compression level.
 3. **After message dict conversion (Step 5)**: Messages are already in the dict format the summarizer needs.
 4. **Context validation safety**: Step 6 is skipped when `needs_summarization=True` because the generator will compress the messages before inference. If compression still leaves messages too large, the LLM itself will reject the request (caught by streaming error handling).
@@ -440,10 +440,9 @@ ROLLING_SUMMARIZATION_ENABLED=true
 ROLLING_SUMMARIZATION_ENABLED=false
 ```
 
-This environment variable can be set in:
-- `.env` file (persistent)
-- Shell environment (per-session)
-- Docker Compose environment section (server mode)
+This environment variable can be set in the **`.env` file** — a single location that works for both deployment modes. Desktop mode loads `.env` at startup via `apply_desktop_defaults()`, and Docker Compose loads it via `env_file: - .env` in each service definition. You only need to change it in one place.
+
+Alternatively, you can override it per-session via shell environment (`ROLLING_SUMMARIZATION_ENABLED=false python -m stream.desktop.main --dev`).
 
 ### A/B evaluation methodology for the paper
 

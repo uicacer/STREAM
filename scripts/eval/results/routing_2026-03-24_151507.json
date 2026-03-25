@@ -1,0 +1,600 @@
+{
+  "timestamp": "2026-03-24T15:15:07.855883",
+  "stream_url": "http://localhost:5000",
+  "strategy": "ollama-3b",
+  "test_queries_file": "/Users/nassar/Documents/CODES/STREAM/scripts/eval/test_queries.json",
+  "summary": {
+    "strategy": "ollama-3b",
+    "total_queries": 60,
+    "correct": 41,
+    "accuracy": 0.6833333333333333,
+    "per_class": {
+      "LOW": {
+        "total": 20,
+        "correct": 5,
+        "accuracy": 0.25
+      },
+      "MEDIUM": {
+        "total": 20,
+        "correct": 18,
+        "accuracy": 0.9
+      },
+      "HIGH": {
+        "total": 20,
+        "correct": 18,
+        "accuracy": 0.9
+      }
+    },
+    "confusion_matrix": {
+      "LOW": {
+        "LOW": 5,
+        "MEDIUM": 15,
+        "HIGH": 0
+      },
+      "MEDIUM": {
+        "LOW": 0,
+        "MEDIUM": 18,
+        "HIGH": 2
+      },
+      "HIGH": {
+        "LOW": 0,
+        "MEDIUM": 2,
+        "HIGH": 18
+      }
+    },
+    "cost_analysis": {
+      "queries_on_free_tiers": 40,
+      "queries_on_free_pct": 66.66666666666666,
+      "estimated_cost_auto": 0.063,
+      "estimated_cost_all_cloud": 0.189,
+      "cost_savings_pct": 66.7
+    },
+    "judge_latency": {
+      "mean": 0.5103658374499598,
+      "min": 0.27880262499820674,
+      "max": 2.861577875002695
+    },
+    "raw_results": [
+      {
+        "id": 1,
+        "text": "What is 2 + 2?",
+        "ground_truth": "LOW",
+        "predicted": "MEDIUM",
+        "correct": false,
+        "judge_time": 2.861577875002695,
+        "method": null
+      },
+      {
+        "id": 2,
+        "text": "Define photosynthesis.",
+        "ground_truth": "LOW",
+        "predicted": "MEDIUM",
+        "correct": false,
+        "judge_time": 0.3135939169987978,
+        "method": null
+      },
+      {
+        "id": 3,
+        "text": "What is the capital of France?",
+        "ground_truth": "LOW",
+        "predicted": "LOW",
+        "correct": true,
+        "judge_time": 0.3520102910006244,
+        "method": null
+      },
+      {
+        "id": 4,
+        "text": "Hi, how are you?",
+        "ground_truth": "LOW",
+        "predicted": "LOW",
+        "correct": true,
+        "judge_time": 0.9678313749973313,
+        "method": null
+      },
+      {
+        "id": 5,
+        "text": "What does HTML stand for?",
+        "ground_truth": "LOW",
+        "predicted": "MEDIUM",
+        "correct": false,
+        "judge_time": 0.934456915998453,
+        "method": null
+      },
+      {
+        "id": 6,
+        "text": "Who wrote Romeo and Juliet?",
+        "ground_truth": "LOW",
+        "predicted": "MEDIUM",
+        "correct": false,
+        "judge_time": 1.217733292000048,
+        "method": null
+      },
+      {
+        "id": 7,
+        "text": "What is the boiling point of water?",
+        "ground_truth": "LOW",
+        "predicted": "LOW",
+        "correct": true,
+        "judge_time": 0.28656941699955496,
+        "method": null
+      },
+      {
+        "id": 8,
+        "text": "Translate 'hello' to Spanish.",
+        "ground_truth": "LOW",
+        "predicted": "MEDIUM",
+        "correct": false,
+        "judge_time": 0.30632470899945474,
+        "method": null
+      },
+      {
+        "id": 9,
+        "text": "What year did World War II end?",
+        "ground_truth": "LOW",
+        "predicted": "LOW",
+        "correct": true,
+        "judge_time": 2.8226380000014615,
+        "method": null
+      },
+      {
+        "id": 10,
+        "text": "What is a for loop?",
+        "ground_truth": "LOW",
+        "predicted": "MEDIUM",
+        "correct": false,
+        "judge_time": 0.32069754199983436,
+        "method": null
+      },
+      {
+        "id": 11,
+        "text": "Name three primary colors.",
+        "ground_truth": "LOW",
+        "predicted": "MEDIUM",
+        "correct": false,
+        "judge_time": 1.6162127499992494,
+        "method": null
+      },
+      {
+        "id": 12,
+        "text": "What is the largest planet in our solar system?",
+        "ground_truth": "LOW",
+        "predicted": "MEDIUM",
+        "correct": false,
+        "judge_time": 0.31718608400115045,
+        "method": null
+      },
+      {
+        "id": 13,
+        "text": "Convert 100 Celsius to Fahrenheit.",
+        "ground_truth": "LOW",
+        "predicted": "MEDIUM",
+        "correct": false,
+        "judge_time": 0.3445116670009156,
+        "method": null
+      },
+      {
+        "id": 14,
+        "text": "What does CPU stand for?",
+        "ground_truth": "LOW",
+        "predicted": "MEDIUM",
+        "correct": false,
+        "judge_time": 0.31086824999874807,
+        "method": null
+      },
+      {
+        "id": 15,
+        "text": "What is the speed of light?",
+        "ground_truth": "LOW",
+        "predicted": "MEDIUM",
+        "correct": false,
+        "judge_time": 0.33818787500058534,
+        "method": null
+      },
+      {
+        "id": 16,
+        "text": "Tell me a joke.",
+        "ground_truth": "LOW",
+        "predicted": "MEDIUM",
+        "correct": false,
+        "judge_time": 0.314250291998178,
+        "method": null
+      },
+      {
+        "id": 17,
+        "text": "What is the square root of 144?",
+        "ground_truth": "LOW",
+        "predicted": "MEDIUM",
+        "correct": false,
+        "judge_time": 0.31548195800132817,
+        "method": null
+      },
+      {
+        "id": 18,
+        "text": "Who is the current president of the United States?",
+        "ground_truth": "LOW",
+        "predicted": "MEDIUM",
+        "correct": false,
+        "judge_time": 0.36004337499980466,
+        "method": null
+      },
+      {
+        "id": 19,
+        "text": "What is an integer in programming?",
+        "ground_truth": "LOW",
+        "predicted": "MEDIUM",
+        "correct": false,
+        "judge_time": 0.33344020799995633,
+        "method": null
+      },
+      {
+        "id": 20,
+        "text": "How many continents are there?",
+        "ground_truth": "LOW",
+        "predicted": "LOW",
+        "correct": true,
+        "judge_time": 0.32577370799845085,
+        "method": null
+      },
+      {
+        "id": 21,
+        "text": "Explain how a neural network learns through backpropagation.",
+        "ground_truth": "MEDIUM",
+        "predicted": "MEDIUM",
+        "correct": true,
+        "judge_time": 0.34916224999687984,
+        "method": null
+      },
+      {
+        "id": 22,
+        "text": "Write a Python function to find all prime numbers up to n using the Sieve of Eratosthenes.",
+        "ground_truth": "MEDIUM",
+        "predicted": "MEDIUM",
+        "correct": true,
+        "judge_time": 1.1583818330000213,
+        "method": null
+      },
+      {
+        "id": 23,
+        "text": "What are the differences between TCP and UDP? When would you use each?",
+        "ground_truth": "MEDIUM",
+        "predicted": "MEDIUM",
+        "correct": true,
+        "judge_time": 0.30585483300092164,
+        "method": null
+      },
+      {
+        "id": 24,
+        "text": "Explain the CAP theorem in distributed systems with examples.",
+        "ground_truth": "MEDIUM",
+        "predicted": "HIGH",
+        "correct": false,
+        "judge_time": 1.509913999998389,
+        "method": null
+      },
+      {
+        "id": 25,
+        "text": "Write a SQL query to find the second highest salary in an employees table.",
+        "ground_truth": "MEDIUM",
+        "predicted": "MEDIUM",
+        "correct": true,
+        "judge_time": 0.41688370799965924,
+        "method": null
+      },
+      {
+        "id": 26,
+        "text": "Explain how public key cryptography works and why it is secure.",
+        "ground_truth": "MEDIUM",
+        "predicted": "MEDIUM",
+        "correct": true,
+        "judge_time": 0.31984129099873826,
+        "method": null
+      },
+      {
+        "id": 27,
+        "text": "What is the difference between a process and a thread? Explain with examples.",
+        "ground_truth": "MEDIUM",
+        "predicted": "MEDIUM",
+        "correct": true,
+        "judge_time": 0.3125095830000646,
+        "method": null
+      },
+      {
+        "id": 28,
+        "text": "Implement a binary search tree in Python with insert, search, and delete operations.",
+        "ground_truth": "MEDIUM",
+        "predicted": "MEDIUM",
+        "correct": true,
+        "judge_time": 0.3409092080000846,
+        "method": null
+      },
+      {
+        "id": 29,
+        "text": "Explain the concept of containerization and how Docker works.",
+        "ground_truth": "MEDIUM",
+        "predicted": "MEDIUM",
+        "correct": true,
+        "judge_time": 0.3131165000013425,
+        "method": null
+      },
+      {
+        "id": 30,
+        "text": "What are the SOLID principles in object-oriented design? Give an example of each.",
+        "ground_truth": "MEDIUM",
+        "predicted": "MEDIUM",
+        "correct": true,
+        "judge_time": 0.3393500420024793,
+        "method": null
+      },
+      {
+        "id": 31,
+        "text": "Explain how garbage collection works in Java versus Python.",
+        "ground_truth": "MEDIUM",
+        "predicted": "MEDIUM",
+        "correct": true,
+        "judge_time": 0.37365491700256825,
+        "method": null
+      },
+      {
+        "id": 32,
+        "text": "Write a recursive function to solve the Tower of Hanoi problem and explain its time complexity.",
+        "ground_truth": "MEDIUM",
+        "predicted": "HIGH",
+        "correct": false,
+        "judge_time": 0.301393999998254,
+        "method": null
+      },
+      {
+        "id": 33,
+        "text": "What is MapReduce and how does it enable distributed data processing?",
+        "ground_truth": "MEDIUM",
+        "predicted": "MEDIUM",
+        "correct": true,
+        "judge_time": 0.3118742089973239,
+        "method": null
+      },
+      {
+        "id": 34,
+        "text": "Explain the difference between supervised, unsupervised, and reinforcement learning with examples.",
+        "ground_truth": "MEDIUM",
+        "predicted": "MEDIUM",
+        "correct": true,
+        "judge_time": 0.30466920799881336,
+        "method": null
+      },
+      {
+        "id": 35,
+        "text": "How does HTTPS work? Explain the TLS handshake process.",
+        "ground_truth": "MEDIUM",
+        "predicted": "MEDIUM",
+        "correct": true,
+        "judge_time": 0.33957337500032736,
+        "method": null
+      },
+      {
+        "id": 36,
+        "text": "Write a Python script that reads a CSV file and generates a summary statistics report.",
+        "ground_truth": "MEDIUM",
+        "predicted": "MEDIUM",
+        "correct": true,
+        "judge_time": 0.3457149579990073,
+        "method": null
+      },
+      {
+        "id": 37,
+        "text": "Explain the observer design pattern and implement it in Python.",
+        "ground_truth": "MEDIUM",
+        "predicted": "MEDIUM",
+        "correct": true,
+        "judge_time": 0.35952008299864247,
+        "method": null
+      },
+      {
+        "id": 38,
+        "text": "What are database indexes and how do they improve query performance? What are the tradeoffs?",
+        "ground_truth": "MEDIUM",
+        "predicted": "MEDIUM",
+        "correct": true,
+        "judge_time": 0.31281604100149707,
+        "method": null
+      },
+      {
+        "id": 39,
+        "text": "Explain how virtual memory works and why it is useful.",
+        "ground_truth": "MEDIUM",
+        "predicted": "MEDIUM",
+        "correct": true,
+        "judge_time": 0.3454459169988695,
+        "method": null
+      },
+      {
+        "id": 40,
+        "text": "Compare REST and GraphQL APIs. What are the advantages of each?",
+        "ground_truth": "MEDIUM",
+        "predicted": "MEDIUM",
+        "correct": true,
+        "judge_time": 0.32952620799915167,
+        "method": null
+      },
+      {
+        "id": 41,
+        "text": "Compare and contrast RLHF and DPO for language model alignment. Derive the DPO loss function from the RLHF objective and discuss the theoretical implications.",
+        "ground_truth": "HIGH",
+        "predicted": "HIGH",
+        "correct": true,
+        "judge_time": 0.33716362500126706,
+        "method": null
+      },
+      {
+        "id": 42,
+        "text": "Design a distributed consensus algorithm for a network of heterogeneous nodes with varying reliability. Prove its safety and liveness properties.",
+        "ground_truth": "HIGH",
+        "predicted": "HIGH",
+        "correct": true,
+        "judge_time": 0.28492608300075517,
+        "method": null
+      },
+      {
+        "id": 43,
+        "text": "Analyze the computational complexity of training a transformer model. Derive the memory and compute requirements as a function of model parameters, sequence length, and batch size.",
+        "ground_truth": "HIGH",
+        "predicted": "HIGH",
+        "correct": true,
+        "judge_time": 0.32506287500291364,
+        "method": null
+      },
+      {
+        "id": 44,
+        "text": "Write a comprehensive literature review on federated learning, covering privacy guarantees, convergence proofs, and communication efficiency. Include at least 10 key papers.",
+        "ground_truth": "HIGH",
+        "predicted": "HIGH",
+        "correct": true,
+        "judge_time": 0.3319832499983022,
+        "method": null
+      },
+      {
+        "id": 45,
+        "text": "Design a complete microservices architecture for a real-time trading platform that handles 1 million transactions per second with sub-millisecond latency. Include fault tolerance, data consistency, and monitoring.",
+        "ground_truth": "HIGH",
+        "predicted": "HIGH",
+        "correct": true,
+        "judge_time": 0.35182437500043306,
+        "method": null
+      },
+      {
+        "id": 46,
+        "text": "Explain the mathematical foundations of differential privacy. Derive the Gaussian mechanism and prove its privacy guarantees using Renyi divergence.",
+        "ground_truth": "HIGH",
+        "predicted": "HIGH",
+        "correct": true,
+        "judge_time": 0.27880262499820674,
+        "method": null
+      },
+      {
+        "id": 47,
+        "text": "Compare the expressiveness of Graph Neural Networks with the Weisfeiler-Leman graph isomorphism test. What are the theoretical limitations and how do recent architectures address them?",
+        "ground_truth": "HIGH",
+        "predicted": "MEDIUM",
+        "correct": false,
+        "judge_time": 0.3447014580015093,
+        "method": null
+      },
+      {
+        "id": 48,
+        "text": "Design and analyze a novel caching strategy for a multi-tier storage system that optimizes for both latency and cost. Provide a formal cost model and prove optimality bounds.",
+        "ground_truth": "HIGH",
+        "predicted": "HIGH",
+        "correct": true,
+        "judge_time": 0.3340502499995637,
+        "method": null
+      },
+      {
+        "id": 49,
+        "text": "Critically analyze the scaling laws for large language models (Chinchilla, Kaplan). What do they predict about the future of model training, and where might they break down?",
+        "ground_truth": "HIGH",
+        "predicted": "HIGH",
+        "correct": true,
+        "judge_time": 0.3397141660025227,
+        "method": null
+      },
+      {
+        "id": 50,
+        "text": "Implement a complete compiler frontend for a simple programming language, including lexer, parser, and AST generation. Handle operator precedence, control flow, and function definitions.",
+        "ground_truth": "HIGH",
+        "predicted": "MEDIUM",
+        "correct": false,
+        "judge_time": 0.3639238750001823,
+        "method": null
+      },
+      {
+        "id": 51,
+        "text": "Explain the connection between attention mechanisms in transformers and kernel methods in machine learning. Derive the relationship mathematically and discuss computational implications.",
+        "ground_truth": "HIGH",
+        "predicted": "HIGH",
+        "correct": true,
+        "judge_time": 0.3269309589995828,
+        "method": null
+      },
+      {
+        "id": 52,
+        "text": "Design a zero-knowledge proof system for verifying machine learning model predictions without revealing the model weights. Discuss the computational overhead and practical feasibility.",
+        "ground_truth": "HIGH",
+        "predicted": "HIGH",
+        "correct": true,
+        "judge_time": 0.369813958001032,
+        "method": null
+      },
+      {
+        "id": 53,
+        "text": "Analyze the societal implications of deploying large language models in healthcare, education, and legal systems. Consider bias, accountability, regulatory frameworks, and propose a governance model.",
+        "ground_truth": "HIGH",
+        "predicted": "HIGH",
+        "correct": true,
+        "judge_time": 0.3398650000017369,
+        "method": null
+      },
+      {
+        "id": 54,
+        "text": "Derive the equations of motion for a double pendulum system using Lagrangian mechanics. Analyze the chaotic behavior and implement a numerical simulation.",
+        "ground_truth": "HIGH",
+        "predicted": "HIGH",
+        "correct": true,
+        "judge_time": 0.32846012500158395,
+        "method": null
+      },
+      {
+        "id": 55,
+        "text": "Compare the architectures, training procedures, and capabilities of GPT-4, Claude 3, Gemini Ultra, and Llama 3. Analyze their performance on reasoning, coding, and multilingual tasks.",
+        "ground_truth": "HIGH",
+        "predicted": "HIGH",
+        "correct": true,
+        "judge_time": 0.33851241700176615,
+        "method": null
+      },
+      {
+        "id": 56,
+        "text": "Design a fault-tolerant distributed database that provides both strong consistency and horizontal scalability. Address the CAP theorem limitations with a novel approach and prove correctness.",
+        "ground_truth": "HIGH",
+        "predicted": "HIGH",
+        "correct": true,
+        "judge_time": 0.3455607920004695,
+        "method": null
+      },
+      {
+        "id": 57,
+        "text": "Write a research proposal for using reinforcement learning to optimize HPC job scheduling across heterogeneous GPU clusters. Include related work, methodology, evaluation plan, and expected contributions.",
+        "ground_truth": "HIGH",
+        "predicted": "HIGH",
+        "correct": true,
+        "judge_time": 0.3443100419972325,
+        "method": null
+      },
+      {
+        "id": 58,
+        "text": "Explain how mixture-of-experts models work, derive the gating mechanism, and analyze why they achieve better compute efficiency. Compare Switch Transformer and GShard approaches.",
+        "ground_truth": "HIGH",
+        "predicted": "HIGH",
+        "correct": true,
+        "judge_time": 0.49014966600225307,
+        "method": null
+      },
+      {
+        "id": 59,
+        "text": "Develop a formal verification framework for neural network robustness. Define the threat model, propose verification algorithms, and analyze their completeness and soundness.",
+        "ground_truth": "HIGH",
+        "predicted": "HIGH",
+        "correct": true,
+        "judge_time": 0.3703534159976698,
+        "method": null
+      },
+      {
+        "id": 60,
+        "text": "Design an end-to-end MLOps pipeline for continuous training and deployment of LLMs at scale. Address data versioning, experiment tracking, model registry, A/B testing, and rollback strategies.",
+        "ground_truth": "HIGH",
+        "predicted": "HIGH",
+        "correct": true,
+        "judge_time": 0.4263396249989455,
+        "method": null
+      }
+    ]
+  }
+}

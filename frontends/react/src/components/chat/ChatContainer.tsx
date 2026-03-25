@@ -177,10 +177,8 @@ export function ChatContainer() {
   // Must stay in sync with STAGE_TIMING in TypingIndicator.tsx
   // Formula: analyzeMin + routeDisplay + 300 (checkmark pause) + generateDisplay + 200 (buffer)
   const getTransitionDuration = (count: number) => {
-    if (count <= 1) return 2200 + 1600 + 300 + 1200 + 200  // 5500ms - first message
-    if (count === 2) return 1800 + 1200 + 300 + 800 + 200   // 4300ms
-    if (count === 3) return 1400 + 900 + 300 + 600 + 200     // 3400ms
-    return 600 + 350 + 300 + 0 + 200                          // 1450ms - experienced user
+    if (count <= 1) return 2200 + 1600 + 300 + 1200 + 200  // 5500ms - first message (educational)
+    return 0 + 0 + 0 + 0 + 200                                 // 200ms - all subsequent messages (no artificial delay)
   }
 
   // Detect when metadata arrives (analysis + routing complete on backend)
