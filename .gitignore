@@ -107,7 +107,6 @@ docs/reference-verification.md
 
 # Internal/unpublished documents (kept locally, not in public repo)
 docs/*.md
-!docs/relay-security.md
 docs/*.pdf
 docs/*.tex
 docs/*.bib
