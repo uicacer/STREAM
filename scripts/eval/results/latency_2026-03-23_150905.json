@@ -1,0 +1,41 @@
+{
+  "timestamp": "2026-03-23T14:58:32.429852",
+  "stream_url": "http://localhost:5000",
+  "hardware": {
+    "local": {
+      "os": "macOS 15.7.4 (arm64)",
+      "cpu": "Apple M4 Pro",
+      "ram": "24 GB",
+      "gpu": "Apple M4 Pro (Metal)"
+    },
+    "lakeshore": {
+      "gpu": "NVIDIA H100 NVL 94 GB",
+      "node": "ghi2-002",
+      "partition": "batch_gpu2",
+      "model": "Qwen2.5-VL-72B-Instruct-AWQ",
+      "framework": "vLLM with Marlin kernels"
+    },
+    "cloud": {
+      "note": "Infrastructure not disclosed by providers",
+      "model": "Claude Sonnet 4 via OpenRouter"
+    }
+  },
+  "benchmark_query": "Explain the concept of recursion in programming. Give a clear example.",
+  "runs_per_tier": 20,
+  "tiers": {},
+  "relay_comparison": {
+    "streaming": {
+      "ttft_median": 0.8465913124964572,
+      "ttft_stdev": 0.34765184992538956,
+      "total_median": 15.888707083002373,
+      "successful": 20
+    },
+    "batch": {
+      "ttft_median": 15.675037666493154,
+      "ttft_stdev": 0.09474659664887945,
+      "total_median": 15.675037666493154,
+      "successful": 20
+    },
+    "ttft_speedup": 18.515471910844525
+  }
+}

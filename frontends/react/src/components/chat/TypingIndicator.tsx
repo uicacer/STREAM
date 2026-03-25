@@ -127,7 +127,7 @@ export function TypingIndicator({
   // badges still animate, but no artificial waiting). The user already
   // understands Analyze → Route → Generate from the first message.
   const FIRST_MSG_TIMING: [number, number, number] = [2200, 1600, 1200]
-  const FAST_TIMING: [number, number, number] = [400, 250, 0]
+  const FAST_TIMING: [number, number, number] = [0, 0, 0]
 
   const STAGE_TIMING: Record<number, [number, number, number]> = {
     1: FIRST_MSG_TIMING,

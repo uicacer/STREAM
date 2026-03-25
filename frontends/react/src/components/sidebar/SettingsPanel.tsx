@@ -355,7 +355,8 @@ export function SettingsPanel({ onExampleQuery }: SettingsPanelProps) {
 
     if (result.success) {
       setAuthError(null)
-      // Auth status will be updated via healthStore polling
+      // Immediately refresh health so the UI updates without waiting for next poll
+      useHealthStore.getState().fetchHealth()
     } else {
       setAuthError(result.message)
     }

@@ -1,0 +1,119 @@
+{
+  "timestamp": "2026-03-12T18:12:53.315598",
+  "stream_url": "http://localhost:5000",
+  "summary": {
+    "num_conversations": 1,
+    "compression_threshold_tokens": 26214,
+    "probe_turns": [
+      10,
+      15,
+      20,
+      25,
+      30
+    ],
+    "probe_query": "What is 2 + 2?",
+    "per_turn": {
+      "10": {
+        "stayed_local": 1,
+        "total": 1,
+        "local_pct": 100.0,
+        "avg_context_tokens": 6337,
+        "tiers_used": [
+          "local"
+        ]
+      },
+      "15": {
+        "stayed_local": 1,
+        "total": 1,
+        "local_pct": 100.0,
+        "avg_context_tokens": 15505,
+        "tiers_used": [
+          "local"
+        ]
+      },
+      "20": {
+        "stayed_local": 1,
+        "total": 1,
+        "local_pct": 100.0,
+        "avg_context_tokens": 27552,
+        "tiers_used": [
+          "local"
+        ]
+      },
+      "25": {
+        "stayed_local": 1,
+        "total": 1,
+        "local_pct": 100.0,
+        "avg_context_tokens": 42431,
+        "tiers_used": [
+          "local"
+        ]
+      },
+      "30": {
+        "stayed_local": 1,
+        "total": 1,
+        "local_pct": 100.0,
+        "avg_context_tokens": 60229,
+        "tiers_used": [
+          "local"
+        ]
+      }
+    },
+    "total_probes": 5,
+    "total_stayed_local": 5,
+    "forced_upgrades": 0,
+    "local_retention_pct": 100.0,
+    "conversations": [
+      {
+        "conversation_id": 1,
+        "probes": [
+          {
+            "turn": 10,
+            "tier": "local",
+            "model": "local-llama",
+            "total_tokens": 6346,
+            "approx_context_tokens": 6337,
+            "stayed_local": true,
+            "error": null
+          },
+          {
+            "turn": 15,
+            "tier": "local",
+            "model": "local-llama",
+            "total_tokens": 9175,
+            "approx_context_tokens": 15505,
+            "stayed_local": true,
+            "error": null
+          },
+          {
+            "turn": 20,
+            "tier": "local",
+            "model": "local-llama",
+            "total_tokens": 12051,
+            "approx_context_tokens": 27552,
+            "stayed_local": true,
+            "error": null
+          },
+          {
+            "turn": 25,
+            "tier": "local",
+            "model": "local-llama",
+            "total_tokens": 14887,
+            "approx_context_tokens": 42431,
+            "stayed_local": true,
+            "error": null
+          },
+          {
+            "turn": 30,
+            "tier": "local",
+            "model": "local-llama",
+            "total_tokens": 17803,
+            "approx_context_tokens": 60229,
+            "stayed_local": true,
+            "error": null
+          }
+        ]
+      }
+    ]
+  }
+}
