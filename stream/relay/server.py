@@ -164,12 +164,29 @@ import argparse
 import asyncio
 import json
 import logging
+import time as _time
 from datetime import UTC, datetime
+from urllib.parse import parse_qs, urlparse
 
 import websockets
 from websockets.asyncio.server import serve
 
 logger = logging.getLogger(__name__)
+
+# Shared secret token for authenticating producers and consumers.
+# Set via --secret CLI argument. Empty string = auth disabled (dev mode).
+_RELAY_SECRET: str = ""
+
+# Production limits — set via CLI flags.
+# MAX_BUFFER_MESSAGES: how many messages to buffer before dropping.
+#   Prevents a malicious or runaway producer from filling RAM.
+#   Default 1000 is generous (~1MB at avg 1KB/message) but bounded.
+# CHANNEL_TIMEOUT_SECONDS: how long to keep a channel alive when only
+#   ONE side is connected. After this timeout the channel is abandoned
+#   and cleaned up, preventing orphaned channels from accumulating.
+#   Default 300s covers the worst-case Globus Compute cold-start delay.
+_MAX_BUFFER_MESSAGES: int = 1000
+_CHANNEL_TIMEOUT_SECONDS: int = 300
 
 
 # =============================================================================
@@ -180,7 +197,12 @@ logger = logging.getLogger(__name__)
 # to /consume/{channel_id}, the relay forwards messages from producer to
 # consumer in real-time.
 #
-# The registry maps channel_id → {"producer": ws, "consumer": ws, "buffer": []}.
+# The registry maps channel_id → {
+#     "producer": ws | None,
+#     "consumer": ws | None,
+#     "buffer":   list[str],      # messages buffered before consumer connects
+#     "created":  float,          # time.monotonic() timestamp for timeout tracking
+# }.
 #
 # Typical timing:
 #   1. Consumer connects first (STREAM proxy/litellm_direct — immediate)
@@ -195,6 +217,43 @@ channels: dict[str, dict] = {}
 
 
 # =============================================================================
+# BACKGROUND CHANNEL REAPER
+# =============================================================================
+
+
+async def _channel_reaper():
+    """
+    Background task: periodically sweep for abandoned channels.
+
+    An abandoned channel is one where only ONE side connected and the other
+    side never showed up within CHANNEL_TIMEOUT_SECONDS. Without this reaper,
+    a failed Globus job (or a consumer that crashed before the producer
+    connected) would leave a channel entry in memory forever.
+
+    Runs every 60 seconds. Overhead is negligible — just iterates over the
+    channel dict and checks timestamps.
+    """
+    while True:
+        await asyncio.sleep(60)
+        now = _time.monotonic()
+        stale = []
+        for channel_id, ch in list(channels.items()):
+            # A channel is stale if: only one side is connected (or neither)
+            # AND it was created more than CHANNEL_TIMEOUT_SECONDS ago.
+            one_sided = (ch["producer"] is None) != (ch["consumer"] is None)
+            both_gone = ch["producer"] is None and ch["consumer"] is None
+            age = now - ch["created"]
+            if (one_sided or both_gone) and age > _CHANNEL_TIMEOUT_SECONDS:
+                stale.append(channel_id)
+        for channel_id in stale:
+            channels.pop(channel_id, None)
+            logger.warning(
+                f"[{channel_id[:8]}] abandoned channel reaped after "
+                f"{_CHANNEL_TIMEOUT_SECONDS}s (one side never connected)"
+            )
+
+
+# =============================================================================
 # WEBSOCKET HANDLER
 # =============================================================================
 
@@ -206,20 +265,24 @@ async def handle_connection(websocket):
     The URL path determines the role:
       /produce/{channel_id}  — Lakeshore side, sending tokens
       /consume/{channel_id}  — STREAM proxy or litellm_direct, receiving tokens
-      /health                — health check (returns JSON status)
+      /health                — health check (returns JSON status, no auth required)
+
+    Authentication: when --secret is set, the ?secret=<token> query parameter
+    must be present on produce and consume connections. Health checks are exempt.
 
     The relay is completely stateless — it doesn't interpret the messages,
     just forwards them from producer to consumer.
     """
-    # Extract the URL path from the incoming WebSocket request.
-    # Examples: "/health", "/produce/abc123", "/consume/abc123"
-    path = websocket.request.path
+    # Extract the full request path (including query string) from the WebSocket request.
+    # Examples: "/health", "/produce/abc123?secret=mytoken", "/consume/abc123?secret=mytoken"
+    full_path = websocket.request.path
+    parsed = urlparse(full_path)
+    path = parsed.path  # just the path, without query string
 
     # ---- Health check endpoint ----
     # Monitoring tools (or STREAM's tier_health.py) hit /health to verify the
-    # relay is running. We respond with a JSON status and immediately close —
-    # health checks are not real producer/consumer connections, so there's
-    # nothing more to do. The `return` exits the handler early.
+    # relay is running. We respond with a JSON status and immediately close.
+    # Health checks do NOT require authentication — they carry no user data.
     if path == "/health":
         await websocket.send(
             json.dumps(
@@ -245,6 +308,18 @@ async def handle_connection(websocket):
     role = parts[0]  # "produce" (Lakeshore sending tokens) or "consume" (proxy receiving)
     channel_id = parts[1]  # UUID that pairs this producer with its consumer
 
+    # ---- Shared-secret authentication ----
+    # When --secret is configured, every produce/consume connection must supply
+    # the matching token as ?secret=<value> in the query string. Connections
+    # without the correct secret are rejected before any channel state is created.
+    if _RELAY_SECRET:
+        qs = parse_qs(parsed.query)
+        provided = qs.get("secret", [None])[0]
+        if provided != _RELAY_SECRET:
+            logger.warning(f"[{channel_id[:8]}] rejected {role}r: invalid or missing secret")
+            await websocket.close(4003, "Forbidden: invalid or missing secret")
+            return  # exit early: unauthenticated connection
+
     logger.info(f"[{channel_id[:8]}] {role}r connected")  # log first 8 chars for readability
 
     # ---- Initialize the channel if it doesn't exist ----
@@ -258,6 +333,8 @@ async def handle_connection(websocket):
             # If the producer starts sending tokens before the proxy/litellm_direct
             # connects, we buffer them here so nothing is lost.
             "buffer": [],
+            # Creation timestamp for the channel reaper (abandoned channel cleanup).
+            "created": _time.monotonic(),
         }
 
     channel = channels[channel_id]
@@ -316,6 +393,15 @@ async def _handle_producer(websocket, channel, channel_id):
                 # Consumer hasn't connected yet — buffer the message so it's
                 # not lost. When the consumer connects, _handle_consumer()
                 # will flush these buffered messages first.
+                if len(channel["buffer"]) >= _MAX_BUFFER_MESSAGES:
+                    # Buffer full — a runaway producer is sending faster than
+                    # the consumer can connect. Drop oldest message (sliding
+                    # window) to keep memory bounded.
+                    channel["buffer"].pop(0)
+                    logger.warning(
+                        f"[{channel_id[:8]}] buffer full "
+                        f"({_MAX_BUFFER_MESSAGES} messages) — dropping oldest"
+                    )
                 channel["buffer"].append(message)
                 logger.debug(
                     f"[{channel_id[:8]}] buffered message "
@@ -423,20 +509,38 @@ def _maybe_cleanup_channel(channel_id):
 # =============================================================================
 
 
-async def start_relay(host: str = "0.0.0.0", port: int = 8765):
+async def start_relay(
+    host: str = "0.0.0.0",
+    port: int = 8765,
+    secret: str = "",
+    max_buffer: int = 1000,
+    channel_timeout: int = 300,
+):
     """
     Start the WebSocket relay server.
 
     Args:
-        host: Bind address. "0.0.0.0" = accept connections from anywhere
-              (needed for tunnels and production). "127.0.0.1" = local only.
-        port: Port to listen on. 8765 is the conventional WebSocket dev port.
+        host:            Bind address. "0.0.0.0" = accept connections from anywhere.
+        port:            Port to listen on.
+        secret:          Shared secret token. When non-empty, all produce/consume
+                         connections must supply ?secret=<value>. Disabled when empty.
+        max_buffer:      Max messages buffered per channel before oldest is dropped.
+        channel_timeout: Seconds before an abandoned one-sided channel is reaped.
     """
+    global _RELAY_SECRET, _MAX_BUFFER_MESSAGES, _CHANNEL_TIMEOUT_SECONDS
+    _RELAY_SECRET = secret
+    _MAX_BUFFER_MESSAGES = max_buffer
+    _CHANNEL_TIMEOUT_SECONDS = channel_timeout
+
     # Print connection info so the operator knows what URLs to use
     logger.info(f"Starting WebSocket relay on ws://{host}:{port}")
     logger.info(f"  Producer URL: ws://<host>:{port}/produce/{{channel_id}}")
     logger.info(f"  Consumer URL: ws://<host>:{port}/consume/{{channel_id}}")
     logger.info(f"  Health check: ws://<host>:{port}/health")
+    if secret:
+        logger.info("  Auth:         shared-secret enabled (set RELAY_SECRET in clients)")
+    else:
+        logger.warning("  Auth:         DISABLED — set --secret for production deployments")
     logger.info("")
     logger.info("For development, create a public tunnel:")
     logger.info(f"  cloudflared tunnel --url http://localhost:{port}   (recommended)")
@@ -448,6 +552,8 @@ async def start_relay(host: str = "0.0.0.0", port: int = 8765):
     # that listens on host:port and calls `handle_connection` for every new
     # WebSocket connection. `serve_forever()` blocks until the process is killed.
     async with serve(handle_connection, host, port) as server:
+        # Start the background reaper task that cleans up abandoned channels.
+        asyncio.create_task(_channel_reaper())
         await server.serve_forever()
 
 
@@ -470,12 +576,44 @@ def main():
     )
     parser.add_argument("--port", type=int, default=8765, help="Port to listen on (default: 8765)")
     parser.add_argument(
+        "--secret",
+        default="",
+        help=(
+            "Shared secret token for authentication. When set, all produce/consume "
+            "connections must supply ?secret=<value>. Reads RELAY_SECRET env var "
+            "if this flag is not provided."
+        ),
+    )
+    parser.add_argument(
+        "--max-buffer",
+        type=int,
+        default=1000,
+        help=(
+            "Max messages buffered per channel when consumer hasn't connected yet. "
+            "Oldest messages are dropped when the limit is reached (default: 1000)."
+        ),
+    )
+    parser.add_argument(
+        "--channel-timeout",
+        type=int,
+        default=300,
+        help=(
+            "Seconds before an abandoned one-sided channel is reaped. "
+            "Prevents memory leaks from failed Globus jobs (default: 300)."
+        ),
+    )
+    parser.add_argument(
         "--log-level",
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
         help="Log level (default: INFO)",
     )
     args = parser.parse_args()
+
+    # Allow RELAY_SECRET env var as an alternative to --secret flag.
+    import os
+
+    secret = args.secret or os.getenv("RELAY_SECRET", "")
 
     # Configure Python's logging system. DEBUG shows every buffered message,
     # INFO shows connections and disconnections, WARNING+ for errors only.
@@ -488,7 +626,15 @@ def main():
     try:
         # asyncio.run() starts the event loop and runs our async server.
         # This blocks until the server is stopped (Ctrl+C or kill signal).
-        asyncio.run(start_relay(host=args.host, port=args.port))
+        asyncio.run(
+            start_relay(
+                host=args.host,
+                port=args.port,
+                secret=secret,
+                max_buffer=args.max_buffer,
+                channel_timeout=args.channel_timeout,
+            )
+        )
     except KeyboardInterrupt:
         # Ctrl+C — graceful shutdown. Not an error.
         logger.info("Relay server stopped (Ctrl+C)")

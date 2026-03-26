@@ -46,6 +46,7 @@ from stream.middleware.config import (
     LAKESHORE_PROXY_URL,
     MODEL_CONTEXT_LIMITS,
     OLLAMA_BASE_URL,
+    RELAY_SECRET,
     RELAY_URL,
 )
 
@@ -473,7 +474,11 @@ async def _forward_lakeshore_streaming(
     # sending tokens. If the producer sent tokens before we connected,
     # the relay buffered them and flushes them to us now.
     try:
-        async with ws_connect(f"{RELAY_URL}/consume/{channel_id}") as ws:
+        # Append shared secret if configured (must match relay's --secret flag)
+        relay_consume_url = f"{RELAY_URL}/consume/{channel_id}"
+        if RELAY_SECRET:
+            relay_consume_url += f"?secret={RELAY_SECRET}"
+        async with ws_connect(relay_consume_url) as ws:
             # Step 4: Receive tokens and convert to SSE format.
             # Each message from the relay is a JSON object:
             #   {"type": "token", "content": "Hello"}  — a generated token
