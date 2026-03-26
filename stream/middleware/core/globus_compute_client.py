@@ -30,6 +30,7 @@ from stream.middleware.config import (
     GLOBUS_MAX_PAYLOAD_BYTES,
     LAKESHORE_MODELS,
     MODEL_CONTEXT_LIMITS,
+    RELAY_SECRET,
     get_lakeshore_vllm_url,
 )
 from stream.middleware.utils.multimodal import strip_old_images
@@ -165,7 +166,7 @@ remote_vllm_inference = _ns["remote_vllm_inference"]
 # Same exec() pattern as above — see comments on _REMOTE_FN_SOURCE for why.
 
 _REMOTE_STREAMING_FN_SOURCE = """\
-def remote_vllm_streaming(vllm_url, model, messages, temperature, max_tokens, relay_url, channel_id):
+def remote_vllm_streaming(vllm_url, model, messages, temperature, max_tokens, relay_url, channel_id, relay_secret=""):
     import json
     import requests
     from websockets.sync.client import connect as ws_connect
@@ -178,6 +179,8 @@ def remote_vllm_streaming(vllm_url, model, messages, temperature, max_tokens, re
         # We're the PRODUCER — we'll send tokens. The consumer (STREAM's proxy
         # or litellm_direct) is already connected and waiting on the other end.
         ws_url = f"{relay_url}/produce/{channel_id}"
+        if relay_secret:
+            ws_url += f"?secret={relay_secret}"
         ws = ws_connect(ws_url)
 
         # ---- Step 2: Make a STREAMING request to vLLM ----
@@ -1087,6 +1090,7 @@ class GlobusComputeClient:
                 max_tokens,
                 relay_url,
                 channel_id,
+                RELAY_SECRET,  # passed through Globus Compute's encrypted serialization
             )
 
             logger.info(f"Streaming job submitted (channel={channel_id[:8]})")

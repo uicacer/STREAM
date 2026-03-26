@@ -37,7 +37,7 @@ from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from globus_sdk import GlobusAPIError
 
-from stream.middleware.config import MODEL_CONTEXT_LIMITS, RELAY_URL
+from stream.middleware.config import MODEL_CONTEXT_LIMITS, RELAY_SECRET, RELAY_URL
 from stream.middleware.core.globus_compute_client import GlobusComputeClient
 
 # =========================================================================
@@ -286,7 +286,11 @@ async def _route_via_globus_compute_streaming(model, messages, temperature, max_
     async def sse_generator():
         """Connect to relay and yield SSE events as tokens arrive."""
         try:
-            async with ws_connect(f"{RELAY_URL}/consume/{channel_id}") as ws:
+            # Append shared secret if configured (must match relay's --secret flag)
+            relay_consume_url = f"{RELAY_URL}/consume/{channel_id}"
+            if RELAY_SECRET:
+                relay_consume_url += f"?secret={RELAY_SECRET}"
+            async with ws_connect(relay_consume_url) as ws:
                 async for msg_str in ws:
                     msg = json.loads(msg_str)
 
