@@ -1,0 +1,348 @@
+{
+  "timestamp": "2026-03-28T13:02:06.935957",
+  "stream_url": "http://localhost:5000",
+  "summary": {
+    "label": "with",
+    "num_conversations": 5,
+    "num_turns": 40,
+    "compression_threshold_tokens": 26214,
+    "local_context_hard_limit": 32768,
+    "filler_pair_tokens_avg": 1170,
+    "probe_turns": [
+      10,
+      20,
+      30,
+      35,
+      40
+    ],
+    "probe_query": "What is 2 + 2?",
+    "per_turn": {
+      "10": {
+        "stayed_local": 5,
+        "total": 5,
+        "local_pct": 100.0,
+        "avg_injected_tokens": 10530,
+        "avg_actual_tokens": 10534,
+        "tiers_used": [
+          "local",
+          "local",
+          "local",
+          "local",
+          "local"
+        ]
+      },
+      "20": {
+        "stayed_local": 5,
+        "total": 5,
+        "local_pct": 100.0,
+        "avg_injected_tokens": 21060,
+        "avg_actual_tokens": 21070,
+        "tiers_used": [
+          "local",
+          "local",
+          "local",
+          "local",
+          "local"
+        ]
+      },
+      "30": {
+        "stayed_local": 5,
+        "total": 5,
+        "local_pct": 100.0,
+        "avg_injected_tokens": 31590,
+        "avg_actual_tokens": 4347,
+        "tiers_used": [
+          "local",
+          "local",
+          "local",
+          "local",
+          "local"
+        ]
+      },
+      "35": {
+        "stayed_local": 5,
+        "total": 5,
+        "local_pct": 100.0,
+        "avg_injected_tokens": 36270,
+        "avg_actual_tokens": 4340,
+        "tiers_used": [
+          "local",
+          "local",
+          "local",
+          "local",
+          "local"
+        ]
+      },
+      "40": {
+        "stayed_local": 5,
+        "total": 5,
+        "local_pct": 100.0,
+        "avg_injected_tokens": 40950,
+        "avg_actual_tokens": 4256,
+        "tiers_used": [
+          "local",
+          "local",
+          "local",
+          "local",
+          "local"
+        ]
+      }
+    },
+    "total_probes": 25,
+    "total_stayed_local": 25,
+    "forced_upgrades": 0,
+    "local_retention_pct": 100.0,
+    "conversations": [
+      {
+        "conversation_id": 1,
+        "probes": [
+          {
+            "turn": 10,
+            "tier": "local",
+            "model": "local-llama",
+            "actual_tokens": 10535,
+            "injected_tokens": 10530,
+            "stayed_local": true,
+            "error": null
+          },
+          {
+            "turn": 20,
+            "tier": "local",
+            "model": "local-llama",
+            "actual_tokens": 21071,
+            "injected_tokens": 21060,
+            "stayed_local": true,
+            "error": null
+          },
+          {
+            "turn": 30,
+            "tier": "local",
+            "model": "local-llama",
+            "actual_tokens": 4112,
+            "injected_tokens": 31590,
+            "stayed_local": true,
+            "error": null
+          },
+          {
+            "turn": 35,
+            "tier": "local",
+            "model": "local-llama",
+            "actual_tokens": 3913,
+            "injected_tokens": 36270,
+            "stayed_local": true,
+            "error": null
+          },
+          {
+            "turn": 40,
+            "tier": "local",
+            "model": "local-llama",
+            "actual_tokens": 4232,
+            "injected_tokens": 40950,
+            "stayed_local": true,
+            "error": null
+          }
+        ]
+      },
+      {
+        "conversation_id": 2,
+        "probes": [
+          {
+            "turn": 10,
+            "tier": "local",
+            "model": "local-llama",
+            "actual_tokens": 10535,
+            "injected_tokens": 10530,
+            "stayed_local": true,
+            "error": null
+          },
+          {
+            "turn": 20,
+            "tier": "local",
+            "model": "local-llama",
+            "actual_tokens": 21069,
+            "injected_tokens": 21060,
+            "stayed_local": true,
+            "error": null
+          },
+          {
+            "turn": 30,
+            "tier": "local",
+            "model": "local-llama",
+            "actual_tokens": 4656,
+            "injected_tokens": 31590,
+            "stayed_local": true,
+            "error": null
+          },
+          {
+            "turn": 35,
+            "tier": "local",
+            "model": "local-llama",
+            "actual_tokens": 4166,
+            "injected_tokens": 36270,
+            "stayed_local": true,
+            "error": null
+          },
+          {
+            "turn": 40,
+            "tier": "local",
+            "model": "local-llama",
+            "actual_tokens": 4269,
+            "injected_tokens": 40950,
+            "stayed_local": true,
+            "error": null
+          }
+        ]
+      },
+      {
+        "conversation_id": 3,
+        "probes": [
+          {
+            "turn": 10,
+            "tier": "local",
+            "model": "local-llama",
+            "actual_tokens": 10535,
+            "injected_tokens": 10530,
+            "stayed_local": true,
+            "error": null
+          },
+          {
+            "turn": 20,
+            "tier": "local",
+            "model": "local-llama",
+            "actual_tokens": 21071,
+            "injected_tokens": 21060,
+            "stayed_local": true,
+            "error": null
+          },
+          {
+            "turn": 30,
+            "tier": "local",
+            "model": "local-llama",
+            "actual_tokens": 4000,
+            "injected_tokens": 31590,
+            "stayed_local": true,
+            "error": null
+          },
+          {
+            "turn": 35,
+            "tier": "local",
+            "model": "local-llama",
+            "actual_tokens": 4948,
+            "injected_tokens": 36270,
+            "stayed_local": true,
+            "error": null
+          },
+          {
+            "turn": 40,
+            "tier": "local",
+            "model": "local-llama",
+            "actual_tokens": 4318,
+            "injected_tokens": 40950,
+            "stayed_local": true,
+            "error": null
+          }
+        ]
+      },
+      {
+        "conversation_id": 4,
+        "probes": [
+          {
+            "turn": 10,
+            "tier": "local",
+            "model": "local-llama",
+            "actual_tokens": 10533,
+            "injected_tokens": 10530,
+            "stayed_local": true,
+            "error": null
+          },
+          {
+            "turn": 20,
+            "tier": "local",
+            "model": "local-llama",
+            "actual_tokens": 21069,
+            "injected_tokens": 21060,
+            "stayed_local": true,
+            "error": null
+          },
+          {
+            "turn": 30,
+            "tier": "local",
+            "model": "local-llama",
+            "actual_tokens": 4891,
+            "injected_tokens": 31590,
+            "stayed_local": true,
+            "error": null
+          },
+          {
+            "turn": 35,
+            "tier": "local",
+            "model": "local-llama",
+            "actual_tokens": 4428,
+            "injected_tokens": 36270,
+            "stayed_local": true,
+            "error": null
+          },
+          {
+            "turn": 40,
+            "tier": "local",
+            "model": "local-llama",
+            "actual_tokens": 4237,
+            "injected_tokens": 40950,
+            "stayed_local": true,
+            "error": null
+          }
+        ]
+      },
+      {
+        "conversation_id": 5,
+        "probes": [
+          {
+            "turn": 10,
+            "tier": "local",
+            "model": "local-llama",
+            "actual_tokens": 10535,
+            "injected_tokens": 10530,
+            "stayed_local": true,
+            "error": null
+          },
+          {
+            "turn": 20,
+            "tier": "local",
+            "model": "local-llama",
+            "actual_tokens": 21071,
+            "injected_tokens": 21060,
+            "stayed_local": true,
+            "error": null
+          },
+          {
+            "turn": 30,
+            "tier": "local",
+            "model": "local-llama",
+            "actual_tokens": 4076,
+            "injected_tokens": 31590,
+            "stayed_local": true,
+            "error": null
+          },
+          {
+            "turn": 35,
+            "tier": "local",
+            "model": "local-llama",
+            "actual_tokens": 4246,
+            "injected_tokens": 36270,
+            "stayed_local": true,
+            "error": null
+          },
+          {
+            "turn": 40,
+            "tier": "local",
+            "model": "local-llama",
+            "actual_tokens": 4226,
+            "injected_tokens": 40950,
+            "stayed_local": true,
+            "error": null
+          }
+        ]
+      }
+    ]
+  }
+}

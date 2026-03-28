@@ -1,0 +1,348 @@
+{
+  "timestamp": "2026-03-28T12:51:29.349679",
+  "stream_url": "http://localhost:5000",
+  "summary": {
+    "label": "without",
+    "num_conversations": 5,
+    "num_turns": 40,
+    "compression_threshold_tokens": 26214,
+    "local_context_hard_limit": 32768,
+    "filler_pair_tokens_avg": 1170,
+    "probe_turns": [
+      10,
+      20,
+      30,
+      35,
+      40
+    ],
+    "probe_query": "What is 2 + 2?",
+    "per_turn": {
+      "10": {
+        "stayed_local": 5,
+        "total": 5,
+        "local_pct": 100.0,
+        "avg_injected_tokens": 10530,
+        "avg_actual_tokens": 10535,
+        "tiers_used": [
+          "local",
+          "local",
+          "local",
+          "local",
+          "local"
+        ]
+      },
+      "20": {
+        "stayed_local": 5,
+        "total": 5,
+        "local_pct": 100.0,
+        "avg_injected_tokens": 21060,
+        "avg_actual_tokens": 21071,
+        "tiers_used": [
+          "local",
+          "local",
+          "local",
+          "local",
+          "local"
+        ]
+      },
+      "30": {
+        "stayed_local": 0,
+        "total": 5,
+        "local_pct": 0.0,
+        "avg_injected_tokens": 31590,
+        "avg_actual_tokens": 0,
+        "tiers_used": [
+          null,
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      "35": {
+        "stayed_local": 0,
+        "total": 5,
+        "local_pct": 0.0,
+        "avg_injected_tokens": 36270,
+        "avg_actual_tokens": 0,
+        "tiers_used": [
+          null,
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      "40": {
+        "stayed_local": 0,
+        "total": 5,
+        "local_pct": 0.0,
+        "avg_injected_tokens": 40950,
+        "avg_actual_tokens": 0,
+        "tiers_used": [
+          null,
+          null,
+          null,
+          null,
+          null
+        ]
+      }
+    },
+    "total_probes": 25,
+    "total_stayed_local": 10,
+    "forced_upgrades": 15,
+    "local_retention_pct": 40.0,
+    "conversations": [
+      {
+        "conversation_id": 1,
+        "probes": [
+          {
+            "turn": 10,
+            "tier": "local",
+            "model": "local-llama",
+            "actual_tokens": 10533,
+            "injected_tokens": 10530,
+            "stayed_local": true,
+            "error": null
+          },
+          {
+            "turn": 20,
+            "tier": "local",
+            "model": "local-llama",
+            "actual_tokens": 21069,
+            "injected_tokens": 21060,
+            "stayed_local": true,
+            "error": null
+          },
+          {
+            "turn": 30,
+            "tier": null,
+            "model": null,
+            "actual_tokens": 0,
+            "injected_tokens": 31590,
+            "stayed_local": false,
+            "error": "HTTP 400"
+          },
+          {
+            "turn": 35,
+            "tier": null,
+            "model": null,
+            "actual_tokens": 0,
+            "injected_tokens": 36270,
+            "stayed_local": false,
+            "error": "HTTP 400"
+          },
+          {
+            "turn": 40,
+            "tier": null,
+            "model": null,
+            "actual_tokens": 0,
+            "injected_tokens": 40950,
+            "stayed_local": false,
+            "error": "HTTP 400"
+          }
+        ]
+      },
+      {
+        "conversation_id": 2,
+        "probes": [
+          {
+            "turn": 10,
+            "tier": "local",
+            "model": "local-llama",
+            "actual_tokens": 10535,
+            "injected_tokens": 10530,
+            "stayed_local": true,
+            "error": null
+          },
+          {
+            "turn": 20,
+            "tier": "local",
+            "model": "local-llama",
+            "actual_tokens": 21071,
+            "injected_tokens": 21060,
+            "stayed_local": true,
+            "error": null
+          },
+          {
+            "turn": 30,
+            "tier": null,
+            "model": null,
+            "actual_tokens": 0,
+            "injected_tokens": 31590,
+            "stayed_local": false,
+            "error": "HTTP 400"
+          },
+          {
+            "turn": 35,
+            "tier": null,
+            "model": null,
+            "actual_tokens": 0,
+            "injected_tokens": 36270,
+            "stayed_local": false,
+            "error": "HTTP 400"
+          },
+          {
+            "turn": 40,
+            "tier": null,
+            "model": null,
+            "actual_tokens": 0,
+            "injected_tokens": 40950,
+            "stayed_local": false,
+            "error": "HTTP 400"
+          }
+        ]
+      },
+      {
+        "conversation_id": 3,
+        "probes": [
+          {
+            "turn": 10,
+            "tier": "local",
+            "model": "local-llama",
+            "actual_tokens": 10539,
+            "injected_tokens": 10530,
+            "stayed_local": true,
+            "error": null
+          },
+          {
+            "turn": 20,
+            "tier": "local",
+            "model": "local-llama",
+            "actual_tokens": 21075,
+            "injected_tokens": 21060,
+            "stayed_local": true,
+            "error": null
+          },
+          {
+            "turn": 30,
+            "tier": null,
+            "model": null,
+            "actual_tokens": 0,
+            "injected_tokens": 31590,
+            "stayed_local": false,
+            "error": "HTTP 400"
+          },
+          {
+            "turn": 35,
+            "tier": null,
+            "model": null,
+            "actual_tokens": 0,
+            "injected_tokens": 36270,
+            "stayed_local": false,
+            "error": "HTTP 400"
+          },
+          {
+            "turn": 40,
+            "tier": null,
+            "model": null,
+            "actual_tokens": 0,
+            "injected_tokens": 40950,
+            "stayed_local": false,
+            "error": "HTTP 400"
+          }
+        ]
+      },
+      {
+        "conversation_id": 4,
+        "probes": [
+          {
+            "turn": 10,
+            "tier": "local",
+            "model": "local-llama",
+            "actual_tokens": 10535,
+            "injected_tokens": 10530,
+            "stayed_local": true,
+            "error": null
+          },
+          {
+            "turn": 20,
+            "tier": "local",
+            "model": "local-llama",
+            "actual_tokens": 21071,
+            "injected_tokens": 21060,
+            "stayed_local": true,
+            "error": null
+          },
+          {
+            "turn": 30,
+            "tier": null,
+            "model": null,
+            "actual_tokens": 0,
+            "injected_tokens": 31590,
+            "stayed_local": false,
+            "error": "HTTP 400"
+          },
+          {
+            "turn": 35,
+            "tier": null,
+            "model": null,
+            "actual_tokens": 0,
+            "injected_tokens": 36270,
+            "stayed_local": false,
+            "error": "HTTP 400"
+          },
+          {
+            "turn": 40,
+            "tier": null,
+            "model": null,
+            "actual_tokens": 0,
+            "injected_tokens": 40950,
+            "stayed_local": false,
+            "error": "HTTP 400"
+          }
+        ]
+      },
+      {
+        "conversation_id": 5,
+        "probes": [
+          {
+            "turn": 10,
+            "tier": "local",
+            "model": "local-llama",
+            "actual_tokens": 10535,
+            "injected_tokens": 10530,
+            "stayed_local": true,
+            "error": null
+          },
+          {
+            "turn": 20,
+            "tier": "local",
+            "model": "local-llama",
+            "actual_tokens": 21071,
+            "injected_tokens": 21060,
+            "stayed_local": true,
+            "error": null
+          },
+          {
+            "turn": 30,
+            "tier": null,
+            "model": null,
+            "actual_tokens": 0,
+            "injected_tokens": 31590,
+            "stayed_local": false,
+            "error": "HTTP 400"
+          },
+          {
+            "turn": 35,
+            "tier": null,
+            "model": null,
+            "actual_tokens": 0,
+            "injected_tokens": 36270,
+            "stayed_local": false,
+            "error": "HTTP 400"
+          },
+          {
+            "turn": 40,
+            "tier": null,
+            "model": null,
+            "actual_tokens": 0,
+            "injected_tokens": 40950,
+            "stayed_local": false,
+            "error": "HTTP 400"
+          }
+        ]
+      }
+    ]
+  }
+}

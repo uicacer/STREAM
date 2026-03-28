@@ -18,10 +18,10 @@
 #   - GPU memory utilization 0.90 (increased from 0.85)
 #   - Context length 64K (increased from 32K)
 #
-# Expected throughput: ~25 tok/s
+# Measured throughput: ~28.5 tok/s (median over 5 runs)
 #
 # This serves as the "after" measurement for the paper's claim:
-#   "improved throughput from 3 to 25 tok/s"
+#   "achieving 28.5 vs. 20.1 tok/s with the pre-built container (1.4x improvement)"
 #
 # IMPORTANT: This uses the CUSTOM-BUILT container (vllm-cu124) compiled
 # from source with CUDA 12.4 to match the driver. The Marlin kernels work
@@ -57,7 +57,7 @@ echo "Service: http://${NODE_IP}:${PORT}"
 echo ""
 echo "OPTIMIZED CONFIG:"
 echo "  Container:  vllm-cu124 (CUDA 12.4, custom build, Marlin compatible)"
-echo "  Quantization: awq_marlin (~25 tok/s with Marlin kernels)"
+echo "  Quantization: awq_marlin (~28.5 tok/s with Marlin kernels)"
 echo "  Context:    65536 (64K)"
 echo "  GPU util:   0.90 (increased for more KV cache)"
 echo "  Prefix caching: ON"

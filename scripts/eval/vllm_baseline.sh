@@ -18,10 +18,10 @@
 #   - Default GPU memory utilization (0.85)
 #   - Default context length (32K)
 #
-# Expected throughput: ~3 tok/s
+# Measured throughput: ~20.1 tok/s (median over 5 runs)
 #
 # This serves as the "before" measurement for the paper's claim:
-#   "improved throughput from 3 to 25 tok/s"
+#   "achieving 28.5 vs. 20.1 tok/s with the pre-built container (1.4x improvement)"
 #
 # IMPORTANT: This uses the official vLLM container (vllm-0.15.1) with
 # plain AWQ because the Marlin kernels in that container require CUDA 12.9+,
@@ -58,7 +58,7 @@ echo "Service: http://${NODE_IP}:${PORT}"
 echo ""
 echo "BASELINE CONFIG:"
 echo "  Container:  vllm-0.15.1 (CUDA 12.9, Marlin incompatible with driver 550)"
-echo "  Quantization: awq (plain, ~3 tok/s)"
+echo "  Quantization: awq (plain, ~20 tok/s)"
 echo "  Context:    32768 (default)"
 echo "  GPU util:   0.85 (default safe)"
 echo "  Prefix caching: OFF"

@@ -5,7 +5,7 @@ Compare vLLM Baseline vs Optimized Throughput Results
 Reads the JSON results from vllm_throughput_test.sh and generates:
 1. A side-by-side comparison table
 2. LaTeX table rows for the paper
-3. The speedup factor (for the "3 to 25 tok/s" claim)
+3. The speedup factor (for the "28.5 vs. 20.1 tok/s (1.4x improvement)" claim)
 
 Usage:
     python scripts/eval/compare_throughput.py
@@ -118,30 +118,22 @@ def main():
     print("  PAPER CLAIM VERIFICATION")
     print("=" * 70)
     print()
-    print('  Claim: "improved throughput from 3 to 25 tok/s"')
+    print('  Claim: "28.5 vs. 20.1 tok/s with the pre-built container (1.4x improvement)"')
     print()
     print(f"  Measured baseline:  {b_tp['median']:.1f} tok/s (median)")
     print(f"  Measured optimized: {o_tp['median']:.1f} tok/s (median)")
-    print(f"  Measured speedup:   {speedup:.1f}x")
+    print(f"  Measured speedup:   {speedup:.2f}x")
     print()
 
-    if b_tp["median"] <= 5 and o_tp["median"] >= 20:
+    if b_tp["median"] >= 18 and o_tp["median"] >= 26 and speedup >= 1.3:
         print("  VERDICT: CLAIM VERIFIED")
-        print("  Baseline is in the ~3 tok/s range, optimized is in the ~25 tok/s range.")
-    elif b_tp["median"] <= 5:
-        print("  VERDICT: PARTIALLY VERIFIED")
         print(
-            f"  Baseline confirmed (~3 tok/s), but optimized is {o_tp['median']:.1f} tok/s (expected ~25)."
-        )
-    elif o_tp["median"] >= 20:
-        print("  VERDICT: PARTIALLY VERIFIED")
-        print(
-            f"  Optimized confirmed (~25 tok/s), but baseline is {b_tp['median']:.1f} tok/s (expected ~3)."
+            f"  Baseline ~{b_tp['median']:.1f} tok/s, optimized ~{o_tp['median']:.1f} tok/s, {speedup:.1f}x improvement."
         )
     else:
         print("  VERDICT: NEEDS REVIEW")
         print(
-            f"  Results differ from claim. Baseline: {b_tp['median']:.1f}, Optimized: {o_tp['median']:.1f}"
+            f"  Results differ from claim. Baseline: {b_tp['median']:.1f}, Optimized: {o_tp['median']:.1f}, Speedup: {speedup:.2f}x"
         )
 
     print()
