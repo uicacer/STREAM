@@ -9,14 +9,16 @@ Strategy: inject synthetic long user/assistant pairs as conversation history
 (no API calls) to fill the 32K context window quickly. Only probe turns make
 real API calls to measure which tier handles them.
 
-Each synthetic filler pair is ~1,050 tokens.  Key context sizes:
-  Turn 25: ~22,050 tokens  (approaching 80% threshold at 26,214)
-  Turn 30: ~26,250 tokens  (just past threshold — compression should fire)
-  Turn 35: ~32,550 tokens  (past Ollama hard limit of 32,768 — FAILS without compression)
-  Turn 40: ~36,750 tokens  (well past limit)
+Each synthetic filler pair is ~1,050 actual tokens (padded to 2340 chars/side).
+Key context sizes:
+  Turn 10: ~10,500 tokens  (baseline, well below threshold)
+  Turn 20: ~21,000 tokens  (approaching 80% threshold at 26,214)
+  Turn 30: ~31,500 tokens  (past 30,720 max input — FAILS without compression)
+  Turn 35: ~36,750 tokens  (well past limit)
+  Turn 40: ~42,000 tokens  (well past limit)
 
-With compression:    context is summarized to ~4-5K tokens → stays LOCAL at all turns
-Without compression: turn 35+ overflows Ollama's 32K window → error / forced upgrade
+With compression:    context is summarized to ~4,300 tokens → stays LOCAL at all turns
+Without compression: turn 30+ exceeds local tier's max input (32K - 2K output reserve = 30,720) → forced upgrade
 
 Usage:
     # Run the full comparison (40 turns):
@@ -53,8 +55,9 @@ COMPRESSION_THRESHOLD_TOKENS = int(32768 * 0.80)  # 26,214
 LOCAL_CONTEXT_HARD_LIMIT = 32768
 
 # Default conversation length for the with/without comparison experiment.
-# 40 turns gives ~36,750 injected tokens at the final probe — well past the
-# 32K hard limit, so the without-compression run will fail at turn 35+.
+# 40 turns gives ~42,000 injected tokens at the final probe — well past the
+# 30,720 max input (32K - 2K output reserve), so the without-compression run
+# will fail at turn 30+.
 DEFAULT_NUM_TURNS = 40
 
 # Probe turns for DEFAULT_NUM_TURNS=40.
@@ -70,8 +73,8 @@ PROBE_QUERY = "What is 2 + 2?"
 # ---------------------------------------------------------------------------
 # Synthetic long filler content
 #
-# Each filler pair must contribute ~1,050 real tokens so that 25 filler turns
-# reach the 26,214-token compression threshold (25 × 1,050 = 26,250).
+# Each filler pair must contribute ~1,050 real tokens so that ~25 filler turns
+# reach the 26,214-token compression threshold (25 × 1,050 ≈ 26,250).
 #
 # Llama tokenizer averages ~4 chars/token for English prose, so each side
 # needs ~2,100 chars (≈ 525 tokens × 2 sides = ~1,050 tokens/pair).
@@ -86,7 +89,7 @@ _PAD = (
     " separation of concerns and enable independent scaling of subsystems."
 )
 
-_TARGET_CHARS = 2100  # chars per side ≈ 525 tokens per side ≈ 1,050 tokens/pair
+_TARGET_CHARS = 2340  # chars per side ≈ 585 tokens per side ≈ 1,050 tokens/pair (actual tokenizer)
 
 
 def _pad(text: str) -> str:

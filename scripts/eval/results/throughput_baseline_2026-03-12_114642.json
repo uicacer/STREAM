@@ -1,0 +1,74 @@
+{
+  "timestamp": "2026-03-12T11:47:42.365169",
+  "label": "baseline",
+  "server": "http://ghi2-002:8000",
+  "model": "Qwen/Qwen2.5-VL-72B-Instruct-AWQ",
+  "prompt": "Explain the concept of recursion in programming. Give a clear example.",
+  "max_tokens": 200,
+  "num_runs": 5,
+  "num_warmup": 1,
+  "hardware": {
+    "gpu": "NVIDIA H100 NVL 94 GB",
+    "node": "ghi2-002",
+    "driver": "550.163.01 (CUDA 12.4)"
+  },
+  "config": {
+    "baseline": {
+      "container": "vllm-0.15.1 (CUDA 12.9)",
+      "quantization": "awq (plain)",
+      "context_length": 32768,
+      "gpu_memory_utilization": 0.85,
+      "prefix_caching": false,
+      "chunked_prefill": false,
+      "torch_compile": false
+    },
+    "optimized": {
+      "container": "vllm-cu124 (CUDA 12.4, custom build)",
+      "quantization": "awq_marlin (Marlin kernels)",
+      "context_length": 65536,
+      "gpu_memory_utilization": 0.9,
+      "prefix_caching": true,
+      "chunked_prefill": true,
+      "torch_compile": false,
+      "note": "torch.compile disabled due to Triton autotuning crash on driver 550"
+    }
+  },
+  "results": {
+    "throughput": {
+      "median": 20.2,
+      "mean": 20.2,
+      "stdev": 0.0,
+      "min": 20.1,
+      "max": 20.2,
+      "values": [
+        20.1,
+        20.2,
+        20.2,
+        20.2,
+        20.2
+      ]
+    },
+    "total_time": {
+      "median": 9.91,
+      "mean": 9.91,
+      "values": [
+        9.93,
+        9.9,
+        9.91,
+        9.91,
+        9.91
+      ]
+    },
+    "output_tokens": {
+      "median": 200,
+      "mean": 200,
+      "values": [
+        200,
+        200,
+        200,
+        200,
+        200
+      ]
+    }
+  }
+}

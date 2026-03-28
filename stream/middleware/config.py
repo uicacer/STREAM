@@ -498,7 +498,7 @@ CLOUD_PROVIDER_KEY_MAPPING = {
 }
 
 # Default cloud provider (can be overridden by user in settings)
-DEFAULT_CLOUD_PROVIDER = os.getenv("DEFAULT_CLOUD_PROVIDER", "cloud-claude")
+DEFAULT_CLOUD_PROVIDER = os.getenv("DEFAULT_CLOUD_PROVIDER", "cloud-or-claude")
 
 DEFAULT_MODELS = {
     "local": "local-llama",
