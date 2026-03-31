@@ -1,0 +1,54 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite the PEARC '26 paper."
+authors:
+  - family-names: Nassar
+    given-names: Anas
+    email: nassar@uic.edu
+    affiliation: "University of Illinois Chicago"
+  - family-names: Mohr
+    given-names: Steve
+    email: smohr@uic.edu
+    affiliation: "University of Illinois Chicago"
+  - family-names: Apanasevich
+    given-names: Leonard
+    email: apana@uic.edu
+    affiliation: "University of Illinois Chicago"
+  - family-names: Sharma
+    given-names: Himanshu
+    email: himanshu@uic.edu
+    affiliation: "University of Illinois Chicago"
+title: "STREAM: Multi-Tier LLM Inference Middleware with Dual-Channel HPC Token Streaming"
+version: 1.0.0
+url: https://github.com/uicacer/STREAM
+license: Apache-2.0
+type: software
+keywords:
+  - LLM inference
+  - tiered routing
+  - HPC
+  - Globus Compute
+  - token streaming
+  - middleware
+preferred-citation:
+  type: conference-paper
+  title: "STREAM: Multi-Tier LLM Inference Middleware with Dual-Channel HPC Token Streaming"
+  authors:
+    - family-names: Nassar
+      given-names: Anas
+    - family-names: Mohr
+      given-names: Steve
+    - family-names: Apanasevich
+      given-names: Leonard
+    - family-names: Sharma
+      given-names: Himanshu
+  collection-title: "Practice and Experience in Advanced Research Computing (PEARC '26)"
+  year: 2026
+  publisher:
+    name: ACM
+  conference:
+    name: "PEARC '26"
+    city: Minneapolis
+    region: Minnesota
+    country: US
+    date-start: "2026-07-26"
+    date-end: "2026-07-30"
