@@ -61,7 +61,7 @@ desktop = [
     "pyinstaller>=6.0",
 ]
 dev = [
-    "pytest>=8.3.4",
+    "pytest>=9.0.3",
     "pytest-asyncio>=0.24.0",
     "ipykernel>=7.1.0",
     "jupyter>=1.1.1",
