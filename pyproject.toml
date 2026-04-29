@@ -69,7 +69,7 @@ dev = [
     "pre-commit>=3.6.0",
     # Benchmarking tools
     "matplotlib>=3.8.0",
-    "numpy>=1.26.0",
+    "numpy>=2.4.4",
     "psutil>=5.9.0",
 ]
 
