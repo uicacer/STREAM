@@ -115,6 +115,9 @@ docs/image/
 # Claude Code memory
 .claude/
 
+# Tutorial folder (local learning, never committed)
+tutorial/
+
 # Excalidraw source files
 *.excalidraw
 

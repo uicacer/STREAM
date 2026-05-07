@@ -46,9 +46,11 @@ from stream.middleware.config import (
     LAKESHORE_PROXY_URL,
     MODEL_CONTEXT_LIMITS,
     OLLAMA_BASE_URL,
+    RELAY_ENCRYPTION_KEY,
     RELAY_SECRET,
     RELAY_URL,
 )
+from stream.relay.crypto import decrypt_message
 
 logger = logging.getLogger(__name__)
 
@@ -485,6 +487,17 @@ async def _forward_lakeshore_streaming(
             #   {"type": "done", "usage": {...}}        — stream complete
             #   {"type": "error", "message": "..."}     — something went wrong
             async for msg_str in ws:
+                # --- E2E DECRYPTION ---
+                # If RELAY_ENCRYPTION_KEY is set, the producer (Lakeshore) encrypted
+                # every message before sending it to the relay.  The relay forwarded
+                # the ciphertext unchanged.  We decrypt here before parsing.
+                #
+                # If the key is not set (empty string), decrypt_message() is a
+                # passthrough — msg_str comes back unchanged.  This is the
+                # backward-compatible plaintext path.
+                if RELAY_ENCRYPTION_KEY:
+                    msg_str = decrypt_message(RELAY_ENCRYPTION_KEY, msg_str)
+
                 msg = json.loads(msg_str)
 
                 if msg["type"] == "token":

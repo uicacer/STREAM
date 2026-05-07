@@ -37,8 +37,14 @@ from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from globus_sdk import GlobusAPIError
 
-from stream.middleware.config import MODEL_CONTEXT_LIMITS, RELAY_SECRET, RELAY_URL
+from stream.middleware.config import (
+    MODEL_CONTEXT_LIMITS,
+    RELAY_ENCRYPTION_KEY,
+    RELAY_SECRET,
+    RELAY_URL,
+)
 from stream.middleware.core.globus_compute_client import GlobusComputeClient
+from stream.relay.crypto import decrypt_message
 
 # =========================================================================
 # Configuration — read from environment variables
@@ -292,6 +298,14 @@ async def _route_via_globus_compute_streaming(model, messages, temperature, max_
                 relay_consume_url += f"?secret={RELAY_SECRET}"
             async with ws_connect(relay_consume_url) as ws:
                 async for msg_str in ws:
+                    # --- E2E DECRYPTION ---
+                    # If RELAY_ENCRYPTION_KEY is configured, the producer encrypted
+                    # each payload before sending to the relay.  decrypt_message()
+                    # strips the {"type":"enc","d":"..."} envelope and returns the
+                    # original inner JSON.  If the key is empty, it's a passthrough.
+                    if RELAY_ENCRYPTION_KEY:
+                        msg_str = decrypt_message(RELAY_ENCRYPTION_KEY, msg_str)
+
                     msg = json.loads(msg_str)
 
                     if msg["type"] == "token":

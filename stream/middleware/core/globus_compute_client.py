@@ -30,6 +30,7 @@ from stream.middleware.config import (
     GLOBUS_MAX_PAYLOAD_BYTES,
     LAKESHORE_MODELS,
     MODEL_CONTEXT_LIMITS,
+    RELAY_ENCRYPTION_KEY,
     RELAY_SECRET,
     get_lakeshore_vllm_url,
 )
@@ -166,10 +167,44 @@ remote_vllm_inference = _ns["remote_vllm_inference"]
 # Same exec() pattern as above — see comments on _REMOTE_FN_SOURCE for why.
 
 _REMOTE_STREAMING_FN_SOURCE = """\
-def remote_vllm_streaming(vllm_url, model, messages, temperature, max_tokens, relay_url, channel_id, relay_secret=""):
+def remote_vllm_streaming(vllm_url, model, messages, temperature, max_tokens, relay_url, channel_id, relay_secret="", encryption_key=""):
+    # NOTE: All imports MUST be inside this function body.
+    # This entire function is serialised as a source-code string and executed
+    # remotely on Lakeshore by Globus Compute.  There is no shared import
+    # context — every module the function needs must be imported here.
     import json
     import requests
     from websockets.sync.client import connect as ws_connect
+
+    # ---- Encryption helper (used only when encryption_key is set) ----
+    #
+    # This is a self-contained copy of the logic in stream/relay/crypto.py.
+    # We cannot import that module here because the remote execution environment
+    # on Lakeshore does not have the STREAM package installed.
+    #
+    # Algorithm: AES-256-GCM
+    #   - `encryption_key` is a base64-encoded 32-byte key shared via .env.
+    #   - Each message gets a fresh 12-byte random nonce (os.urandom is
+    #     cryptographically secure on all platforms Python supports).
+    #   - The GCM auth tag (16 bytes, appended automatically by AESGCM.encrypt)
+    #     means any tampering at the relay is detected at decrypt time.
+    #   - Wire format: JSON {"type":"enc","d":"<base64(nonce+ciphertext+tag)>"}
+    #     The relay forwards this opaque blob without being able to read it.
+    def _encrypt(plaintext_json):
+        import base64
+        import os as _os
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+        key = base64.b64decode(encryption_key)      # 32 bytes, AES-256
+        nonce = _os.urandom(12)                     # Fresh random nonce per message
+        aesgcm = AESGCM(key)
+        ciphertext_with_tag = aesgcm.encrypt(nonce, plaintext_json.encode(), None)
+        blob = base64.b64encode(nonce + ciphertext_with_tag).decode()
+        return json.dumps({"type": "enc", "d": blob})
+
+    def _send(ws, payload_dict):
+        # Encrypt-then-send if a key is configured, otherwise send plaintext.
+        raw = json.dumps(payload_dict)
+        ws.send(_encrypt(raw) if encryption_key else raw)
 
     ws = None
 
@@ -209,8 +244,8 @@ def remote_vllm_streaming(vllm_url, model, messages, temperature, max_tokens, re
                 error_msg += f": {response.text[:300]}"
             except Exception:
                 pass
-            ws.send(json.dumps({"type": "error", "message": error_msg}))
-            ws.send(json.dumps({"type": "done"}))
+            _send(ws, {"type": "error", "message": error_msg})
+            _send(ws, {"type": "done"})
             return {"error": error_msg}
 
         # ---- Step 3: Read SSE chunks from vLLM and forward via relay ----
@@ -247,9 +282,11 @@ def remote_vllm_streaming(vllm_url, model, messages, temperature, max_tokens, re
             delta = choices[0].get("delta", {})
             content = delta.get("content")
 
-            # Forward the token to the relay (and thus to the consumer)
+            # Forward the token to the relay (and thus to the consumer).
+            # If encryption_key is set, _send() encrypts before transmitting —
+            # the relay forwards an opaque blob instead of readable JSON.
             if content:
-                ws.send(json.dumps({"type": "token", "content": content}))
+                _send(ws, {"type": "token", "content": content})
                 tokens_sent += 1
 
             # Capture usage stats from the final chunk (vLLM includes them
@@ -261,14 +298,14 @@ def remote_vllm_streaming(vllm_url, model, messages, temperature, max_tokens, re
         # Everything the consumer needs is sent here: the "done" signal
         # plus usage stats (prompt_tokens, completion_tokens, total_tokens).
         # The consumer reads this and knows the stream is complete.
-        ws.send(json.dumps({"type": "done", "usage": usage}))
+        _send(ws, {"type": "done", "usage": usage})
 
     except Exception as e:
         # Best-effort: try to notify the consumer about the error via relay
         if ws:
             try:
-                ws.send(json.dumps({"type": "error", "message": str(e)}))
-                ws.send(json.dumps({"type": "done"}))
+                _send(ws, {"type": "error", "message": str(e)})
+                _send(ws, {"type": "done"})
             except Exception:
                 pass
         return {"error": f"{type(e).__name__}: {e}"}
@@ -1090,7 +1127,10 @@ class GlobusComputeClient:
                 max_tokens,
                 relay_url,
                 channel_id,
-                RELAY_SECRET,  # passed through Globus Compute's encrypted serialization
+                RELAY_SECRET,  # auth: controls who may connect to the channel
+                RELAY_ENCRYPTION_KEY,  # e2e: encrypts every token payload end-to-end
+                # Both values travel via Globus Compute's own encrypted serialization
+                # channel — they never touch the relay in plaintext.
             )
 
             logger.info(f"Streaming job submitted (channel={channel_id[:8]})")

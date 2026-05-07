@@ -184,6 +184,29 @@ RELAY_URL = _raw_relay_url
 # Leave empty to disable auth (development only).
 RELAY_SECRET = os.getenv("RELAY_SECRET", "")
 
+# End-to-end encryption key for relay payloads.
+#
+# RELAY_SECRET (above) only controls WHO can connect to a relay channel —
+# it does not protect WHAT flows through it.  The relay operator (or anyone
+# who intercepts traffic at the relay server) can still read plaintext tokens.
+#
+# RELAY_ENCRYPTION_KEY makes the relay a dumb pipe: token payloads are
+# encrypted by the producer (Lakeshore) before they enter the relay, and
+# decrypted only by the consumer (STREAM middleware).  The relay server sees
+# opaque ciphertext it cannot read.
+#
+# Algorithm: AES-256-GCM (symmetric authenticated encryption)
+#   - Same 32-byte key on both ends.  Generate once, share via .env.
+#   - Provides confidentiality (unreadable without the key) AND integrity
+#     (any tampering is detected at decrypt time — no silent corruption).
+#
+# How to generate a key (run once, save to .env on BOTH sides):
+#   python -c "import os, base64; print(base64.b64encode(os.urandom(32)).decode())"
+#
+# Leave empty to disable encryption (relay traffic is plaintext — fine for
+# development on localhost, not for multi-user or internet-facing deployments).
+RELAY_ENCRYPTION_KEY = os.getenv("RELAY_ENCRYPTION_KEY", "")
+
 # =============================================================================
 # LAKESHORE MODELS
 # =============================================================================
