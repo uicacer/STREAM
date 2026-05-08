@@ -87,7 +87,7 @@ The UI is available at `http://localhost:5000`.
 
 ## Demo
 
-[![STREAM Demo](https://img.youtube.com/vi/sPcUh9df3YE/maxresdefault.jpg)](https://youtu.be/sPcUh9df3YE)
+[![STREAM Demo](https://img.youtube.com/vi/eTllhqNtOOY/maxresdefault.jpg)](https://www.youtube.com/watch?v=eTllhqNtOOY)
 
 ## Tech Stack
 
