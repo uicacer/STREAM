@@ -1,0 +1,1678 @@
+{
+  "_description": "325 hand-labeled queries for evaluating and training STREAM complexity classifiers. Original 150 (50/class) cover HPC/research vocabulary. Expanded set adds 175 queries across diverse general domains (science, math, history, software engineering, system design) plus additional HPC/research examples. Design principle: labels reflect syntactic complexity pattern, not vocabulary difficulty \u2014 HPC definition queries (What is vLLM?) are LOW despite technical vocabulary.",
+  "_labeling_criteria": {
+    "LOW": "Simple facts, definitions, greetings, basic math. A 3B local model can answer correctly. Includes domain-specific vocabulary questions (e.g., 'What is vLLM?') that are still just definitions.",
+    "MEDIUM": "Explanations, code writing, analysis, multi-step reasoning. Needs a capable model (7B-72B).",
+    "HIGH": "Research-level questions, complex comparisons, mathematical proofs, multi-domain synthesis. Benefits from frontier models."
+  },
+  "_borderline_notes": {
+    "LOW_borderline": "Technical vocabulary lookups are LOW regardless of domain \u2014 \"What is vLLM?\", \"What is Kubernetes?\", \"What is RLHF?\" are all single-fact definitions. The key rule: if a one-sentence answer fully satisfies the query, it is LOW.",
+    "MEDIUM_borderline": "Short coding tasks and single-concept explanations sit at the LOW/MEDIUM border. Anything requiring multi-step reasoning, writing >5 lines of code, or explaining a mechanism (not just defining a term) is MEDIUM.",
+    "HIGH_borderline": "Complex but scoped design questions (CI/CD pipeline, A/B testing framework) that could tempt a judge to say MEDIUM are labeled HIGH because they require multi-component reasoning and architectural decisions, not just explanation."
+  },
+  "_split_info": {
+    "original_150": "IDs 1-150. 50 per class. HPC and general simple examples.",
+    "expanded_175": "IDs 151-325. General domain + more research computing.",
+    "total": 325,
+    "distribution": {
+      "LOW": 125,
+      "MEDIUM": 105,
+      "HIGH": 95
+    }
+  },
+  "queries": [
+    {
+      "id": 1,
+      "text": "What is 2 + 2?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 2,
+      "text": "Define photosynthesis.",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 3,
+      "text": "What is the capital of France?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 4,
+      "text": "Hi, how are you?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 5,
+      "text": "What does HTML stand for?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 6,
+      "text": "Who wrote Romeo and Juliet?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 7,
+      "text": "What is the boiling point of water?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 8,
+      "text": "Translate 'hello' to Spanish.",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 9,
+      "text": "What year did World War II end?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 10,
+      "text": "What is a for loop?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 11,
+      "text": "Name three primary colors.",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 12,
+      "text": "What is the largest planet in our solar system?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 13,
+      "text": "Convert 100 Celsius to Fahrenheit.",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 14,
+      "text": "What does CPU stand for?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 15,
+      "text": "What is the speed of light?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 16,
+      "text": "Tell me a joke.",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 17,
+      "text": "What is the square root of 144?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 18,
+      "text": "Who is the current president of the United States?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 19,
+      "text": "What is an integer in programming?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 20,
+      "text": "How many continents are there?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 61,
+      "text": "What is a GPU?",
+      "ground_truth": "LOW",
+      "_note": "borderline: technical vocab"
+    },
+    {
+      "id": 62,
+      "text": "What is vLLM?",
+      "ground_truth": "LOW",
+      "_note": "borderline: HPC vocab"
+    },
+    {
+      "id": 63,
+      "text": "What is Slurm?",
+      "ground_truth": "LOW",
+      "_note": "borderline: HPC vocab"
+    },
+    {
+      "id": 64,
+      "text": "What is CUDA?",
+      "ground_truth": "LOW",
+      "_note": "borderline: HPC vocab"
+    },
+    {
+      "id": 65,
+      "text": "What does API stand for?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 66,
+      "text": "What is a large language model?",
+      "ground_truth": "LOW",
+      "_note": "borderline: AI vocab"
+    },
+    {
+      "id": 67,
+      "text": "What is quantization in machine learning?",
+      "ground_truth": "LOW",
+      "_note": "borderline: ML vocab"
+    },
+    {
+      "id": 68,
+      "text": "What is Globus Compute?",
+      "ground_truth": "LOW",
+      "_note": "borderline: HPC vocab"
+    },
+    {
+      "id": 69,
+      "text": "What is a hyperparameter?",
+      "ground_truth": "LOW",
+      "_note": "borderline: ML vocab"
+    },
+    {
+      "id": 70,
+      "text": "What is an epoch in machine learning?",
+      "ground_truth": "LOW",
+      "_note": "borderline: ML vocab"
+    },
+    {
+      "id": 71,
+      "text": "What does HPC stand for?",
+      "ground_truth": "LOW",
+      "_note": "borderline: HPC vocab"
+    },
+    {
+      "id": 72,
+      "text": "What is a token in NLP?",
+      "ground_truth": "LOW",
+      "_note": "borderline: NLP vocab"
+    },
+    {
+      "id": 73,
+      "text": "What is a transformer model?",
+      "ground_truth": "LOW",
+      "_note": "borderline: AI vocab"
+    },
+    {
+      "id": 74,
+      "text": "What is a checkpoint in deep learning?",
+      "ground_truth": "LOW",
+      "_note": "borderline: ML vocab"
+    },
+    {
+      "id": 75,
+      "text": "What is batch size?",
+      "ground_truth": "LOW",
+      "_note": "borderline: ML vocab"
+    },
+    {
+      "id": 76,
+      "text": "What is a container in software?",
+      "ground_truth": "LOW",
+      "_note": "borderline: DevOps vocab"
+    },
+    {
+      "id": 77,
+      "text": "What is Apptainer?",
+      "ground_truth": "LOW",
+      "_note": "borderline: HPC vocab"
+    },
+    {
+      "id": 78,
+      "text": "What is WebSocket?",
+      "ground_truth": "LOW",
+      "_note": "borderline: networking vocab"
+    },
+    {
+      "id": 79,
+      "text": "What is SSE (Server-Sent Events)?",
+      "ground_truth": "LOW",
+      "_note": "borderline: web vocab"
+    },
+    {
+      "id": 80,
+      "text": "What is Ollama?",
+      "ground_truth": "LOW",
+      "_note": "borderline: AI vocab"
+    },
+    {
+      "id": 81,
+      "text": "What is the difference between RAM and storage?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 82,
+      "text": "What is Python?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 83,
+      "text": "What does GPU stand for?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 84,
+      "text": "What is a variable in programming?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 85,
+      "text": "What is the internet?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 86,
+      "text": "What is a function in programming?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 87,
+      "text": "What is version control?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 88,
+      "text": "What does JSON stand for?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 89,
+      "text": "What is a neural network?",
+      "ground_truth": "LOW",
+      "_note": "borderline: AI vocab"
+    },
+    {
+      "id": 90,
+      "text": "What is an operating system?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 21,
+      "text": "Explain how a neural network learns through backpropagation.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 22,
+      "text": "Write a Python function to find all prime numbers up to n using the Sieve of Eratosthenes.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 23,
+      "text": "What are the differences between TCP and UDP? When would you use each?",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 24,
+      "text": "Explain the CAP theorem in distributed systems with examples.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 25,
+      "text": "Write a SQL query to find the second highest salary in an employees table.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 26,
+      "text": "Explain how public key cryptography works and why it is secure.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 27,
+      "text": "What is the difference between a process and a thread? Explain with examples.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 28,
+      "text": "Implement a binary search tree in Python with insert, search, and delete operations.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 29,
+      "text": "Explain the concept of containerization and how Docker works.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 30,
+      "text": "What are the SOLID principles in object-oriented design? Give an example of each.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 31,
+      "text": "Explain how garbage collection works in Java versus Python.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 32,
+      "text": "Write a recursive function to solve the Tower of Hanoi problem and explain its time complexity.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 33,
+      "text": "What is MapReduce and how does it enable distributed data processing?",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 34,
+      "text": "Explain the difference between supervised, unsupervised, and reinforcement learning with examples.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 35,
+      "text": "How does HTTPS work? Explain the TLS handshake process.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 36,
+      "text": "Write a Python script that reads a CSV file and generates a summary statistics report.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 37,
+      "text": "Explain the observer design pattern and implement it in Python.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 38,
+      "text": "What are database indexes and how do they improve query performance? What are the tradeoffs?",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 39,
+      "text": "Explain how virtual memory works and why it is useful.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 40,
+      "text": "Compare REST and GraphQL APIs. What are the advantages of each?",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 91,
+      "text": "Explain how attention mechanisms work in transformer models.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 92,
+      "text": "Write a Python class that implements a queue using two stacks.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 93,
+      "text": "What is the difference between a mutex and a semaphore?",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 94,
+      "text": "Explain how LRU cache eviction works and implement it in Python.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 95,
+      "text": "What are the tradeoffs between relational and NoSQL databases?",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 96,
+      "text": "Explain how gradient descent optimization works, including momentum and Adam.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 97,
+      "text": "Write a Python script to scrape a webpage and extract all links.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 98,
+      "text": "Explain how Kubernetes manages containerized applications.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 99,
+      "text": "What is the difference between L1 and L2 regularization in machine learning?",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 100,
+      "text": "Implement a rate limiter in Python using the token bucket algorithm.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 101,
+      "text": "Explain how vLLM achieves high throughput for LLM serving.",
+      "ground_truth": "MEDIUM",
+      "_note": "borderline: HPC/AI domain"
+    },
+    {
+      "id": 102,
+      "text": "How does Globus Compute authenticate users and dispatch jobs?",
+      "ground_truth": "MEDIUM",
+      "_note": "borderline: HPC domain"
+    },
+    {
+      "id": 103,
+      "text": "Explain how AWQ quantization reduces model size while preserving accuracy.",
+      "ground_truth": "MEDIUM",
+      "_note": "borderline: ML domain"
+    },
+    {
+      "id": 104,
+      "text": "Write a FastAPI endpoint that accepts a JSON payload and returns a streaming response.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 105,
+      "text": "Explain the difference between synchronous and asynchronous programming in Python.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 106,
+      "text": "How does prefix caching improve LLM inference latency?",
+      "ground_truth": "MEDIUM",
+      "_note": "borderline: ML domain"
+    },
+    {
+      "id": 107,
+      "text": "Write a Python function to parse command-line arguments and validate them.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 108,
+      "text": "Explain how WebSocket connections differ from HTTP requests.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 109,
+      "text": "What are the differences between process-based and thread-based concurrency in Python?",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 110,
+      "text": "Implement a simple pub-sub message broker in Python.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 111,
+      "text": "Explain how Slurm schedules jobs on an HPC cluster.",
+      "ground_truth": "MEDIUM",
+      "_note": "borderline: HPC domain"
+    },
+    {
+      "id": 112,
+      "text": "Write a Dockerfile for a Python FastAPI application.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 113,
+      "text": "What is the difference between a content delivery network and a reverse proxy?",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 114,
+      "text": "Explain how the PageRank algorithm works.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 115,
+      "text": "Write a Python script that monitors a directory for file changes.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 116,
+      "text": "What is the difference between eager and lazy evaluation?",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 117,
+      "text": "Explain how consistent hashing is used in distributed systems.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 118,
+      "text": "Write a Python decorator that adds retry logic with exponential backoff.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 119,
+      "text": "Explain how RAFT consensus handles leader election.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 120,
+      "text": "What is the difference between horizontal and vertical scaling? When should you use each?",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 41,
+      "text": "Compare and contrast RLHF and DPO for language model alignment. Derive the DPO loss function from the RLHF objective and discuss the theoretical implications.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 42,
+      "text": "Design a distributed consensus algorithm for a network of heterogeneous nodes with varying reliability. Prove its safety and liveness properties.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 43,
+      "text": "Analyze the computational complexity of training a transformer model. Derive the memory and compute requirements as a function of model parameters, sequence length, and batch size.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 44,
+      "text": "Write a comprehensive literature review on federated learning, covering privacy guarantees, convergence proofs, and communication efficiency. Include at least 10 key papers.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 45,
+      "text": "Design a complete microservices architecture for a real-time trading platform that handles 1 million transactions per second with sub-millisecond latency. Include fault tolerance, data consistency, and monitoring.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 46,
+      "text": "Explain the mathematical foundations of differential privacy. Derive the Gaussian mechanism and prove its privacy guarantees using Renyi divergence.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 47,
+      "text": "Compare the expressiveness of Graph Neural Networks with the Weisfeiler-Leman graph isomorphism test. What are the theoretical limitations and how do recent architectures address them?",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 48,
+      "text": "Design and analyze a novel caching strategy for a multi-tier storage system that optimizes for both latency and cost. Provide a formal cost model and prove optimality bounds.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 49,
+      "text": "Critically analyze the scaling laws for large language models (Chinchilla, Kaplan). What do they predict about the future of model training, and where might they break down?",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 50,
+      "text": "Implement a complete compiler frontend for a simple programming language, including lexer, parser, and AST generation. Handle operator precedence, control flow, and function definitions.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 51,
+      "text": "Explain the connection between attention mechanisms in transformers and kernel methods in machine learning. Derive the relationship mathematically and discuss computational implications.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 52,
+      "text": "Design a zero-knowledge proof system for verifying machine learning model predictions without revealing the model weights. Discuss the computational overhead and practical feasibility.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 53,
+      "text": "Analyze the societal implications of deploying large language models in healthcare, education, and legal systems. Consider bias, accountability, regulatory frameworks, and propose a governance model.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 54,
+      "text": "Derive the equations of motion for a double pendulum system using Lagrangian mechanics. Analyze the chaotic behavior and implement a numerical simulation.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 55,
+      "text": "Compare the architectures, training procedures, and capabilities of GPT-4, Claude 3, Gemini Ultra, and Llama 3. Analyze their performance on reasoning, coding, and multilingual tasks.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 56,
+      "text": "Design a fault-tolerant distributed database that provides both strong consistency and horizontal scalability. Address the CAP theorem limitations with a novel approach and prove correctness.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 57,
+      "text": "Write a research proposal for using reinforcement learning to optimize HPC job scheduling across heterogeneous GPU clusters. Include related work, methodology, evaluation plan, and expected contributions.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 58,
+      "text": "Explain how mixture-of-experts models work, derive the gating mechanism, and analyze why they achieve better compute efficiency. Compare Switch Transformer and GShard approaches.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 59,
+      "text": "Develop a formal verification framework for neural network robustness. Define the threat model, propose verification algorithms, and analyze their completeness and soundness.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 60,
+      "text": "Design an end-to-end MLOps pipeline for continuous training and deployment of LLMs at scale. Address data versioning, experiment tracking, model registry, A/B testing, and rollback strategies.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 121,
+      "text": "Critically compare RouteLLM, FrugalGPT, and Hybrid LLM as routing frameworks. What are their theoretical guarantees and failure modes at scale?",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 122,
+      "text": "Design a multi-tenant LLM serving system that provides fairness guarantees across concurrent users while minimizing latency. Provide a formal queueing model.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 123,
+      "text": "Derive and analyze the convergence properties of federated averaging (FedAvg) under heterogeneous data distributions. When does it diverge from centralized training?",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 124,
+      "text": "Propose a novel architecture for continual learning in LLMs that avoids catastrophic forgetting. Provide theoretical motivation and an experimental evaluation plan.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 125,
+      "text": "Analyze the security implications of prompt injection attacks on LLM-based systems. Propose and formally analyze a mitigation strategy.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 126,
+      "text": "Design a system for real-time anomaly detection in HPC job telemetry using streaming ML. Address concept drift, latency requirements, and false positive rate.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 127,
+      "text": "Compare Globus Compute, SciStream, and a WebSocket relay for interactive HPC streaming. Analyze latency, security, and infrastructure requirements. Which is best for LLM token delivery?",
+      "ground_truth": "HIGH",
+      "_note": "borderline: domain-specific but HIGH scope"
+    },
+    {
+      "id": 128,
+      "text": "Derive the information-theoretic lower bound for lossless compression of natural language text. How close do modern LLMs come to this bound?",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 129,
+      "text": "Design a privacy-preserving federated learning system for medical imaging across hospital networks. Address data heterogeneity, regulatory compliance, and convergence.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 130,
+      "text": "Analyze the compute and memory scaling behavior of speculative decoding for LLM inference. Under what conditions does it outperform standard autoregressive decoding?",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 131,
+      "text": "Write a research paper outline comparing TTFT optimization strategies across local, HPC, and cloud LLM inference tiers.",
+      "ground_truth": "HIGH",
+      "_note": "borderline: MEDIUM scope but research synthesis required"
+    },
+    {
+      "id": 132,
+      "text": "Design a cost-optimal strategy for routing LLM queries across tiers when query complexity is uncertain. Formulate it as a decision problem under uncertainty.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 133,
+      "text": "Critically analyze the assumptions and failure modes of LLM-as-judge for query complexity classification. What biases does a small judge model introduce?",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 134,
+      "text": "Derive the optimal context window utilization policy for a tiered LLM system. When should summarization be triggered to minimize expected cost?",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 135,
+      "text": "Compare the security models of OAuth2, SAML, and WebAuthn for federated identity in research computing. Which is most appropriate for HPC job submission?",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 136,
+      "text": "Design an adaptive load balancer for a vLLM cluster that accounts for KV cache reuse. Prove that your strategy reduces mean latency versus round-robin.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 137,
+      "text": "Analyze the tradeoffs between model quantization levels (INT4, INT8, FP16) for LLM serving on HPC. Derive the Pareto frontier for latency vs. quality.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 138,
+      "text": "Propose a framework for evaluating the environmental impact of multi-tier LLM routing systems. Include carbon accounting for local, HPC, and cloud tiers.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 139,
+      "text": "Derive the optimal batch size for LLM inference on a GPU given a target latency SLA and throughput requirement. Include memory bandwidth and compute utilization constraints.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 140,
+      "text": "Design a self-healing distributed system for campus LLM serving that automatically detects tier failures and rebalances load. Provide a formal reliability model.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 141,
+      "text": "Write a comprehensive comparison of speculative decoding, Medusa, and Eagle for LLM inference acceleration. What are the theoretical speedup limits?",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 142,
+      "text": "Analyze the information leakage from a WebSocket relay that forwards LLM token streams. What can a passive observer infer? Propose countermeasures.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 143,
+      "text": "Design a benchmark suite for evaluating multi-tier LLM routing systems. What metrics capture cost, latency, quality, and reliability? How do you handle ground truth?",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 144,
+      "text": "Critically evaluate the claim that LLM-as-judge achieves human-level accuracy for query complexity classification. What evidence is needed to support this claim?",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 145,
+      "text": "Derive the expected cost savings from complexity-based LLM routing as a function of query distribution and per-tier pricing. When does routing break even against always using the cheapest tier?",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 146,
+      "text": "Design a streaming data pipeline for real-time LLM token delivery across firewall-restricted HPC environments. Compare relay, tunnel, and reverse-proxy approaches formally.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 147,
+      "text": "Analyze the failure modes of tiered LLM systems under partial failures. When does graceful degradation fail? Propose a formal fault model.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 148,
+      "text": "Write a research proposal for a user study comparing tiered LLM routing systems against single-tier cloud APIs on perceived response quality and cost.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 149,
+      "text": "Derive the Shannon entropy of natural language at the sentence level. How does this inform minimum TTFT for meaningful partial output streaming?",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 150,
+      "text": "Compare Apptainer, Docker, and Singularity for HPC container deployment of LLM serving frameworks. Analyze security, performance overhead, and compatibility tradeoffs.",
+      "ground_truth": "HIGH",
+      "_note": "borderline: could be MEDIUM but requires synthesis"
+    },
+    {
+      "id": 151,
+      "text": "What is the chemical formula for water?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 152,
+      "text": "What is Newton's first law of motion?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 153,
+      "text": "How many bones are in the human body?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 154,
+      "text": "What is the atomic number of carbon?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 155,
+      "text": "What is DNA?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 156,
+      "text": "What is the speed of sound in air?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 157,
+      "text": "What is photosynthesis?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 158,
+      "text": "What is the mitochondria?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 159,
+      "text": "What is gravity?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 160,
+      "text": "What is the Pythagorean theorem?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 161,
+      "text": "What is absolute zero?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 162,
+      "text": "What is the Big Bang theory?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 163,
+      "text": "How many planets are in our solar system?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 164,
+      "text": "What is a black hole?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 165,
+      "text": "What element has the symbol Au?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 166,
+      "text": "What is 15 percent of 200?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 167,
+      "text": "What is the derivative of x squared?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 168,
+      "text": "What is a prime number?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 169,
+      "text": "What is the value of pi to two decimal places?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 170,
+      "text": "What is a logarithm?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 171,
+      "text": "What is 7 factorial?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 172,
+      "text": "What is a matrix in mathematics?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 173,
+      "text": "What does it mean for two lines to be perpendicular?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 174,
+      "text": "What is the mean of the numbers 3, 5, 7, 9?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 175,
+      "text": "What is a boolean?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 176,
+      "text": "In what year did the French Revolution begin?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 177,
+      "text": "Who was the first president of the United States?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 178,
+      "text": "What is the capital of Japan?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 179,
+      "text": "What country has the largest land area?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 180,
+      "text": "What year did the Berlin Wall fall?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 181,
+      "text": "Who invented the telephone?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 182,
+      "text": "What ocean is the largest?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 183,
+      "text": "What language is spoken in Brazil?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 184,
+      "text": "How long is the Great Wall of China?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 185,
+      "text": "What is the currency of Japan?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 186,
+      "text": "What is a binary tree?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 187,
+      "text": "What does RAM stand for?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 188,
+      "text": "What is a compiler?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 189,
+      "text": "What is an API?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 190,
+      "text": "What is recursion in programming?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 191,
+      "text": "What is a hash table?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 192,
+      "text": "What is the difference between HTTP and HTTPS?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 193,
+      "text": "What is a stack in data structures?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 194,
+      "text": "What is an IP address?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 195,
+      "text": "What is a class in object-oriented programming?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 196,
+      "text": "What is a microservice?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 197,
+      "text": "What is Kubernetes?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 198,
+      "text": "What is Docker?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 199,
+      "text": "What is a REST API?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 200,
+      "text": "What is machine learning?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 201,
+      "text": "What is deep learning?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 202,
+      "text": "What is a convolutional neural network?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 203,
+      "text": "What is natural language processing?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 204,
+      "text": "What is reinforcement learning?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 205,
+      "text": "What is Git?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 206,
+      "text": "What is a database?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 207,
+      "text": "What is SQL?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 208,
+      "text": "What is a virtual machine?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 209,
+      "text": "What is TensorFlow?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 210,
+      "text": "What is PyTorch?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 211,
+      "text": "What is MPI?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 212,
+      "text": "What is OpenMP?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 213,
+      "text": "What is a job scheduler?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 214,
+      "text": "What is a cluster in computing?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 215,
+      "text": "What is a node in an HPC cluster?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 216,
+      "text": "What is a batch job?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 217,
+      "text": "What is a compute node?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 218,
+      "text": "What is vLLM used for?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 219,
+      "text": "What does SBATCH mean in SLURM?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 220,
+      "text": "What is a GPU kernel?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 221,
+      "text": "What is attention in transformers?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 222,
+      "text": "What is fine-tuning in machine learning?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 223,
+      "text": "What is a foundation model?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 224,
+      "text": "What is RLHF?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 225,
+      "text": "What is a context window in an LLM?",
+      "ground_truth": "LOW"
+    },
+    {
+      "id": 226,
+      "text": "Write a Python function that checks if a string is a palindrome.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 227,
+      "text": "Write a Python script to count word frequencies in a text file.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 228,
+      "text": "Write a Python function to flatten a nested list.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 229,
+      "text": "Write a Python class for a stack with push, pop, and peek.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 230,
+      "text": "Write a Python function to merge two sorted lists.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 231,
+      "text": "Write a binary search function in Python.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 232,
+      "text": "Write a Python function to compute the nth Fibonacci number using memoization.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 233,
+      "text": "Write a regular expression to validate an email address in Python.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 234,
+      "text": "Write a Python script to download a file from a URL and save it.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 235,
+      "text": "Write a Python decorator that logs the execution time of a function.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 236,
+      "text": "Write a Python generator that yields prime numbers indefinitely.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 237,
+      "text": "Implement quicksort in Python.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 238,
+      "text": "Write a Python function to parse a CSV file into a list of dicts.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 239,
+      "text": "Write a Python context manager that suppresses a specific exception.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 240,
+      "text": "Write a Python async function that fetches multiple URLs concurrently.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 241,
+      "text": "Explain how gradient descent works in machine learning.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 242,
+      "text": "Explain the difference between supervised and unsupervised learning.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 243,
+      "text": "Explain how HTTPS works step by step.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 244,
+      "text": "Explain how a relational database index speeds up queries.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 245,
+      "text": "Explain how TCP handles packet loss.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 246,
+      "text": "Explain the difference between process and thread.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 247,
+      "text": "Explain how a hash function works and what makes a good one.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 248,
+      "text": "Explain the concept of overfitting and how to prevent it.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 249,
+      "text": "Explain how garbage collection works in Python.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 250,
+      "text": "Explain the difference between CNN and RNN architectures.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 251,
+      "text": "Explain how attention mechanism works in transformers.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 252,
+      "text": "Explain how Docker containers differ from virtual machines.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 253,
+      "text": "Explain how a load balancer distributes traffic.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 254,
+      "text": "Explain what happens when you type a URL into a browser.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 255,
+      "text": "Explain the difference between synchronous and asynchronous programming.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 256,
+      "text": "Compare SQL and NoSQL databases. When would you use each?",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 257,
+      "text": "Compare REST and GraphQL APIs. What are the tradeoffs?",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 258,
+      "text": "What are the tradeoffs between using a list vs a set in Python?",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 259,
+      "text": "Compare batch normalization and layer normalization.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 260,
+      "text": "Compare Adam and SGD optimizers in deep learning.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 261,
+      "text": "What are the differences between Git merge and Git rebase?",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 262,
+      "text": "Compare relational and graph databases for social network data.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 263,
+      "text": "What are the differences between multiprocessing and multithreading in Python?",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 264,
+      "text": "Compare gRPC and REST for microservice communication.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 265,
+      "text": "What are the tradeoffs between float16 and float32 in neural network training?",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 266,
+      "text": "Explain how PageRank works.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 267,
+      "text": "Explain the bias-variance tradeoff in machine learning.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 268,
+      "text": "Explain how principal component analysis works.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 269,
+      "text": "How does backpropagation compute gradients through a neural network?",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 270,
+      "text": "Explain how the BERT model is pre-trained.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 271,
+      "text": "Explain how vLLM achieves high throughput for LLM inference.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 272,
+      "text": "How does SLURM schedule jobs on an HPC cluster?",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 273,
+      "text": "Explain how Globus Transfer moves large datasets between institutions.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 274,
+      "text": "How does quantization reduce the memory footprint of an LLM?",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 275,
+      "text": "Explain how KV cache works in transformer inference.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 276,
+      "text": "Write a Python script that scrapes headlines from a news website and saves them to CSV.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 277,
+      "text": "Write a simple REST API in FastAPI with two endpoints.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 278,
+      "text": "Write a Bash script that monitors disk usage and sends an alert if it exceeds 90%.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 279,
+      "text": "Implement a simple LRU cache in Python.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 280,
+      "text": "Write a Python function that retries a network request up to 3 times with exponential backoff.",
+      "ground_truth": "MEDIUM"
+    },
+    {
+      "id": 281,
+      "text": "Design a URL shortening service like bit.ly. Cover storage, redirection, and analytics at scale.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 282,
+      "text": "Design a global content delivery network. Address cache invalidation, routing, and failure modes.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 283,
+      "text": "Design a real-time collaborative document editor like Google Docs. Address concurrency and conflict resolution.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 284,
+      "text": "Design a notification system that delivers 10 million push notifications per day with guaranteed delivery.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 285,
+      "text": "Design a ride-sharing matching system that minimizes passenger wait time globally.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 286,
+      "text": "Design a distributed message queue like Kafka. Explain partitioning, replication, and consumer groups.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 287,
+      "text": "Design a recommendation engine for a streaming service with 100 million users.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 288,
+      "text": "Design a search engine indexing pipeline for a corpus of 1 billion documents.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 289,
+      "text": "Design a fraud detection system for a payment network processing 1 million transactions per second.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 290,
+      "text": "Design a multi-tenant SaaS platform with strong data isolation, autoscaling, and cost attribution.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 291,
+      "text": "Write a literature review on transformer architectures, covering attention mechanisms, positional encoding, scaling laws, and emergent capabilities.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 292,
+      "text": "Analyze the tradeoffs between model distillation, quantization, and pruning for deploying LLMs on edge devices.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 293,
+      "text": "Compare RLHF, DPO, and RLAIF for language model alignment. Analyze theoretical properties and empirical results.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 294,
+      "text": "Survey the literature on federated learning. Cover privacy guarantees, convergence analysis, and communication efficiency.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 295,
+      "text": "Analyze the theoretical foundations of in-context learning in large language models. Why does it work without weight updates?",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 296,
+      "text": "Write a research proposal for applying graph neural networks to protein structure prediction. Include related work, methodology, and evaluation plan.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 297,
+      "text": "Analyze the security implications of deploying LLMs in multi-user environments. Cover prompt injection, data leakage, and mitigation strategies.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 298,
+      "text": "Survey retrieval-augmented generation systems. Compare indexing strategies, retrieval models, and generation approaches.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 299,
+      "text": "Analyze the environmental impact of training frontier language models. Estimate carbon cost and propose mitigation strategies.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 300,
+      "text": "Derive the scaling laws for neural language models from first principles. Explain the Chinchilla result and its implications.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 301,
+      "text": "Prove that the halting problem is undecidable using a diagonalization argument.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 302,
+      "text": "Derive the backpropagation equations for a multi-layer perceptron from the chain rule.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 303,
+      "text": "Prove the convergence of stochastic gradient descent under Lipschitz smoothness and bounded variance assumptions.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 304,
+      "text": "Derive the variational lower bound (ELBO) for a variational autoencoder from first principles.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 305,
+      "text": "Prove that P is a subset of NP and explain why proving P != NP is hard.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 306,
+      "text": "Derive the attention mechanism in transformers and show why scaled dot-product attention prevents gradient vanishing.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 307,
+      "text": "Prove the correctness and analyze the time complexity of Dijkstra's algorithm.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 308,
+      "text": "Derive the EM algorithm for a Gaussian mixture model.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 309,
+      "text": "Prove the no-free-lunch theorem in machine learning.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 310,
+      "text": "Derive the information-theoretic lower bound for sorting and explain why comparison sorts cannot beat O(n log n).",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 311,
+      "text": "Design a fault-tolerant distributed training system for a 70B parameter language model across 1000 GPUs. Address checkpoint strategy, failure recovery, and communication overhead.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 312,
+      "text": "Design a multi-tier LLM serving system for a national lab with 10,000 concurrent researchers. Address autoscaling, cost allocation, and fairness.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 313,
+      "text": "Propose a framework for reproducible AI experiments on HPC clusters. Cover environment management, data versioning, and result provenance.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 314,
+      "text": "Design an adaptive job scheduler for a heterogeneous HPC cluster that optimizes for both throughput and fairness across research groups.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 315,
+      "text": "Analyze the network topology requirements for efficient all-reduce communication in distributed LLM training. Compare ring, tree, and switch-based approaches.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 316,
+      "text": "Design a secure multi-user LLM gateway for a university HPC system. Cover authentication, rate limiting, audit logging, and cost recovery.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 317,
+      "text": "Write a research paper comparing real-time streaming architectures for interactive LLM inference on HPC: relay, tunnel, and persistent server approaches.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 318,
+      "text": "Propose a methodology for benchmarking LLM routing systems. Define metrics, dataset construction, statistical validity, and reproducibility criteria.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 319,
+      "text": "Analyze the tradeoffs between centralized and federated LLM deployment for a consortium of research universities.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 320,
+      "text": "Design a carbon-aware LLM routing policy that dynamically shifts load between HPC tiers based on real-time grid carbon intensity.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 321,
+      "text": "Design a CI/CD pipeline for a machine learning model that includes data validation, training, evaluation, and staged deployment.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 322,
+      "text": "Design an A/B testing framework for evaluating LLM routing policies in production.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 323,
+      "text": "Design a monitoring and alerting system for a multi-tier LLM serving infrastructure.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 324,
+      "text": "Write a comprehensive evaluation rubric for comparing LLM routing classifiers across accuracy, latency, cost, and domain generalization.",
+      "ground_truth": "HIGH"
+    },
+    {
+      "id": 325,
+      "text": "Propose a method for continual learning in a deployed LLM routing classifier that adapts to query distribution shift without catastrophic forgetting.",
+      "ground_truth": "HIGH"
+    }
+  ]
+}
