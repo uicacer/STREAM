@@ -26,8 +26,8 @@ engine:
 
     # Scaling configuration
     nodes_per_block: 1        # Number of compute nodes per job (1 = each job gets one node)
-    init_blocks: 1            # Number of jobs to start immediately when endpoint starts (0 = on-demand only, > 0 = fast first response)
-    min_blocks: 1             # Keep 1 worker always alive (eliminates SLURM scheduling latency for the first request)
+    init_blocks: 1            # Submit 1 worker job on the first task (lazy start — no SLURM job runs until the first query arrives)
+    min_blocks: 1             # Keep 1 worker alive once started — subsequent queries dispatch tasks to this running worker, no new SLURM job per query
     max_blocks: 4             # Maximum number of concurrent SLURM jobs allowed (controls scaling)
 
     # Resource requests per worker
