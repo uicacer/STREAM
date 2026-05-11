@@ -1,0 +1,87 @@
+display_name: UIC Lakeshore Research Computing Endpoint  # Human-readable name shown in Globus web interface
+
+# Connection settings
+heartbeat_period: 30        # How often (seconds) to send heartbeat to Globus service (keeps connection alive). Ping Globus every 30 seconds
+idle_heartbeats_soft: 0     # Number of idle heartbeats before warning (0 = disabled, keeps workers alive indefinitely). Never warn about idle
+idle_heartbeats_hard: 0     # Number of idle heartbeats before shutdown (0 = disabled, never auto-shutdown).
+
+engine:
+  type: GlobusComputeEngine   # Use Globus Compute's execution engine (manages task distribution)
+
+  # One worker process per node (lightweight HTTP clients don't need more)
+  # Increase to 4-8 if you want parallel task execution per node
+  max_workers_per_node: 1
+
+  # Auto-scaling: shut down idle workers after 5 min to save resources (the stategy's section syntax still needs verification)
+  # Without this, workers can stay idle for 1-2 hours wasting allocation
+  #strategy:
+  #  type: SimpleStrategy
+  #  max_idletime: 300         # 300s = 5 minutes
+
+  provider:                   # https://parsl.readthedocs.io/en/stable/stubs/parsl.providers.SlurmProvider.html
+    type: SlurmProvider       # Use SLURM workload manager to submit jobs
+    account: ts_acer_chi      # SLURM account to charge for compute time
+    partition: batch          # Submit to the CPU batch partition (Globus workers are lightweight HTTP clients, not GPU jobs)
+    walltime: "02:00:00"      # Maximum runtime for each SLURM job (HH:MM:SS format)
+
+    # Scaling configuration
+    nodes_per_block: 1        # Number of compute nodes per job (1 = each job gets one node)
+    init_blocks: 1            # Number of jobs to start immediately when endpoint starts (0 = on-demand only, > 0 = fast first response)
+    min_blocks: 1             # Keep 1 worker always alive (eliminates SLURM scheduling latency for the first request)
+    max_blocks: 4             # Maximum number of concurrent SLURM jobs allowed (controls scaling)
+
+    # Resource requests per worker
+    cores_per_node: 1         # 1 CPU (lightweight HTTP client — no GPU needed here)
+    mem_per_node: 8           # Memory in GB to request per node (8GB RAM)
+    exclusive: false          # Share node — don't request entire node. This is very important
+
+    scheduler_options: ""     # No QOS needed (uses default ts_acer_chi)
+
+    # Worker environment setup (commands to run before starting worker process)
+    worker_init: |            # This pipe operator is very important. It allows for the multi-line commands below
+      module load Python/3.12.3-GCCcore-13.3.0                                            # Needs Python
+      # NOTE: VLLM_SERVER_URL is NOT read from the worker environment.
+      # The vLLM URL (http://ghi2-002:8000) is resolved on the submitting side
+      # by get_lakeshore_vllm_url() in stream/middleware/config.py and passed
+      # as a task argument — so setting it here has no effect on runtime behavior.
+      export PYTHONPATH=/home/nassar/.local/lib/python3.12/site-packages:$PYTHONPATH      # Tell workers where to find user-installed packages
+
+    # Fraction of resources to use (0.8 = 80%, leaves headroom for system overhead)
+    parallelism: 0.8
+
+    # SLURM can be slow on busy clusters; wait up to 60s for commands
+    # Default is 10s which may cause timeouts during peak hours
+    cmd_timeout: 60
+
+# =============================================================================
+# HOW TO USE THIS FILE
+# =============================================================================
+# This is the reference copy of the Globus Compute endpoint configuration for
+# the lakeshore-research endpoint. The live file lives on Lakeshore at:
+#   ~/.globus_compute/lakeshore-research/config.yaml
+#
+# To set up the endpoint on a new account or after a fresh install:
+#   1. SSH into Lakeshore
+#   2. Install globus-compute-endpoint:
+#        pip install globus-compute-endpoint
+#   3. Configure the endpoint:
+#        globus-compute-endpoint configure lakeshore-research
+#   4. Replace the generated config with this file:
+#        cp scripts/globus-endpoint-config.yaml ~/.globus_compute/lakeshore-research/config.yaml
+#   5. Start the endpoint:
+#        globus-compute-endpoint start lakeshore-research
+#   6. Copy the endpoint UUID into your local .env:
+#        GLOBUS_COMPUTE_ENDPOINT_ID=<uuid shown by: globus-compute-endpoint list>
+#
+# Architecture note:
+#   Globus Compute workers run as lightweight CPU SLURM jobs in the batch
+#   partition. They are the "inside agents" — already past the cluster
+#   firewall — that can reach vLLM on ghi2-002:8000 over the cluster's
+#   internal network. The vLLM URL is passed to them as a task argument
+#   (not read from environment), resolved from LAKESHORE_MODELS in config.py.
+#
+# References:
+# https://globus-compute.readthedocs.io/en/stable/endpoints/endpoints.html
+# https://globus-compute.readthedocs.io/en/2.31.0/endpoints/config_reference.html
+# https://globus-compute.readthedocs.io/en/latest/endpoints/endpoint_examples.html
+# https://parsl.readthedocs.io/en/stable/stubs/parsl.providers.SlurmProvider.html
