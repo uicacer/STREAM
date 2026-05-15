@@ -115,8 +115,12 @@ docs/image/
 # Claude Code memory
 .claude/
 
+# Personal backup instructions (local only)
+BACKUP_INSTRUCTIONS.md
+
 # Tutorial folder (local learning, never committed)
 tutorial/
+Research_Directions/
 
 # Excalidraw source files
 *.excalidraw
