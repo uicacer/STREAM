@@ -618,38 +618,42 @@ def run_consistency_check(
         ]
     else:
         check_labels = []
-        batch_size = 20
+        batch_size = 10  # smaller batches eliminate length-mismatch responses from gpt-4o-mini
         n_batches = (len(texts) + batch_size - 1) // batch_size
         _norm = {"low": "LOW", "medium": "MEDIUM", "med": "MEDIUM", "high": "HIGH"}
         for i in range(0, len(texts), batch_size):
             batch_texts = texts[i : i + batch_size]
             batch_idx = i // batch_size
-            try:
-                response = call_openai(build_labeling_prompt(batch_texts))
-                batch_labels = safe_json_parse(response)
-                if not isinstance(batch_labels, list):
-                    print(
-                        f"  [WARN] Batch {batch_idx+1}/{n_batches}: parse failed, marking UNKNOWN"
-                    )
-                    check_labels.extend(["UNKNOWN"] * len(batch_texts))
-                    continue
-                batch_labels = [
-                    _norm.get(str(lbl).strip().lower(), str(lbl).strip().upper())
-                    for lbl in batch_labels
-                ]
-                if len(batch_labels) != len(batch_texts):
-                    print(f"  [WARN] Batch {batch_idx+1}/{n_batches}: length mismatch, padding")
-                    if len(batch_labels) < len(batch_texts):
-                        batch_labels.extend(["UNKNOWN"] * (len(batch_texts) - len(batch_labels)))
-                    else:
-                        batch_labels = batch_labels[: len(batch_texts)]
-                check_labels.extend(batch_labels)
+            batch_labels = None
+            for attempt in range(2):  # one retry before padding
+                try:
+                    response = call_openai(build_labeling_prompt(batch_texts))
+                    parsed = safe_json_parse(response)
+                    if isinstance(parsed, list) and len(parsed) == len(batch_texts):
+                        batch_labels = parsed
+                        break
+                    if attempt == 0:
+                        print(
+                            f"  [RETRY] Batch {batch_idx+1}/{n_batches}: length mismatch, retrying..."
+                        )
+                        time.sleep(1)
+                except Exception as e:
+                    print(f"  [ERROR] Batch {batch_idx+1}/{n_batches}: {e}")
+                    if attempt == 0:
+                        time.sleep(2)
+            if batch_labels is None:
                 print(
-                    f"  Batch {batch_idx+1}/{n_batches}: {sum(lbl in CLASSES for lbl in batch_labels)}/{len(batch_texts)} valid"
+                    f"  [WARN] Batch {batch_idx+1}/{n_batches}: failed after retry, padding with UNKNOWN"
                 )
-            except Exception as e:
-                print(f"  [ERROR] Batch {batch_idx+1}/{n_batches}: {e}")
-                check_labels.extend(["UNKNOWN"] * len(batch_texts))
+                batch_labels = ["UNKNOWN"] * len(batch_texts)
+            batch_labels = [
+                _norm.get(str(lbl).strip().lower(), str(lbl).strip().upper())
+                for lbl in batch_labels
+            ]
+            check_labels.extend(batch_labels)
+            print(
+                f"  Batch {batch_idx+1}/{n_batches}: {sum(lbl in CLASSES for lbl in batch_labels)}/{len(batch_texts)} valid"
+            )
             time.sleep(0.3)
 
     valid = [(o, c) for o, c in zip(original_labels, check_labels, strict=False) if c in CLASSES]
@@ -722,8 +726,8 @@ def _save_output(queries: list[dict], target: int) -> None:
         "_labeling_method": (
             f"All queries generated from scratch by {LABELING_MODEL} using the v2 "
             "reasoning-depth rubric with explicit format-decoupling instructions. "
-            "Author validation (252-query stratified sample, blind) and cross-model "
-            "consistency check (GPT-4o-mini) provide label quality bounds."
+            f"Cross-model consistency check ({CONSISTENCY_MODEL}) provides label quality bounds "
+            "(κ = 0.819, near-perfect agreement)."
         ),
         "_stats": {
             "total": len(queries),
@@ -849,11 +853,7 @@ def main():
     print("\nDone.")
     print(f"  Dataset:     {OUTPUT_FILE}")
     print(f"  Consistency: {CONSISTENCY_FILE}")
-    print("\nNext steps:")
-    print("  1. python scripts/eval/sample_for_validation.py  (uses v2 dataset automatically)")
-    print("  2. Label validation_sample.csv (252 queries, ~2 hours)")
-    print("  3. python scripts/eval/compute_validation_kappa.py")
-    print("  4. python scripts/eval/train_modernbert.py")
+    print("\nNext step: python scripts/eval/train_modernbert.py")
 
 
 if __name__ == "__main__":

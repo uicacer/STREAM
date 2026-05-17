@@ -131,3 +131,6 @@ streamrelay_staging/
 # Test results/figures (generated)
 tests/results_*.json
 tests/figures/
+
+# Benchmark datasets (large, published on HuggingFace)
+scripts/eval/benchmark_dataset*.json
