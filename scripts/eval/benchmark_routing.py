@@ -365,12 +365,34 @@ def main():
     parser.add_argument(
         "--strategy",
         type=str,
-        default="ollama-3b",
-        choices=["ollama-3b", "gemma-vision", "haiku"],
+        default=None,
+        choices=["ollama-3b", "gemma-vision", "haiku", "modernbert"],
         help="Judge strategy to test (default: ollama-3b)",
     )
+    parser.add_argument(
+        "--judge",
+        type=str,
+        default=None,
+        choices=["ollama-3b", "gemma-vision", "haiku", "modernbert"],
+        help="Alias for --strategy",
+    )
     parser.add_argument("--url", type=str, help="STREAM URL (default: http://localhost:5000)")
+    parser.add_argument(
+        "--queries",
+        type=str,
+        default=None,
+        help="Path to query JSON file (default: scripts/eval/test_queries.json)",
+    )
+    parser.add_argument(
+        "--output",
+        type=str,
+        default=None,
+        help="Output file path (default: auto-timestamped in results/)",
+    )
     args = parser.parse_args()
+
+    # --judge is an alias for --strategy
+    strategy = args.judge or args.strategy or "ollama-3b"
 
     if args.url:
         global STREAM_URL, CHAT_ENDPOINT
@@ -378,7 +400,10 @@ def main():
         CHAT_ENDPOINT = f"{STREAM_URL}/v1/chat/completions"
 
     # Load test queries
-    queries_file = Path(__file__).parent / "test_queries.json"
+    if args.queries:
+        queries_file = Path(args.queries)
+    else:
+        queries_file = Path(__file__).parent / "test_queries.json"
     if not queries_file.exists():
         print(f"ERROR: Test queries file not found: {queries_file}")
         sys.exit(1)
@@ -399,18 +424,28 @@ def main():
         sys.exit(1)
 
     # Run benchmark
-    summary = run_routing_benchmark(queries, strategy=args.strategy, verbose=args.verbose)
+    summary = run_routing_benchmark(queries, strategy=strategy, verbose=args.verbose)
 
     # Save results
     results_dir = Path(__file__).parent / "results"
     results_dir.mkdir(exist_ok=True)
     timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-    output_file = results_dir / f"routing_{timestamp}.json"
+    n_queries = len(queries)
+    default_name = (
+        f"routing_{n_queries}_{timestamp}.json"
+        if n_queries != 1800
+        else f"routing_{timestamp}.json"
+    )
+    if args.output:
+        output_file = Path(args.output)
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+    else:
+        output_file = results_dir / default_name
 
     output = {
         "timestamp": datetime.now().isoformat(),
         "stream_url": STREAM_URL,
-        "strategy": args.strategy,
+        "strategy": strategy,
         "test_queries_file": str(queries_file),
         "summary": summary,
     }

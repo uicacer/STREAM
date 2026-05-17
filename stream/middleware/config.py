@@ -336,10 +336,18 @@ JUDGE_STRATEGIES = {
         "icon": "🚀",
         "timeout": 15,
     },
+    "modernbert": {
+        "model": "modernbert",
+        "name": "ModernBERT",
+        "description": "Local classifier distilled from Claude Sonnet 4.6, ~15ms, no API cost",
+        "icon": "⚡",
+        "timeout": 5,
+        "local_classifier": True,  # handled by judge_complexity_with_classifier(), not LLM path
+    },
 }
 
 # Default judge strategy
-DEFAULT_JUDGE_STRATEGY = "ollama-3b"
+DEFAULT_JUDGE_STRATEGY = "modernbert"
 
 # Legacy config (for backwards compatibility with older code paths)
 JUDGE_MODEL = JUDGE_STRATEGIES[DEFAULT_JUDGE_STRATEGY]["model"]

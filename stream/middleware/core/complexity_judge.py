@@ -23,6 +23,7 @@ of the query, which may still be sufficient for many cases.
 
 import hashlib
 import logging
+import os
 import time
 from dataclasses import dataclass
 
@@ -47,17 +48,78 @@ logger = logging.getLogger(__name__)
 # Judge cache (module-level state)
 _judge_cache = {}
 
+# ModernBERT classifier (lazy-loaded on first use)
+_classifier_pipeline = None
+_CLASSIFIER_MODEL_PATH = os.path.join(
+    os.path.dirname(__file__), "../../../scripts/eval/models/modernbert"
+)
+
+
+def _get_classifier():
+    """Lazy-load the ModernBERT classifier pipeline (CPU, singleton)."""
+    global _classifier_pipeline
+    if _classifier_pipeline is None:
+        try:
+            from transformers import pipeline as hf_pipeline
+
+            model_path = os.path.abspath(_CLASSIFIER_MODEL_PATH)
+            if not os.path.exists(model_path):
+                raise FileNotFoundError(
+                    f"ModernBERT model not found at {model_path}. "
+                    "Run scripts/eval/train_modernbert.py first."
+                )
+            _classifier_pipeline = hf_pipeline(
+                "text-classification",
+                model=model_path,
+                device=-1,  # CPU
+                truncation=True,
+                max_length=128,
+                top_k=None,  # return all class scores
+            )
+            logger.info("ModernBERT classifier loaded successfully")
+        except Exception as e:
+            logger.error(f"Failed to load ModernBERT classifier: {e}")
+            raise
+    return _classifier_pipeline
+
+
+def judge_complexity_with_classifier(query: str) -> tuple[str, dict, float]:
+    """
+    Classify query complexity using the local ModernBERT classifier.
+
+    Returns:
+        (complexity, scores, latency_ms) where:
+        - complexity: "low", "medium", or "high"
+        - scores: {"low": 0.72, "medium": 0.21, "high": 0.07} — shown in UI
+        - latency_ms: inference time in milliseconds
+    """
+    clf = _get_classifier()
+    t0 = time.time()
+    results = clf(query)[0]  # list of {"label": "LOW", "score": 0.72}
+    latency_ms = (time.time() - t0) * 1000
+
+    scores = {r["label"].lower(): round(r["score"], 4) for r in results}
+    complexity = max(scores, key=scores.get)
+
+    logger.info(
+        f"JUDGE [modernbert]: {complexity.upper()}  "
+        f"(low={scores.get('low',0):.2f} med={scores.get('medium',0):.2f} "
+        f"high={scores.get('high',0):.2f})  {latency_ms:.0f}ms"
+    )
+    return complexity, scores, latency_ms
+
 
 @dataclass
 class JudgmentResult:
     """Result of complexity judgment with metadata."""
 
     complexity: str  # "low", "medium", "high"
-    method: str  # "llm", "keyword_fallback", "default_fallback"
-    strategy_used: str | None = None  # e.g., "ollama-3b", "haiku"
+    method: str  # "classifier", "llm", "keyword_fallback", "default_fallback"
+    strategy_used: str | None = None  # e.g., "modernbert", "ollama-3b", "haiku"
     fallback_reason: str | None = None  # Why fallback was used
-    judge_cost: float = 0.0  # Cost of the judge call (for paid models like Haiku)
+    judge_cost: float = 0.0  # Cost of the judge call (0.0 for local models)
     judge_tokens: dict | None = None  # {"input": N, "output": N}
+    scores: dict | None = None  # {"low": 0.72, "medium": 0.21, "high": 0.07} — UI display
 
 
 def _get_cache_key(query: str) -> str:
@@ -275,6 +337,21 @@ def judge_complexity(
         JudgmentResult with complexity, method used, cost, and fallback info
     """
     strategy = strategy or DEFAULT_JUDGE_STRATEGY
+
+    # ModernBERT classifier path — fast, local, no API cost
+    if strategy == "modernbert":
+        try:
+            complexity, scores, _ = judge_complexity_with_classifier(query)
+            _cache_judgment(query, complexity)
+            return JudgmentResult(
+                complexity=complexity,
+                method="classifier",
+                strategy_used="modernbert",
+                scores=scores,
+            )
+        except Exception as e:
+            logger.warning(f"ModernBERT classifier failed: {e}. Falling back to LLM judge.")
+            strategy = "ollama-3b"  # fall through to LLM path
 
     if LLM_JUDGE_ENABLED:
         complexity, error, judge_cost, judge_tokens = judge_complexity_with_llm(query, strategy)

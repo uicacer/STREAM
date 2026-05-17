@@ -1,0 +1,25 @@
+{
+  "primary_model": "claude-sonnet-4-6",
+  "consistency_model": "gpt-4o-mini",
+  "rubric_version": "v2 (reasoning-depth)",
+  "n_checked": 344,
+  "n_invalid": 1,
+  "agreement": 0.7849,
+  "cohens_kappa": 0.6784,
+  "interpretation": "substantial",
+  "per_class": {
+    "LOW": {
+      "n": 118,
+      "agreement": 0.8051
+    },
+    "MEDIUM": {
+      "n": 118,
+      "agreement": 0.661
+    },
+    "HIGH": {
+      "n": 108,
+      "agreement": 0.8981
+    }
+  },
+  "timestamp": "2026-05-17T10:47:45.427283+00:00"
+}

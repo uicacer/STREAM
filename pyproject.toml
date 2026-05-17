@@ -45,6 +45,7 @@ dependencies = [
     "openpyxl>=3.1.0",
     "python-pptx>=1.0.0",
     "cryptography>=46.0.4",
+    "anthropic>=0.102.0",
 ]
 
 [project.optional-dependencies]
@@ -165,3 +166,11 @@ indent-style = "space"
 
 # Use Unix line endings
 line-ending = "lf"
+
+[dependency-groups]
+dev = [
+    "accelerate>=1.13.0",
+    "datasets>=4.8.5",
+    "scikit-learn>=1.8.0",
+    "transformers>=5.8.1",
+]

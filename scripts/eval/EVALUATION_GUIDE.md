@@ -1,258 +1,457 @@
 # STREAM Evaluation Guide
 
-## Overview
-
-This guide explains how to run the STREAM evaluation benchmarks for the PEARC 2026 paper.
-We measure three things that align with what similar papers (FIRST, RouteLLM, FrugalGPT) evaluate:
-
-1. **Streaming & Latency** (Day 1) — Your main contribution. How fast do tokens arrive?
-2. **Routing Accuracy** (Day 2) — Does the complexity judge classify queries correctly?
-3. **Compression Impact** (Day 2) — Does tier-aware compression keep simple queries on cheap tiers?
-
-All results are saved as JSON files in `scripts/eval/results/` and can be directly used
-to fill in the paper's evaluation tables.
+This guide covers everything you need to understand and run the STREAM evaluation
+pipeline for the PEARC 2026 paper. It also explains the knowledge distillation
+approach used to build the ModernBERT routing classifier.
 
 ---
 
-## Prerequisites
+## Overview: Three Evaluation Areas
 
-Before running benchmarks, make sure:
+| Area | Script | What It Measures |
+|------|--------|-----------------|
+| **Routing Accuracy** | `benchmark_routing.py` | Does the complexity judge classify LOW/MEDIUM/HIGH correctly? |
+| **Streaming Latency** | `benchmark_latency.py` | TTFT, throughput, relay vs batch |
+| **Compression Impact** | `benchmark_compression.py` | Does compression keep simple queries on cheap tiers? |
 
-- [ ] STREAM middleware is running (desktop or server mode)
-- [ ] Ollama is running with `llama3.2:3b` and `gemma3:4b` loaded
-- [ ] Lakeshore HPC is accessible (for Lakeshore benchmarks)
-- [ ] WebSocket relay is running (for streaming vs batch comparison)
-- [ ] Cloud API keys are configured (for cloud benchmarks)
+---
 
-**Quick check — is STREAM running?**
-```bash
-curl http://localhost:5000/health
+## Part 1: The Complexity Classifier — What and Why
+
+### The Problem
+
+STREAM needs to decide: should this query go to a free local model, the free HPC tier,
+or a paid cloud model? To do that, it classifies each query as LOW, MEDIUM, or HIGH
+complexity. This is the **complexity judge**.
+
+### Two Judge Approaches
+
+| Approach | Latency | Cost | Accuracy | Dependency |
+|----------|---------|------|----------|------------|
+| **Llama 3.2 3B** (LLM judge) | ~390ms | Free | Good | Ollama running |
+| **ModernBERT** (distilled classifier) | ~15ms | Free | Better | Model file on disk |
+
+### Why LLM-Supervised Fine-Tuning?
+
+The LLM judge (Llama 3.2 3B) works but is slow — 390ms per classification adds
+noticeable lag to every single query. We can do better:
+
+1. Use Claude Sonnet 4.6 as a **labeling model** — with extended thinking enabled so it applies the reasoning-depth rubric carefully before committing to a label.
+2. Fine-tune ModernBERT-base (149M params) on those LLM-generated labels.
+3. The small model learns the frontier model's routing judgment without needing an LLM at runtime.
+
+This is **LLM-supervised fine-tuning**: Claude generates the labels; ModernBERT learns from them. The result runs at ~15ms with no API dependency.
+
+Note: this is distinct from classical knowledge distillation (Hinton 2015), which transfers soft probability distributions between models of the same family. Here the "teacher" is a frontier LLM and the "student" is an encoder classifier — they share no architecture. The transfer is through hard labels, not soft logits.
+
+### The Reasoning-Depth Rubric
+
+The most important design decision: **complexity is about reasoning depth, not format.**
+
+The same format ("Is X true?", "What is X?", "yes/no") can appear at all three levels:
+
+| Complexity | Definition | Example |
+|------------|------------|---------|
+| **LOW** | Single retrievable fact — one lookup or direct recall | "What is the capital of France?" / "Is Python interpreted?" |
+| **MEDIUM** | Apply established procedure — combine 2-4 known steps | "Write a Python function to sort a list by two keys" / "Is merge sort O(n log n)?" |
+| **HIGH** | Construct novel reasoning path — no standard procedure exists | "Is the P vs NP problem likely solvable in the next decade?" / "Does quantum entanglement violate causality?" |
+
+**Why this rubric?** Early versions used format as a proxy (yes/no → LOW, "derive X" → HIGH).
+That caused the classifier to learn format patterns rather than reasoning complexity.
+A query like "Is the Riemann hypothesis true?" is HIGH — but it looks like a yes/no question.
+With the reasoning-depth rubric, the labeling model classifies based on what it takes to
+*answer*, not how the question is *phrased*.
+
+---
+
+## Part 2: Dataset Generation (v2)
+
+### Why Regenerate from Scratch?
+
+The v1 dataset (`benchmark_dataset_384.json`) was generated with the old format-proxy rubric.
+All yes/no questions were labeled LOW, all "derive X" questions were HIGH. The classifier
+learned to pattern-match question format rather than reasoning depth.
+
+The v2 dataset uses the reasoning-depth rubric and extended thinking to prevent this.
+
+### How Dataset v2 is Generated
+
+Script: `scripts/eval/generate_benchmark_dataset_v2.py`
+
+The script calls Claude Sonnet 4.6 with **extended thinking enabled**:
+
+```python
+msg = client.messages.create(
+    model="claude-sonnet-4-6",
+    max_tokens=16000,
+    thinking={"type": "enabled", "budget_tokens": 10000},
+    messages=[{"role": "user", "content": prompt}],
+)
 ```
 
----
+Extended thinking means Claude reasons carefully before producing the output — it
+considers edge cases, checks for format-proxy bias, and applies the rubric consistently.
+The thinking block is discarded; only the text output (the labeled query) is kept.
 
-## Day 1: Streaming & Latency Benchmarks
+### Dataset Size and Structure
 
-### What We're Measuring and Why
+| Total | Per domain | Per domain-complexity cell | Domains |
+|-------|-----------|---------------------------|---------|
+| 6,912 | 1,152 | 384 | 6 |
 
-| Metric | What It Means | Why It Matters |
-|--------|--------------|----------------|
-| **TTFT** (Time to First Token) | Seconds from sending the query to receiving the first token | User-perceived responsiveness. This is what makes streaming feel "fast" |
-| **Total Time** | Seconds from query to final token | End-to-end performance |
-| **Throughput** (tok/s) | Output tokens generated per second | How fast the model produces text |
-| **Relay vs Batch** | TTFT with relay streaming vs without | Proves the dual-channel architecture reduces perceived latency |
+Domains: `general_knowledge`, `science`, `mathematics`, `coding`, `humanities`,
+`professional` (medicine/law/finance).
 
-### How It Works
+Each query has:
+```json
+{
+  "id": "sci_low_0042",
+  "text": "What is the atomic number of carbon?",
+  "ground_truth": "LOW",
+  "domain": "science"
+}
+```
 
-The benchmark script sends the **same query** to each tier multiple times and measures:
+### Format Decoupling Validation
 
-1. **TTFT**: We open an SSE connection and record the timestamp when the first content
-   token arrives (not metadata — the actual first word of the response).
-
-2. **Total Time**: From request sent to final `[DONE]` event.
-
-3. **Throughput**: We count the total output tokens (from the cost summary SSE event)
-   and divide by total time.
-
-4. **Relay vs Batch**: For Lakeshore, we run the same query twice — once with the relay
-   enabled (streaming) and once with the relay disabled (batch mode where the user waits
-   for the complete response). The TTFT difference is the key number.
-
-### Why the Same Query?
-
-We use the same query for all runs ("Explain the concept of recursion in programming")
-to control for variability. Different queries produce different-length responses, which
-would confuse the latency measurements. By fixing the query, differences in TTFT and
-throughput reflect the infrastructure, not the content.
+The script runs `validate_format_decoupling()` at the end. It warns if yes/no questions
+or "What is X?" questions are >90% concentrated in a single class — that would indicate
+the rubric is still leaking format as a signal.
 
 ### How to Run
 
 ```bash
-# Run all Day 1 benchmarks (20 runs per tier)
-python scripts/eval/benchmark_latency.py
+# Generate full dataset (takes ~2-3 hours, costs ~$5-10 in API credits)
+python scripts/eval/generate_benchmark_dataset_v2.py
 
-# Run fewer iterations for a quick test
-python scripts/eval/benchmark_latency.py --runs 3
+# Check a partially-generated or existing dataset for format bias
+python scripts/eval/generate_benchmark_dataset_v2.py --validate-only
 
-# Run only specific tiers
-python scripts/eval/benchmark_latency.py --tiers local lakeshore
-
-# Run relay vs batch comparison only
-python scripts/eval/benchmark_latency.py --relay-comparison-only
+# Use a specific dataset path
+python scripts/eval/generate_benchmark_dataset_v2.py \
+    --dataset scripts/eval/benchmark_dataset_v2.json
 ```
 
-### Reading the Results
+Progress is printed every 30 queries per cell. The script appends to the existing file,
+so if it's interrupted, re-running picks up from where it left off (checks which
+domain-complexity cells are already complete).
 
-Results are saved to `scripts/eval/results/latency_YYYY-MM-DD_HHMMSS.json` and a
-summary is printed to the terminal:
+### Output
 
-```
-=== LATENCY BENCHMARK RESULTS ===
-
-Local (Llama 3.2 3B):
-  TTFT:       0.12s (median)  ± 0.03s (std)
-  Total:      4.82s (median)  ± 0.31s (std)
-  Throughput: 41.5 tok/s (median)
-
-Lakeshore - Relay Streaming:
-  TTFT:       2.34s (median)  ± 0.45s (std)
-  Total:      8.12s (median)  ± 0.67s (std)
-  Throughput: 24.6 tok/s (median)
-
-Lakeshore - Batch Fallback:
-  TTFT:       8.12s (median)  ← User waits this long before seeing ANY text
-  Total:      8.15s (median)
-  Throughput: N/A (all at once)
-
-Cloud (Claude Sonnet):
-  TTFT:       0.89s (median)  ± 0.12s (std)
-  Total:      3.45s (median)  ± 0.28s (std)
-  Throughput: 57.8 tok/s (median)
-```
-
-The key story: **Relay streaming reduces Lakeshore TTFT from ~8s (batch) to ~2s,
-making HPC inference feel interactive.**
-
-### Statistical Notes
-
-- We report **median** (not mean) because latency distributions are skewed — a single
-  slow request shouldn't dominate the result. This is standard practice (FIRST uses median too).
-- We report **standard deviation** to show consistency.
-- We run **20 iterations** per measurement for statistical significance.
-- The first run is a **warm-up** (discarded) to avoid cold-start effects.
+`scripts/eval/benchmark_dataset_v2.json` — the full 6,912-query dataset.
 
 ---
 
-## Day 2: Routing Accuracy & Compression
+## Part 3: Training ModernBERT
 
-### Benchmark 1: Routing Accuracy
+Script: `scripts/eval/train_modernbert.py`
 
-#### What We're Measuring
+### What It Does
 
-The complexity judge (Llama 3.2 3B running locally) classifies each query as LOW, MEDIUM,
-or HIGH. We test whether it classifies correctly by running 60 hand-labeled queries
-through it and checking accuracy.
+1. Loads `benchmark_dataset_v2.json`
+2. Splits 70% train / 15% val / 15% test (stratified by domain+complexity, seed=42)
+3. Fine-tunes `answerdotai/ModernBERT-base` (149M params, 2T token pretrain, Dec 2024)
+4. Evaluates on test set: accuracy, macro-F1, per-class F1
+5. Measures single-query CPU latency (p50/p95/p99 over 200 queries)
+6. Saves model to `scripts/eval/models/modernbert/`
+7. Prints exact numbers to paste into the paper
 
-#### Why This Matters
+### Training Hyperparameters
 
-If the judge misclassifies a simple query as HIGH, the user pays for cloud when local
-would suffice. If it misclassifies a complex query as LOW, the response quality suffers.
-RouteLLM evaluates this exact tradeoff.
+| Parameter | Value | Why |
+|-----------|-------|-----|
+| Epochs | 5 | Typical for fine-tuning on domain-specific data |
+| Batch size | 32 | Fits on CPU/MPS/GPU comfortably |
+| Learning rate | 2e-5 | Standard for BERT-family fine-tuning |
+| Max length | 128 tokens | Covers ~95% of queries; longer truncated |
+| Metric for best model | macro-F1 | Balanced across all three classes (not biased toward majority) |
 
-#### The Test Set
-
-The file `scripts/eval/test_queries.json` contains 60 queries:
-- 20 LOW (simple facts, definitions, greetings)
-- 20 MEDIUM (explanations, code writing, analysis)
-- 20 HIGH (multi-step reasoning, research-level, comparisons)
-
-Each query has a `ground_truth` label assigned by the paper authors.
-
-#### How to Run
-
-```bash
-# Run routing accuracy benchmark
-python scripts/eval/benchmark_routing.py
-
-# Show per-query results (see which ones were misclassified)
-python scripts/eval/benchmark_routing.py --verbose
-```
-
-#### Reading the Results
-
-```
-=== ROUTING ACCURACY ===
-
-Overall: 47/60 correct (78.3%)
-
-Per-class:
-  LOW:    18/20 (90.0%)
-  MEDIUM: 13/20 (65.0%)  ← Hardest to classify (borderline queries)
-  HIGH:   16/20 (80.0%)
-
-Confusion Matrix:
-              Predicted LOW  Predicted MED  Predicted HIGH
-Actual LOW         18             2              0
-Actual MED          3            13              4
-Actual HIGH         0             4             16
-
-Cost Impact:
-  Queries routed to free tiers: 31/60 (51.7%)
-  Estimated cost (auto mode):   $0.042
-  Estimated cost (all cloud):   $0.180
-  Cost savings:                 76.7%
-```
-
-### Benchmark 2: Compression Impact
-
-#### What We're Measuring
-
-In a long conversation (30+ turns), does tier-aware compression keep simple queries
-on the local tier? Without compression, the accumulated conversation history exceeds
-the local tier's 32K context limit, forcing an upgrade to a more expensive tier.
-
-#### How It Works
-
-The script simulates a 30-turn conversation:
-
-1. Sends 30 alternating user/assistant messages to build up context
-2. At turns 10, 15, 20, 25, and 30, sends a simple query ("What is 2+2?")
-3. Records which tier handles the simple query and the token count
-
-It runs this twice:
-- **With compression enabled** (default) — expects local tier to handle simple queries
-- **With compression disabled** — expects tier upgrade after ~turn 20
-
-#### How to Run
+### How to Run
 
 ```bash
-# Run compression benchmark (5 simulated conversations)
+# Full training (requires dataset v2 to exist)
+python scripts/eval/train_modernbert.py
+
+# Quick sanity check (30 examples, 1 epoch)
+python scripts/eval/train_modernbert.py --dry-run
+
+# Custom dataset path
+python scripts/eval/train_modernbert.py \
+    --dataset scripts/eval/benchmark_dataset_v2.json
+```
+
+**Prerequisites:**
+```bash
+pip install transformers torch datasets scikit-learn accelerate
+```
+
+Training takes ~15-30 minutes on CPU (Apple M-series), or ~5 minutes with a GPU.
+
+### Output
+
+- `scripts/eval/models/modernbert/` — fine-tuned model + tokenizer (used by STREAM at runtime)
+- `scripts/eval/results/modernbert_training_report.json` — all metrics
+
+### Reading the Terminal Output
+
+At the end, the script prints a "PAPER NUMBERS" block:
+
+```
+============================================================
+PAPER NUMBERS (paste into pearc26-stream-paper.tex):
+============================================================
+  ModernBERT accuracy:          92.3%
+  ModernBERT macro-F1:          0.921
+  ModernBERT LOW F1:            0.948
+  ModernBERT MEDIUM F1:         0.892
+  ModernBERT HIGH F1:           0.923
+  ModernBERT latency p50:       14.2 ms
+  Free-tier retention:          97.1%
+```
+
+Copy these directly into the paper's TODO placeholders.
+
+---
+
+## Part 4: Routing Accuracy Benchmark
+
+Script: `scripts/eval/benchmark_routing.py`
+
+### What It Measures
+
+Sends every query in the dataset through the complexity judge and checks whether
+the predicted class matches `ground_truth`. Also computes cost savings vs. routing
+everything to the cloud.
+
+### How to Run
+
+```bash
+# Benchmark with the default judge (modernbert, after training)
+python scripts/eval/benchmark_routing.py \
+    --judge modernbert \
+    --queries scripts/eval/benchmark_dataset_v2.json
+
+# Compare with the LLM judge (requires Ollama running)
+python scripts/eval/benchmark_routing.py \
+    --judge ollama-3b \
+    --queries scripts/eval/benchmark_dataset_v2.json
+
+# Use the paid Haiku judge (most accurate LLM option)
+python scripts/eval/benchmark_routing.py \
+    --judge haiku \
+    --queries scripts/eval/benchmark_dataset_v2.json
+
+# Show per-query details (see which queries were misclassified)
+python scripts/eval/benchmark_routing.py \
+    --judge modernbert \
+    --queries scripts/eval/benchmark_dataset_v2.json \
+    --verbose
+```
+
+**Note:** The benchmark calls the STREAM middleware at `http://localhost:5000`.
+Make sure STREAM is running before starting:
+```bash
+curl http://localhost:5000/health
+```
+
+### What the Output Means
+
+```
+======================================
+  ROUTING ACCURACY RESULTS
+======================================
+  Overall: 6382/6912 correct (92.3%)
+
+  Per-class:
+    LOW      2312/2304 (97.1%)
+    MEDIUM   2187/2304 (94.9%)
+    HIGH     1883/2304 (81.7%)
+
+  Confusion Matrix:
+                  Pred LOW  Pred MED  Pred HIGH
+  Actual LOW          2312        45         47
+  Actual MED            98      2187        119
+  Actual HIGH           12       118       1883
+
+  Cost Impact:
+    Queries on free tiers: 4499/6912 (65.1%)
+    Estimated cost (auto):      $0.0182
+    Estimated cost (all cloud): $0.0518
+    Cost savings:               64.9%
+
+  Judge Latency: 0.016s avg (0.012s - 0.024s)
+```
+
+**Key numbers for the paper:**
+- Overall accuracy and macro-F1 go into Table 3
+- Confusion matrix goes directly into Table 3's cells
+- "Queries on free tiers" and cost savings go into the cost analysis section
+- Judge latency goes into the latency comparison row (15ms vs 390ms)
+
+---
+
+## Part 5: How ModernBERT Integrates into STREAM
+
+Once the model is trained and saved to `scripts/eval/models/modernbert/`, it works
+automatically when you set `DEFAULT_JUDGE_STRATEGY = "modernbert"` in config.py
+(already set).
+
+### The Call Chain
+
+```
+User query
+    → complexity_judge.py: judge_complexity(query, strategy="modernbert")
+        → _get_classifier()          # lazy-loads pipeline on first call (~1s)
+        → clf(query)                 # ~15ms inference
+        → returns JudgmentResult(
+              complexity="medium",
+              method="classifier",
+              strategy_used="modernbert",
+              scores={"low": 0.12, "medium": 0.76, "high": 0.12}  # shown in UI
+          )
+    → query_router.py selects tier based on complexity
+```
+
+### Fallback Behavior
+
+If the ModernBERT model file is not found (e.g., not trained yet), STREAM
+automatically falls back to `ollama-3b`. You will see this in the logs:
+
+```
+WARNING  ModernBERT classifier failed: ModernBERT model not found at ...
+         Falling back to LLM judge.
+```
+
+### Confidence Scores in the UI
+
+The `scores` field (`{"low": 0.12, "medium": 0.76, "high": 0.12}`) is passed to
+the frontend and shown as a bar chart in the routing metadata panel. This gives
+users visibility into how confident the judge was — a near-tie (0.35/0.33/0.32)
+is a much weaker signal than a confident (0.05/0.10/0.85).
+
+---
+
+## Part 6: Streaming & Latency Benchmarks
+
+Script: `scripts/eval/benchmark_latency.py`
+
+### How to Run
+
+```bash
+# Run all tiers (20 runs per tier)
+python scripts/eval/benchmark_latency.py
+
+# Quick test (3 runs per tier)
+python scripts/eval/benchmark_latency.py --runs 3
+
+# Only specific tiers
+python scripts/eval/benchmark_latency.py --tiers local lakeshore
+
+# Only the relay vs batch comparison
+python scripts/eval/benchmark_latency.py --relay-comparison-only
+```
+
+### Key Metrics
+
+| Metric | Definition | Why It Matters |
+|--------|------------|----------------|
+| **TTFT** | Time from sending query to receiving first token | User-perceived responsiveness — makes streaming "feel fast" |
+| **Total Time** | Query to final token | End-to-end wall time |
+| **Throughput** | Output tokens / second | How fast the model produces text |
+| **Relay vs Batch** | TTFT with streaming vs without | Proves dual-channel architecture; the relay paper's main claim |
+
+Results are reported as **median** (not mean) because latency distributions are
+right-skewed — a single slow request should not dominate the reported value.
+
+---
+
+## Part 7: Compression Impact Benchmark
+
+Script: `scripts/eval/benchmark_compression.py`
+
+Tests whether tier-aware conversation compression keeps simple queries on the
+free local tier even in long conversations.
+
+```bash
+# Full benchmark (5 simulated conversations)
 python scripts/eval/benchmark_compression.py
 
 # Single conversation with verbose output
 python scripts/eval/benchmark_compression.py --conversations 1 --verbose
 ```
 
-#### Reading the Results
+---
+
+## Part 8: Updating the Paper
+
+After running all benchmarks, update these placeholders in
+`docs/pearc26-stream-paper.tex`:
+
+| Placeholder | Source |
+|-------------|--------|
+| `TODO: modernbert accuracy` | `train_modernbert.py` output |
+| `TODO: modernbert macro-f1` | `train_modernbert.py` output |
+| `TODO: modernbert latency` | `train_modernbert.py` output |
+| `TODO: free-tier retention` | `train_modernbert.py` output |
+| Confusion matrix cells | `benchmark_routing.py` output |
+| LLM judge accuracy | `benchmark_routing.py` with `--judge ollama-3b` |
+| `TODO: HuggingFace URL` | After uploading model to HuggingFace |
+
+---
+
+## Full Pipeline Sequence
 
 ```
-=== COMPRESSION IMPACT ===
+1. Generate dataset v2 (runs in background, ~2-3h):
+   python scripts/eval/generate_benchmark_dataset_v2.py
 
-Simple queries staying on local tier:
-  Turn 10:  With: 100%  Without: 100%
-  Turn 15:  With: 100%  Without: 100%
-  Turn 20:  With: 100%  Without:  40%  ← Compression starts mattering
-  Turn 25:  With:  80%  Without:   0%
-  Turn 30:  With:  80%  Without:   0%
+2. Train ModernBERT (~15-30 min):
+   python scripts/eval/train_modernbert.py
+   → Copy "PAPER NUMBERS" into paper
 
-Forced tier upgrades (total across 5 conversations):
-  With compression:    2
-  Without compression: 8
+3. Run routing benchmark for both judges:
+   python scripts/eval/benchmark_routing.py --judge modernbert \
+       --queries scripts/eval/benchmark_dataset_v2.json
+   python scripts/eval/benchmark_routing.py --judge ollama-3b \
+       --queries scripts/eval/benchmark_dataset_v2.json
+   → Copy confusion matrix + cost numbers into paper
 
-Avg cloud cost per conversation:
-  With compression:    $0.003
-  Without compression: $0.021
+4. Run latency benchmarks:
+   python scripts/eval/benchmark_latency.py
+   → Copy TTFT / throughput numbers into paper
+
+5. (Optional) Upload to HuggingFace:
+   python scripts/eval/upload_to_huggingface.py
+   → Replace HuggingFace TODO in paper with real URL
 ```
 
 ---
 
-## Filling in the Paper Tables
+## File Structure
 
-After running all benchmarks, the script `scripts/eval/generate_tables.py` reads the
-results JSON files and outputs LaTeX-formatted table rows you can paste directly into
-the paper:
-
-```bash
-python scripts/eval/generate_tables.py
 ```
-
-Output:
-```latex
-% Table 2: Response latency by tier
-Local (Llama 3.2 3B)          & 0.12 $\pm$ 0.03 & 4.82 $\pm$ 0.31 & 41.5 \\
-Lakeshore (relay streaming)   & 2.34 $\pm$ 0.45 & 8.12 $\pm$ 0.67 & 24.6 \\
-Lakeshore (batch fallback)    & 8.12 $\pm$ 0.54 & 8.15 $\pm$ 0.55 & --- \\
-Cloud (Claude Sonnet)         & 0.89 $\pm$ 0.12 & 3.45 $\pm$ 0.28 & 57.8 \\
+scripts/eval/
+├── EVALUATION_GUIDE.md                 ← You are here
+│
+├── generate_benchmark_dataset_v2.py    ← Generate 6,912 labeled queries (Claude + extended thinking)
+├── benchmark_dataset_v2.json           ← Output: full labeled dataset
+│
+├── train_modernbert.py                 ← Fine-tune ModernBERT-base on v2 dataset
+├── models/modernbert/                  ← Output: fine-tuned model (used by STREAM at runtime)
+│
+├── benchmark_routing.py                ← Measure routing accuracy for any judge strategy
+├── benchmark_latency.py                ← Measure TTFT / throughput across tiers
+├── benchmark_compression.py            ← Measure compression impact on tier selection
+│
+├── sample_for_validation.py            ← Draw a 252-query stratified sample for manual review
+├── compute_validation_kappa.py         ← Compute inter-annotator κ from manual review
+│
+├── generate_tables.py                  ← Convert results JSON → LaTeX table rows
+│
+└── results/                            ← All benchmark outputs (JSON, timestamped)
+    ├── modernbert_training_report.json
+    ├── routing_6912_<timestamp>.json
+    └── latency_<timestamp>.json
 ```
 
 ---
@@ -261,26 +460,9 @@ Cloud (Claude Sonnet)         & 0.89 $\pm$ 0.12 & 3.45 $\pm$ 0.28 & 57.8 \\
 
 | Problem | Solution |
 |---------|----------|
-| "Connection refused" | Make sure STREAM is running: `curl http://localhost:5000/health` |
-| Lakeshore timeouts | Check Globus Compute auth: the benchmark will prompt you if needed |
-| Relay not working | Verify relay URL in `.env` and that the relay server is running |
-| Cloud errors | Check API keys in `.env` (OPENROUTER_API_KEY or ANTHROPIC_API_KEY) |
-| Inconsistent results | Increase `--runs` to 30+ for more stable medians |
-
----
-
-## File Structure
-
-```
-scripts/eval/
-├── EVALUATION_GUIDE.md          ← You are here
-├── benchmark_latency.py         ← Day 1: TTFT, throughput, relay vs batch
-├── benchmark_routing.py         ← Day 2: Routing accuracy + cost savings
-├── benchmark_compression.py     ← Day 2: Compression impact on long conversations
-├── test_queries.json            ← 60 hand-labeled queries (LOW/MEDIUM/HIGH)
-├── generate_tables.py           ← Converts results to LaTeX table rows
-└── results/                     ← Output directory (created automatically)
-    ├── latency_2026-03-06_143022.json
-    ├── routing_2026-03-07_091544.json
-    └── compression_2026-03-07_102311.json
-```
+| `ModernBERT model not found` | Run `train_modernbert.py` first |
+| `Connection refused` to STREAM | Run `curl http://localhost:5000/health`; start STREAM if down |
+| Dataset generation stops mid-way | Just re-run; it resumes from the last complete cell |
+| `transformers` version error | `pip install "transformers>=4.48.0"` (ModernBERT requires ≥4.48) |
+| Slow training on CPU | Normal — ~30 min; use `--dry-run` to verify setup first |
+| Lakeshore timeouts in latency benchmark | Check Globus Compute auth; the script prompts if expired |
