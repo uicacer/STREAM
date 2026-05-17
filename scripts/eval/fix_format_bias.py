@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Fix format-proxy bias in benchmark_dataset_v2.json.
+Fix format-proxy bias in stream_routing_benchmark.json.
 
 Problem: 91% of "What is X?" queries are LOW (391 LOW, 19 MEDIUM, 20 HIGH).
 A classifier could learn "starts with What is" → LOW rather than reasoning depth.
@@ -31,8 +31,8 @@ from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 
-DATASET_PATH = Path("scripts/eval/benchmark_dataset_v2.json")
-CONSISTENCY_PATH = Path("scripts/eval/consistency_report_v2.json")
+DATASET_PATH = Path("scripts/eval/stream_routing_benchmark.json")
+CONSISTENCY_PATH = Path("scripts/eval/consistency_report.json")
 
 LABELING_MODEL = "claude-sonnet-4-6"
 CONSISTENCY_MODEL = "gpt-4o-mini"
@@ -443,7 +443,7 @@ def validate_format_decoupling(queries: list[dict]) -> bool:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Fix format-proxy bias in benchmark_dataset_v2.json"
+        description="Fix format-proxy bias in stream_routing_benchmark.json"
     )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--skip-consistency", action="store_true")

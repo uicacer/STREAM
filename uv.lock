@@ -4229,6 +4229,8 @@ dev = [
 dev = [
     { name = "accelerate" },
     { name = "datasets" },
+    { name = "huggingface-hub" },
+    { name = "pre-commit" },
     { name = "scikit-learn" },
     { name = "transformers" },
 ]
@@ -4278,6 +4280,8 @@ provides-extras = ["desktop", "dev"]
 dev = [
     { name = "accelerate", specifier = ">=1.13.0" },
     { name = "datasets", specifier = ">=4.8.5" },
+    { name = "huggingface-hub", extras = ["cli"], specifier = ">=0.27.0" },
+    { name = "pre-commit", specifier = ">=4.5.1" },
     { name = "scikit-learn", specifier = ">=1.8.0" },
     { name = "transformers", specifier = ">=5.8.1" },
 ]

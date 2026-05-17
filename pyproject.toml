@@ -171,6 +171,8 @@ line-ending = "lf"
 dev = [
     "accelerate>=1.13.0",
     "datasets>=4.8.5",
+    "huggingface-hub[cli]>=0.27.0",
+    "pre-commit>=4.5.1",
     "scikit-learn>=1.8.0",
     "transformers>=5.8.1",
 ]

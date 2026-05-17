@@ -8,7 +8,7 @@ dependency, replacing the 390ms Llama 3.2 3B LLM judge.
 
 Usage:
     python scripts/eval/train_modernbert.py
-    python scripts/eval/train_modernbert.py --dataset scripts/eval/benchmark_dataset_v2.json
+    python scripts/eval/train_modernbert.py --dataset scripts/eval/stream_routing_benchmark.json
     python scripts/eval/train_modernbert.py --dry-run   # sanity check, 10 examples
 
 Output:
@@ -27,7 +27,7 @@ from pathlib import Path
 
 import numpy as np
 
-DATASET_PATH = Path("scripts/eval/benchmark_dataset_v2.json")
+DATASET_PATH = Path("scripts/eval/stream_routing_benchmark.json")
 OUTPUT_DIR = Path("scripts/eval/models/modernbert")
 REPORT_PATH = Path("scripts/eval/results/modernbert_training_report.json")
 
@@ -132,7 +132,7 @@ def main():
     dataset_path = Path(args.dataset)
     if not dataset_path.exists():
         print(f"Dataset not found: {dataset_path}")
-        print("Run generate_benchmark_dataset_v2.py first.")
+        print("Run generate_benchmark_dataset.py first.")
         return
 
     print(f"Loading dataset from {dataset_path}")

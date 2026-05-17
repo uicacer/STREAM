@@ -1,24 +1,25 @@
 {
   "primary_model": "claude-sonnet-4-6",
   "consistency_model": "gpt-4o-mini",
-  "n_checked": 341,
-  "n_invalid": 4,
-  "agreement": 0.7889,
-  "cohens_kappa": 0.6834,
+  "rubric_version": "v2 (reasoning-depth)",
+  "n_checked": 342,
+  "n_invalid": 3,
+  "agreement": 0.7778,
+  "cohens_kappa": 0.6669,
   "interpretation": "substantial",
   "per_class": {
     "LOW": {
-      "n": 114,
-      "agreement": 0.7982456140350878
+      "n": 118,
+      "agreement": 0.8051
     },
     "MEDIUM": {
-      "n": 109,
-      "agreement": 0.8073394495412844
+      "n": 112,
+      "agreement": 0.625
     },
     "HIGH": {
-      "n": 118,
-      "agreement": 0.7627118644067796
+      "n": 112,
+      "agreement": 0.9018
     }
   },
-  "timestamp": "2026-05-16T15:36:02.833065+00:00"
+  "timestamp": "2026-05-17T20:33:36.112940+00:00"
 }

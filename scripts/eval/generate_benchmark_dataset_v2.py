@@ -13,8 +13,8 @@ Usage:
     python generate_benchmark_dataset_v2.py [--dry-run] [--cells N] [--check-only]
 
 Output:
-    scripts/eval/benchmark_dataset_v2.json   — full dataset
-    scripts/eval/consistency_report_v2.json  — cross-model agreement report
+    scripts/eval/stream_routing_benchmark.json   — full dataset
+    scripts/eval/consistency_report.json  — cross-model agreement report
 """
 
 import argparse
@@ -35,8 +35,8 @@ def utcnow() -> str:
 # Configuration
 # ---------------------------------------------------------------------------
 
-OUTPUT_FILE = Path(__file__).parent / "benchmark_dataset_v2.json"
-CONSISTENCY_FILE = Path(__file__).parent / "consistency_report_v2.json"
+OUTPUT_FILE = Path(__file__).parent / "stream_routing_benchmark.json"
+CONSISTENCY_FILE = Path(__file__).parent / "consistency_report.json"
 
 DOMAINS = [
     "general_knowledge",

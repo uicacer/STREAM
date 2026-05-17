@@ -76,7 +76,7 @@ The v2 dataset uses the reasoning-depth rubric and extended thinking to prevent 
 
 ### How Dataset v2 is Generated
 
-Script: `scripts/eval/generate_benchmark_dataset_v2.py`
+Script: `scripts/eval/generate_benchmark_dataset.py`
 
 The script calls Claude Sonnet 4.6 with **extended thinking enabled**:
 
@@ -122,14 +122,14 @@ the rubric is still leaking format as a signal.
 
 ```bash
 # Generate full dataset (takes ~2-3 hours, costs ~$5-10 in API credits)
-python scripts/eval/generate_benchmark_dataset_v2.py
+python scripts/eval/generate_benchmark_dataset.py
 
 # Check a partially-generated or existing dataset for format bias
-python scripts/eval/generate_benchmark_dataset_v2.py --validate-only
+python scripts/eval/generate_benchmark_dataset.py --validate-only
 
 # Use a specific dataset path
-python scripts/eval/generate_benchmark_dataset_v2.py \
-    --dataset scripts/eval/benchmark_dataset_v2.json
+python scripts/eval/generate_benchmark_dataset.py \
+    --dataset scripts/eval/stream_routing_benchmark.json
 ```
 
 Progress is printed every 30 queries per cell. The script appends to the existing file,
@@ -138,7 +138,7 @@ domain-complexity cells are already complete).
 
 ### Output
 
-`scripts/eval/benchmark_dataset_v2.json` — the full 6,912-query dataset.
+`scripts/eval/stream_routing_benchmark.json` — the full 6,912-query dataset.
 
 ---
 
@@ -148,7 +148,7 @@ Script: `scripts/eval/train_modernbert.py`
 
 ### What It Does
 
-1. Loads `benchmark_dataset_v2.json`
+1. Loads `stream_routing_benchmark.json`
 2. Splits 70% train / 15% val / 15% test (stratified by domain+complexity, seed=42)
 3. Fine-tunes `answerdotai/ModernBERT-base` (149M params, 2T token pretrain, Dec 2024)
 4. Evaluates on test set: accuracy, macro-F1, per-class F1
@@ -177,7 +177,7 @@ python scripts/eval/train_modernbert.py --dry-run
 
 # Custom dataset path
 python scripts/eval/train_modernbert.py \
-    --dataset scripts/eval/benchmark_dataset_v2.json
+    --dataset scripts/eval/stream_routing_benchmark.json
 ```
 
 **Prerequisites:**
@@ -229,22 +229,22 @@ everything to the cloud.
 # Benchmark with the default judge (modernbert, after training)
 python scripts/eval/benchmark_routing.py \
     --judge modernbert \
-    --queries scripts/eval/benchmark_dataset_v2.json
+    --queries scripts/eval/stream_routing_benchmark.json
 
 # Compare with the LLM judge (requires Ollama running)
 python scripts/eval/benchmark_routing.py \
     --judge ollama-3b \
-    --queries scripts/eval/benchmark_dataset_v2.json
+    --queries scripts/eval/stream_routing_benchmark.json
 
 # Use the paid Haiku judge (most accurate LLM option)
 python scripts/eval/benchmark_routing.py \
     --judge haiku \
-    --queries scripts/eval/benchmark_dataset_v2.json
+    --queries scripts/eval/stream_routing_benchmark.json
 
 # Show per-query details (see which queries were misclassified)
 python scripts/eval/benchmark_routing.py \
     --judge modernbert \
-    --queries scripts/eval/benchmark_dataset_v2.json \
+    --queries scripts/eval/stream_routing_benchmark.json \
     --verbose
 ```
 
@@ -403,7 +403,7 @@ After running all benchmarks, update these placeholders in
 
 ```
 1. Generate dataset v2 (runs in background, ~2-3h):
-   python scripts/eval/generate_benchmark_dataset_v2.py
+   python scripts/eval/generate_benchmark_dataset.py
 
 2. Train ModernBERT (~15-30 min):
    python scripts/eval/train_modernbert.py
@@ -411,9 +411,9 @@ After running all benchmarks, update these placeholders in
 
 3. Run routing benchmark for both judges:
    python scripts/eval/benchmark_routing.py --judge modernbert \
-       --queries scripts/eval/benchmark_dataset_v2.json
+       --queries scripts/eval/stream_routing_benchmark.json
    python scripts/eval/benchmark_routing.py --judge ollama-3b \
-       --queries scripts/eval/benchmark_dataset_v2.json
+       --queries scripts/eval/stream_routing_benchmark.json
    → Copy confusion matrix + cost numbers into paper
 
 4. Run latency benchmarks:
@@ -433,8 +433,8 @@ After running all benchmarks, update these placeholders in
 scripts/eval/
 ├── EVALUATION_GUIDE.md                 ← You are here
 │
-├── generate_benchmark_dataset_v2.py    ← Generate 6,912 labeled queries (Claude + extended thinking)
-├── benchmark_dataset_v2.json           ← Output: full labeled dataset
+├── generate_benchmark_dataset.py    ← Generate 6,912 labeled queries (Claude + extended thinking)
+├── stream_routing_benchmark.json           ← Output: full labeled dataset
 │
 ├── train_modernbert.py                 ← Fine-tune ModernBERT-base on v2 dataset
 ├── models/modernbert/                  ← Output: fine-tuned model (used by STREAM at runtime)
