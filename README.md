@@ -102,6 +102,13 @@ The UI is available at `http://localhost:5000`.
 > Anas Nassar, Steve Mohr, Leonard Apanasevich, Himanshu Sharma
 > PEARC '26: Practice and Experience in Advanced Research Computing, July 2026
 
+## Datasets and Models
+
+The routing benchmark dataset and fine-tuned complexity classifier are published on Hugging Face:
+
+- **Dataset**: [anasnassar/llm-query-complexity-benchmark](https://huggingface.co/datasets/anasnassar/llm-query-complexity-benchmark) — labeled queries across 6 domains (general knowledge, science, mathematics, humanities, computer science, research computing), LOW/MEDIUM/HIGH complexity classes
+- **Classifier**: [anasnassar/llm-query-complexity-classifier](https://huggingface.co/anasnassar/llm-query-complexity-classifier) — ModernBERT-base fine-tuned on LLM-generated labels for local, privacy-preserving query routing
+
 ## License
 
 Apache License 2.0. See [LICENSE](LICENSE) for details.
