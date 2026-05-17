@@ -135,3 +135,5 @@ tests/figures/
 # Benchmark datasets (large, published on HuggingFace)
 scripts/eval/benchmark_dataset*.json
 scripts/eval/stream_routing_benchmark.json
+scripts/eval/stream_routing_benchmark.jsonl
+scripts/eval/hf_dataset_card.md
