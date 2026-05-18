@@ -362,6 +362,43 @@ def main():
     print("\n--- ModernBERT Classifier Evaluation ---\n")
     print(generate_classifier_table(results_dir))
 
+    # Judge comparison table (ModernBERT vs LLM on same queries)
+    comparison_files = sorted(results_dir.glob("judge_comparison_*.json"), reverse=True)
+    if comparison_files:
+        print(f"\n--- Judge Comparison Table (from {comparison_files[0].name}) ---\n")
+        with open(comparison_files[0]) as f:
+            cmp = json.load(f)
+        mb = cmp["modernbert"]
+        llm = cmp["llm"]
+        comp = cmp["comparison"]
+        print("% Judge comparison on same test set")
+        print(
+            "% Columns: Judge & Accuracy & Macro-F1 & LOW F1 & MED F1 & HIGH F1 & Latency p50 (ms) \\\\"
+        )
+        print(
+            f"{'ModernBERT':<20s} & "
+            f"{mb['accuracy']:.3f} & "
+            f"{mb['macro_f1']:.3f} & "
+            f"{mb['per_class']['LOW']['f1']:.3f} & "
+            f"{mb['per_class']['MEDIUM']['f1']:.3f} & "
+            f"{mb['per_class']['HIGH']['f1']:.3f} & "
+            f"{mb['latency_ms']['p50_ms']} \\\\"
+        )
+        print(
+            f"{cmp['llm_judge'] + ' (LLM)':<20s} & "
+            f"{llm['accuracy']:.3f} & "
+            f"{llm['macro_f1']:.3f} & "
+            f"{llm['per_class']['LOW']['f1']:.3f} & "
+            f"{llm['per_class']['MEDIUM']['f1']:.3f} & "
+            f"{llm['per_class']['HIGH']['f1']:.3f} & "
+            f"{llm['latency_ms']['p50_ms']} \\\\"
+        )
+        print(f"% Latency speedup: {comp['latency_speedup_x']}×")
+        print(f"% Macro-F1 delta (ModernBERT − LLM): {comp['macro_f1_delta']:+.3f}")
+        print(f"% Judge agreement: {comp['judge_agreement_pct']:.1f}%")
+    else:
+        print("\n  No judge comparison results found. Run compare_judges.py first.")
+
     print()
 
 
