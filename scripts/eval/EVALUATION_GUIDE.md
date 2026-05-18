@@ -142,19 +142,28 @@ domain-complexity cells are already complete).
 
 ---
 
-## Part 3: Training ModernBERT
+## Part 3: Training and Evaluating ModernBERT
 
 Script: `scripts/eval/train_modernbert.py`
 
-### What It Does
+### The Data Leakage Problem
 
-1. Loads `stream_routing_benchmark.json`
-2. Splits 70% train / 15% val / 15% test (stratified by domain+complexity, seed=42)
-3. Fine-tunes `answerdotai/ModernBERT-base` (149M params, 2T token pretrain, Dec 2024)
-4. Evaluates on test set: accuracy, macro-F1, per-class F1
-5. Measures single-query CPU latency (p50/p95/p99 over 200 queries)
-6. Saves model to `scripts/eval/models/modernbert/`
-7. Prints exact numbers to paste into the paper
+A naive random 70/15/15 split on LLM-generated data is biased. Because Claude
+generated 384 queries per domain-complexity cell, near-duplicate phrasings often
+end up on both sides of the split. The classifier memorizes phrasing patterns
+rather than generalizing, producing inflated accuracy (~99%).
+
+We address this with three evaluation strategies of increasing rigor:
+
+| Strategy | What it tests | Expected accuracy |
+|----------|--------------|------------------|
+| Random split | Baseline; may be inflated | ~99% (inflated) |
+| Domain-held-out CV | Cross-domain generalization | More conservative |
+| Similarity-aware split | Deduplication before splitting | Conservative |
+| Real-world (Arena) | Out-of-distribution generalization | Most rigorous |
+
+Report the **domain-held-out** and **real-world** numbers in the paper. The
+random split is included for comparison only with a caveat.
 
 ### Training Hyperparameters
 
@@ -164,18 +173,59 @@ Script: `scripts/eval/train_modernbert.py`
 | Batch size | 32 | Fits on CPU/MPS/GPU comfortably |
 | Learning rate | 2e-5 | Standard for BERT-family fine-tuning |
 | Max length | 128 tokens | Covers ~95% of queries; longer truncated |
-| Metric for best model | macro-F1 | Balanced across all three classes (not biased toward majority) |
+| Metric for best model | macro-F1 | Balanced across all three classes |
 
-### How to Run
+### Eval Mode 1: Random Split (baseline)
 
 ```bash
-# Full training (requires dataset v2 to exist)
 python scripts/eval/train_modernbert.py
+# or explicitly:
+python scripts/eval/train_modernbert.py --eval-mode random
+```
 
+Standard 70/15/15 split. Fast to run but inflated due to near-duplicate
+LLM-generated queries in both train and test.
+
+Output: `results/modernbert_training_report.json`
+
+### Eval Mode 2: Domain-Held-Out Cross-Validation
+
+```bash
+python scripts/eval/train_modernbert.py --eval-mode domain-holdout
+```
+
+6-fold CV: each fold trains on 5 domains (~5,760 queries) and tests on the
+held-out 6th domain (~1,152 queries). Because the test domain's queries were
+never seen during training, this measures true cross-domain generalization.
+Takes ~6× longer than a single run (~2-3 hours on CPU).
+
+Output: `results/modernbert_domain_holdout_report.json`
+Reports mean ± std across 6 folds.
+
+### Eval Mode 3: Similarity-Aware Split
+
+```bash
+# Requires sentence-transformers: pip install sentence-transformers
+python scripts/eval/train_modernbert.py --eval-mode similarity-split
+```
+
+Embeds all queries with `all-MiniLM-L6-v2`, groups near-duplicates (cosine
+similarity > 0.90) into connected components, then assigns whole components
+to either train or test — never split. This prevents near-identical
+query phrasings from appearing on both sides.
+
+Output: `results/modernbert_similarity_split_report.json`
+
+### Common Options
+
+```bash
 # Quick sanity check (30 examples, 1 epoch)
 python scripts/eval/train_modernbert.py --dry-run
 
-# Custom dataset path
+# Load saved model, skip retraining
+python scripts/eval/train_modernbert.py --eval-only
+
+# Custom dataset
 python scripts/eval/train_modernbert.py \
     --dataset scripts/eval/stream_routing_benchmark.json
 ```
@@ -183,37 +233,59 @@ python scripts/eval/train_modernbert.py \
 **Prerequisites:**
 ```bash
 pip install transformers torch datasets scikit-learn accelerate
+# For similarity-split only:
+pip install sentence-transformers
 ```
 
-Training takes ~15-30 minutes on CPU (Apple M-series), or ~5 minutes with a GPU.
-
-### Output
+### Output Files
 
 - `scripts/eval/models/modernbert/` — fine-tuned model + tokenizer (used by STREAM at runtime)
-- `scripts/eval/results/modernbert_training_report.json` — all metrics
-
-### Reading the Terminal Output
-
-At the end, the script prints a "PAPER NUMBERS" block:
-
-```
-============================================================
-PAPER NUMBERS (paste into pearc26-stream-paper.tex):
-============================================================
-  ModernBERT accuracy:          92.3%
-  ModernBERT macro-F1:          0.921
-  ModernBERT LOW F1:            0.948
-  ModernBERT MEDIUM F1:         0.892
-  ModernBERT HIGH F1:           0.923
-  ModernBERT latency p50:       14.2 ms
-  Free-tier retention:          97.1%
-```
-
-Copy these directly into the paper's TODO placeholders.
+- `scripts/eval/results/modernbert_training_report.json` — random split
+- `scripts/eval/results/modernbert_domain_holdout_report.json` — 6-fold CV
+- `scripts/eval/results/modernbert_similarity_split_report.json` — similarity split
 
 ---
 
-## Part 4: Routing Accuracy Benchmark
+## Part 4: Real-World Test Set (LMSYS Chatbot Arena)
+
+Scripts: `scripts/eval/build_realworld_testset.py` and `scripts/eval/eval_on_realworld.py`
+
+### Why a Real-World Test Set?
+
+The training data was generated by Claude — all queries were written by an LLM.
+Even with domain-held-out CV, the test set still comes from the same LLM-generated
+distribution. The real-world test set uses genuine user prompts from the LMSYS
+Chatbot Arena (1M+ conversations), labeled by Claude with the same rubric.
+
+This is the **most rigorous** evaluation: it tests whether the classifier
+generalizes to real user behavior, not just to different LLM-generated phrasings.
+
+### Step 1: Build the test set
+
+```bash
+# Build 400-query real-world test set (~$0.12 in API credits)
+python scripts/eval/build_realworld_testset.py
+
+# Dry run (no API calls, fake labels)
+python scripts/eval/build_realworld_testset.py --dry-run
+
+# Custom size
+python scripts/eval/build_realworld_testset.py --n 200
+```
+
+Output: `scripts/eval/realworld_testset.json`
+
+### Step 2: Evaluate the trained model
+
+```bash
+python scripts/eval/eval_on_realworld.py
+```
+
+Output: `scripts/eval/results/modernbert_realworld_report.json`
+
+---
+
+## Part 5: Routing Accuracy Benchmark
 
 Script: `scripts/eval/benchmark_routing.py`
 
@@ -290,7 +362,7 @@ curl http://localhost:5000/health
 
 ---
 
-## Part 5: How ModernBERT Integrates into STREAM
+## Part 6: How ModernBERT Integrates into STREAM
 
 Once the model is trained and saved to `scripts/eval/models/modernbert/`, it works
 automatically when you set `DEFAULT_JUDGE_STRATEGY = "modernbert"` in config.py
@@ -331,7 +403,7 @@ is a much weaker signal than a confident (0.05/0.10/0.85).
 
 ---
 
-## Part 6: Streaming & Latency Benchmarks
+## Part 7: Streaming & Latency Benchmarks
 
 Script: `scripts/eval/benchmark_latency.py`
 
@@ -365,7 +437,7 @@ right-skewed — a single slow request should not dominate the reported value.
 
 ---
 
-## Part 7: Compression Impact Benchmark
+## Part 8: Compression Impact Benchmark
 
 Script: `scripts/eval/benchmark_compression.py`
 
@@ -382,7 +454,7 @@ python scripts/eval/benchmark_compression.py --conversations 1 --verbose
 
 ---
 
-## Part 8: Updating the Paper
+## Part 9: Updating the Paper
 
 After running all benchmarks, update these placeholders in
 `docs/pearc26-stream-paper.tex`:
@@ -402,27 +474,37 @@ After running all benchmarks, update these placeholders in
 ## Full Pipeline Sequence
 
 ```
-1. Generate dataset v2 (runs in background, ~2-3h):
+1. Generate dataset (runs in background, ~2-3h):
    python scripts/eval/generate_benchmark_dataset.py
 
-2. Train ModernBERT (~15-30 min):
-   python scripts/eval/train_modernbert.py
-   → Copy "PAPER NUMBERS" into paper
+2. Train ModernBERT — random split baseline (~15-30 min):
+   python scripts/eval/train_modernbert.py --eval-mode random
 
-3. Run routing benchmark for both judges:
+3. Rigorous evaluation — domain-held-out 6-fold CV (~3h on CPU):
+   python scripts/eval/train_modernbert.py --eval-mode domain-holdout
+
+4. Rigorous evaluation — similarity-aware split (~30 min):
+   pip install sentence-transformers
+   python scripts/eval/train_modernbert.py --eval-mode similarity-split
+
+5. Real-world test set (LMSYS Chatbot Arena):
+   python scripts/eval/build_realworld_testset.py   # ~$0.12 API cost
+   python scripts/eval/eval_on_realworld.py
+
+6. Run routing benchmark for both judges:
    python scripts/eval/benchmark_routing.py --judge modernbert \
        --queries scripts/eval/stream_routing_benchmark.json
    python scripts/eval/benchmark_routing.py --judge ollama-3b \
        --queries scripts/eval/stream_routing_benchmark.json
    → Copy confusion matrix + cost numbers into paper
 
-4. Run latency benchmarks:
+7. Run latency benchmarks:
    python scripts/eval/benchmark_latency.py
    → Copy TTFT / throughput numbers into paper
 
-5. (Optional) Upload to HuggingFace:
-   python scripts/eval/upload_to_huggingface.py
-   → Replace HuggingFace TODO in paper with real URL
+8. Generate all LaTeX tables:
+   python scripts/eval/generate_tables.py
+   → Reads all four eval reports + routing + latency → prints LaTeX rows
 ```
 
 ---
@@ -431,25 +513,33 @@ After running all benchmarks, update these placeholders in
 
 ```
 scripts/eval/
-├── EVALUATION_GUIDE.md                 ← You are here
+├── EVALUATION_GUIDE.md                          ← You are here
 │
-├── generate_benchmark_dataset.py    ← Generate 6,912 labeled queries (Claude + extended thinking)
-├── stream_routing_benchmark.json           ← Output: full labeled dataset
+├── generate_benchmark_dataset.py                ← Generate 6,912 labeled queries
+├── stream_routing_benchmark.json                ← Output: full labeled dataset (gitignored)
 │
-├── train_modernbert.py                 ← Fine-tune ModernBERT-base on v2 dataset
-├── models/modernbert/                  ← Output: fine-tuned model (used by STREAM at runtime)
+├── train_modernbert.py                          ← Train ModernBERT + three eval modes
+│     --eval-mode random                         ←   70/15/15 random split (baseline)
+│     --eval-mode domain-holdout                 ←   6-fold CV (rigorous)
+│     --eval-mode similarity-split               ←   semantic dedup split (rigorous)
+├── build_realworld_testset.py                   ← Download + label LMSYS Arena queries
+├── eval_on_realworld.py                         ← Evaluate on real-world test set
 │
-├── benchmark_routing.py                ← Measure routing accuracy for any judge strategy
-├── benchmark_latency.py                ← Measure TTFT / throughput across tiers
-├── benchmark_compression.py            ← Measure compression impact on tier selection
+├── models/modernbert/                           ← Trained model weights (gitignored)
 │
-├── sample_for_validation.py            ← Draw a 252-query stratified sample for manual review
-├── compute_validation_kappa.py         ← Compute inter-annotator κ from manual review
+├── benchmark_routing.py                         ← Routing accuracy for any judge
+├── benchmark_latency.py                         ← TTFT / throughput across tiers
+├── benchmark_compression.py                     ← Compression impact on tier selection
 │
-├── generate_tables.py                  ← Convert results JSON → LaTeX table rows
+├── compute_validation_kappa.py                  ← Inter-annotator κ
 │
-└── results/                            ← All benchmark outputs (JSON, timestamped)
-    ├── modernbert_training_report.json
+├── generate_tables.py                           ← All results → LaTeX table rows
+│
+└── results/                                     ← All benchmark outputs (JSON)
+    ├── modernbert_training_report.json          ← random split
+    ├── modernbert_domain_holdout_report.json    ← 6-fold CV
+    ├── modernbert_similarity_split_report.json  ← similarity-aware split
+    ├── modernbert_realworld_report.json         ← LMSYS Arena
     ├── routing_6912_<timestamp>.json
     └── latency_<timestamp>.json
 ```
@@ -465,4 +555,7 @@ scripts/eval/
 | Dataset generation stops mid-way | Just re-run; it resumes from the last complete cell |
 | `transformers` version error | `pip install "transformers>=4.48.0"` (ModernBERT requires ≥4.48) |
 | Slow training on CPU | Normal — ~30 min; use `--dry-run` to verify setup first |
+| `sentence-transformers` not found | `pip install sentence-transformers` (similarity-split only) |
+| `ANTHROPIC_API_KEY not set` | Set env var for `build_realworld_testset.py` |
+| `lmsys/chatbot_arena_conversations` gated | Accept terms on HuggingFace, then `huggingface-cli login` |
 | Lakeshore timeouts in latency benchmark | Check Globus Compute auth; the script prompts if expired |

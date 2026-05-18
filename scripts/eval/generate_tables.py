@@ -227,6 +227,84 @@ def generate_compression_table(data: dict) -> str:
 # ---------------------------------------------------------------------------
 
 
+def generate_classifier_table(results_dir: Path) -> str:
+    """Generate LaTeX rows for the ModernBERT evaluation table.
+
+    Reads three reports (random, domain-holdout, similarity-split, realworld)
+    and formats them for the classifier comparison table in the paper.
+    """
+    report_files = {
+        "random": results_dir / "modernbert_training_report.json",
+        "domain-holdout": results_dir / "modernbert_domain_holdout_report.json",
+        "similarity-split": results_dir / "modernbert_similarity_split_report.json",
+        "realworld": results_dir / "modernbert_realworld_report.json",
+    }
+
+    labels = {
+        "random": "Random split",
+        "domain-holdout": "Domain-held-out CV",
+        "similarity-split": "Similarity-aware split",
+        "realworld": "Real-world (Arena)",
+    }
+
+    lines = [
+        "% ModernBERT classifier evaluation (Table: Evaluation Rigor Comparison)",
+        "% Columns: Eval Strategy & Accuracy & Macro-F1 & LOW F1 & MED F1 & HIGH F1 & Latency (ms) \\\\",
+        "",
+    ]
+
+    for key, path in report_files.items():
+        if not path.exists():
+            lines.append(f"% {labels[key]}: not found — run the corresponding script first")
+            continue
+        with open(path) as f:
+            data = json.load(f)
+
+        if key == "domain-holdout":
+            acc = data.get("mean_accuracy", 0)
+            acc_std = data.get("std_accuracy", 0)
+            f1 = data.get("mean_macro_f1", 0)
+            f1_std = data.get("std_macro_f1", 0)
+            # Per-class: average over folds
+            fold_pc = [fold.get("per_class", {}) for fold in data.get("folds", [])]
+            per_class = {}
+            for cls in ["LOW", "MEDIUM", "HIGH"]:
+                per_class[cls] = round(
+                    sum(f.get(cls, {}).get("f1", 0) for f in fold_pc) / max(len(fold_pc), 1), 3
+                )
+            lat = "--"
+            lines.append(
+                f"{labels[key]:<30s} & "
+                f"{acc:.3f} $\\pm$ {acc_std:.3f} & "
+                f"{f1:.3f} $\\pm$ {f1_std:.3f} & "
+                f"{per_class.get('LOW', 0):.3f} & "
+                f"{per_class.get('MEDIUM', 0):.3f} & "
+                f"{per_class.get('HIGH', 0):.3f} & "
+                f"{lat} \\\\"
+            )
+        else:
+            acc = data.get("accuracy", 0)
+            f1 = data.get("macro_f1", 0)
+            pc = data.get("per_class", {})
+            lat_ms = data.get("latency_ms", {}).get("p50_ms", "--")
+            lines.append(
+                f"{labels[key]:<30s} & "
+                f"{acc:.3f} & "
+                f"{f1:.3f} & "
+                f"{pc.get('LOW', {}).get('f1', 0):.3f} & "
+                f"{pc.get('MEDIUM', {}).get('f1', 0):.3f} & "
+                f"{pc.get('HIGH', {}).get('f1', 0):.3f} & "
+                f"{lat_ms} \\\\"
+            )
+
+    lines.append("")
+    lines.append(
+        "% Note: Random split may be inflated due to near-duplicate LLM-generated queries."
+    )
+    lines.append("% Domain-holdout and real-world numbers are the rigorous reported metrics.")
+    return "\n".join(lines)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Generate LaTeX tables from STREAM benchmark results"
@@ -279,6 +357,10 @@ def main():
         print(generate_compression_table(data))
     else:
         print("\n  No compression results found. Run benchmark_compression.py first.")
+
+    # ModernBERT classifier evaluation table
+    print("\n--- ModernBERT Classifier Evaluation ---\n")
+    print(generate_classifier_table(results_dir))
 
     print()
 

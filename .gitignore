@@ -137,3 +137,9 @@ scripts/eval/benchmark_dataset*.json
 scripts/eval/stream_routing_benchmark.json
 scripts/eval/stream_routing_benchmark.jsonl
 scripts/eval/hf_dataset_card.md
+
+# Real-world test set (generated, not committed)
+scripts/eval/realworld_testset.json
+
+# Trained model weights (large, published on HuggingFace)
+scripts/eval/models/
