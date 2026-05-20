@@ -110,15 +110,14 @@ docs/*.tex
 docs/*.bib
 docs/image/
 
-# Paper figures (committed — referenced by paper)
-!docs/figure1_theta_curve.pdf
-!docs/figure1_theta_curve.png
-!docs/figure2_budget_routing.pdf
-!docs/figure2_budget_routing.png
-
-# Paper source (committed)
-!docs/pearc26-stream-paper.tex
-!docs/references.bib
+# Paper figures, source, and bibliography (local only — not in public repo)
+docs/figure1_theta_curve.pdf
+docs/figure1_theta_curve.png
+docs/figure2_budget_routing.pdf
+docs/figure2_budget_routing.png
+docs/convergence_study.png
+docs/pearc26-stream-paper.tex
+docs/references.bib
 
 # Keep compiled paper PDF excluded (submit directly, not in repo)
 docs/pearc26-stream-paper.pdf
