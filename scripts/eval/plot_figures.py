@@ -226,7 +226,7 @@ def plot_figure2(sim: dict, out_dir: Path, show: bool) -> None:
     ax_bot.annotate(
         f"+{overshoot_pct:.0f}%",
         xy=(overshoot_t, max(f_cum)),
-        xytext=(overshoot_t - 0.18, max(f_cum) + 0.05),
+        xytext=(overshoot_t - 0.22, max(f_cum) + 0.12),
         arrowprops={"arrowstyle": "->", "color": "#ff7f0e", "lw": 0.8},
         fontsize=6.5,
         color="#ff7f0e",
@@ -236,7 +236,7 @@ def plot_figure2(sim: dict, out_dir: Path, show: bool) -> None:
     ax_bot.set_xlabel("Budget period", fontsize=8)
     ax_bot.tick_params(labelsize=7)
     ax_bot.set_xlim(0, 1)
-    ax_bot.set_ylim(0, 1.18)
+    ax_bot.set_ylim(0, 1.60)
     ax_bot.xaxis.set_major_formatter(mticker.PercentFormatter(xmax=1.0, decimals=0))
     ax_bot.yaxis.set_major_formatter(mticker.PercentFormatter(xmax=1.0, decimals=0))
     ax_bot.legend(fontsize=6.5, loc="upper left", framealpha=0.9, handlelength=1.6)

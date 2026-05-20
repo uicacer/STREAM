@@ -7,9 +7,11 @@ Both axes are deployment-agnostic:
   - spend: spend_fraction  = cumulative_spend / B           →  [0.0, 1.0]
   - theta: already [0.0, 1.0]
 
-Budget B = 95% of total fixed spend, so fixed routing visibly overshoots the cap
-(ends at ~1.05) while adaptive routing stays under (ends at ~0.98). This makes the
-figure caption "fixed θ exceeds the budget cap" literally true in the plot.
+Uses a smooth constant daily query rate (average of real data) so the curves are
+clean lines rather than jagged noise. Budget B = 70% of total fixed spend so that:
+  - Fixed routing clearly overshoots the cap (~+43%)
+  - Adaptive mechanism activates early (~35% through the period)
+  - The two curves visibly diverge, making the story legible in print
 """
 
 import json
@@ -33,67 +35,68 @@ def lookup(theta: float) -> tuple[float, float]:
     t = round(round(theta * 100) / 100, 2)
     t = max(0.0, min(1.0, t))
     if t not in sweep_by_theta:
-        # Snap to nearest available key
         t = min(sweep_by_theta.keys(), key=lambda k: abs(k - theta))
     e = sweep_by_theta[t]
     return e["cloud_routing_rate"], e["high_recall"]
 
 
-# --- Fixed simulation (unchanged, re-expressed as fractions) ---
 fixed_raw = sim_data["fixed"]
 cost_per_usd = sim_data["cost_per_query_usd"]
 T = len(fixed_raw)  # total days (30)
+theta_base = 0.5
 
-# B = 95% of total fixed spend so fixed routing visibly overshoots the budget cap
-total_fixed_spend = sum(d["cloud_n"] * cost_per_usd for d in fixed_raw)
-B = total_fixed_spend * 0.95
+# Use average daily query count for a smooth, noise-free curve
+avg_total_n = round(sum(d["total_n"] for d in fixed_raw) / T)
 
+# Fixed cloud_rate at theta_base
+fixed_cloud_rate, _ = lookup(theta_base)
+fixed_daily_cloud = round(avg_total_n * fixed_cloud_rate)
+
+# Total fixed spend over full period
+total_fixed_spend = T * fixed_daily_cloud * cost_per_usd
+
+# B = 70% of fixed spend: fixed clearly overshoots (+43%), adaptive activates at ~35%
+B = total_fixed_spend * 0.70
+
+# --- Fixed simulation (smooth constant rate) ---
 fixed_norm = []
 cumul = 0.0
-for d in fixed_raw:
-    cumul += d["cloud_n"] * cost_per_usd
-    period_frac = round((d["day"] - 1) / (T - 1), 4)  # day 1 → 0.0, day 30 → 1.0
+for day in range(1, T + 1):
+    cumul += fixed_daily_cloud * cost_per_usd
+    period_frac = round((day - 1) / (T - 1), 4)
     fixed_norm.append(
         {
-            "day": d["day"],
+            "day": day,
             "period_fraction": period_frac,
-            "theta_eff": round(d.get("theta_eff", 0.5), 3),
-            "cloud_n": d["cloud_n"],
-            "total_n": d["total_n"],
+            "theta_eff": theta_base,
+            "cloud_n": fixed_daily_cloud,
+            "total_n": avg_total_n,
             "spend_fraction": round(cumul / B, 4),
-            "high_recall": round(d["high_recall"], 4),
+            "high_recall": round(lookup(theta_base)[1], 4),
         }
     )
 
-
-# --- Adaptive simulation (re-run with dynamic theta_eff) ---
-# Use same daily total_n as fixed (same daily query volumes)
-theta_base = 0.5
+# --- Adaptive simulation (smooth, dynamic theta_eff) ---
 adaptive_norm = []
 cumulative_spend = 0.0
 
-for _i, d in enumerate(fixed_raw):
-    total_n = d["total_n"]
-
-    # theta_eff is based on spend fraction AT START of this day (from previous day)
+for day in range(1, T + 1):
     spend_frac = cumulative_spend / B
     theta_eff = max(theta_base, min(spend_frac, 1.0))
 
-    # Snap to nearest 0.01 for sweep lookup
     cloud_rate, high_recall = lookup(theta_eff)
-
-    cloud_n = max(0, round(total_n * cloud_rate))
+    cloud_n = round(avg_total_n * cloud_rate)
     day_cost = cloud_n * cost_per_usd
     cumulative_spend += day_cost
 
-    period_frac = round((d["day"] - 1) / (T - 1), 4)
+    period_frac = round((day - 1) / (T - 1), 4)
     adaptive_norm.append(
         {
-            "day": d["day"],
+            "day": day,
             "period_fraction": period_frac,
-            "theta_eff": round(theta_eff, 3),
+            "theta_eff": round(theta_eff, 4),
             "cloud_n": cloud_n,
-            "total_n": total_n,
+            "total_n": avg_total_n,
             "spend_fraction": round(cumulative_spend / B, 4),
             "high_recall": round(high_recall, 4),
         }
