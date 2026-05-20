@@ -1,0 +1,889 @@
+{
+  "metadata": {
+    "model": "answerdotai/ModernBERT-base",
+    "n_test": 1200,
+    "label_distribution": {
+      "LOW": 400,
+      "MEDIUM": 400,
+      "HIGH": 400
+    },
+    "theta_range": {
+      "min": 0.0,
+      "max": 1.0,
+      "step": 0.01,
+      "n_points": 101
+    },
+    "generated_at": "2026-05-20T02:01:43Z"
+  },
+  "eval_at_default_theta": {
+    "theta": 0.5,
+    "accuracy": 0.6417,
+    "macro_f1": 0.6399,
+    "per_class": {
+      "LOW": {
+        "f1": 0.6953,
+        "precision": 0.6836,
+        "recall": 0.7075
+      },
+      "MEDIUM": {
+        "f1": 0.5058,
+        "precision": 0.5198,
+        "recall": 0.4925
+      },
+      "HIGH": {
+        "f1": 0.7187,
+        "precision": 0.7125,
+        "recall": 0.725
+      }
+    },
+    "confusion_matrix": [
+      [
+        283,
+        93,
+        24
+      ],
+      [
+        110,
+        197,
+        93
+      ],
+      [
+        21,
+        89,
+        290
+      ]
+    ],
+    "free_tier_retention_pct": 85.38,
+    "n_test": 1200,
+    "wilson_ci": {
+      "LOW": {
+        "recall_lo": 0.6611,
+        "recall_hi": 0.7499,
+        "k": 283,
+        "n": 400
+      },
+      "MEDIUM": {
+        "recall_lo": 0.4438,
+        "recall_hi": 0.5413,
+        "k": 197,
+        "n": 400
+      },
+      "HIGH": {
+        "recall_lo": 0.6793,
+        "recall_hi": 0.7665,
+        "k": 290,
+        "n": 400
+      }
+    }
+  },
+  "sweep": [
+    {
+      "theta": 0.0,
+      "macro_f1": 0.1667,
+      "high_recall": 1.0,
+      "cloud_routing_rate": 1.0,
+      "cost_leak": 1.0,
+      "qual_leak": 0.0
+    },
+    {
+      "theta": 0.01,
+      "macro_f1": 0.5425,
+      "high_recall": 0.935,
+      "cloud_routing_rate": 0.59,
+      "cost_leak": 0.4175,
+      "qual_leak": 0.1525
+    },
+    {
+      "theta": 0.02,
+      "macro_f1": 0.5662,
+      "high_recall": 0.9075,
+      "cloud_routing_rate": 0.5458,
+      "cost_leak": 0.365,
+      "qual_leak": 0.17
+    },
+    {
+      "theta": 0.03,
+      "macro_f1": 0.5775,
+      "high_recall": 0.8925,
+      "cloud_routing_rate": 0.5242,
+      "cost_leak": 0.34,
+      "qual_leak": 0.1812
+    },
+    {
+      "theta": 0.04,
+      "macro_f1": 0.5849,
+      "high_recall": 0.885,
+      "cloud_routing_rate": 0.51,
+      "cost_leak": 0.3225,
+      "qual_leak": 0.1862
+    },
+    {
+      "theta": 0.05,
+      "macro_f1": 0.5959,
+      "high_recall": 0.8775,
+      "cloud_routing_rate": 0.495,
+      "cost_leak": 0.3038,
+      "qual_leak": 0.19
+    },
+    {
+      "theta": 0.06,
+      "macro_f1": 0.6022,
+      "high_recall": 0.87,
+      "cloud_routing_rate": 0.485,
+      "cost_leak": 0.2925,
+      "qual_leak": 0.1938
+    },
+    {
+      "theta": 0.07,
+      "macro_f1": 0.6017,
+      "high_recall": 0.86,
+      "cloud_routing_rate": 0.4767,
+      "cost_leak": 0.285,
+      "qual_leak": 0.2013
+    },
+    {
+      "theta": 0.08,
+      "macro_f1": 0.6069,
+      "high_recall": 0.855,
+      "cloud_routing_rate": 0.4692,
+      "cost_leak": 0.2762,
+      "qual_leak": 0.2037
+    },
+    {
+      "theta": 0.09,
+      "macro_f1": 0.6113,
+      "high_recall": 0.8475,
+      "cloud_routing_rate": 0.4608,
+      "cost_leak": 0.2675,
+      "qual_leak": 0.2075
+    },
+    {
+      "theta": 0.1,
+      "macro_f1": 0.6135,
+      "high_recall": 0.845,
+      "cloud_routing_rate": 0.4567,
+      "cost_leak": 0.2625,
+      "qual_leak": 0.2087
+    },
+    {
+      "theta": 0.11,
+      "macro_f1": 0.6185,
+      "high_recall": 0.84,
+      "cloud_routing_rate": 0.4492,
+      "cost_leak": 0.2537,
+      "qual_leak": 0.2112
+    },
+    {
+      "theta": 0.12,
+      "macro_f1": 0.622,
+      "high_recall": 0.8375,
+      "cloud_routing_rate": 0.4442,
+      "cost_leak": 0.2475,
+      "qual_leak": 0.2125
+    },
+    {
+      "theta": 0.13,
+      "macro_f1": 0.6259,
+      "high_recall": 0.8375,
+      "cloud_routing_rate": 0.44,
+      "cost_leak": 0.2412,
+      "qual_leak": 0.2125
+    },
+    {
+      "theta": 0.14,
+      "macro_f1": 0.6279,
+      "high_recall": 0.8375,
+      "cloud_routing_rate": 0.4367,
+      "cost_leak": 0.2362,
+      "qual_leak": 0.2137
+    },
+    {
+      "theta": 0.15,
+      "macro_f1": 0.6318,
+      "high_recall": 0.8375,
+      "cloud_routing_rate": 0.4333,
+      "cost_leak": 0.2313,
+      "qual_leak": 0.2137
+    },
+    {
+      "theta": 0.16,
+      "macro_f1": 0.6342,
+      "high_recall": 0.8325,
+      "cloud_routing_rate": 0.4275,
+      "cost_leak": 0.225,
+      "qual_leak": 0.2162
+    },
+    {
+      "theta": 0.17,
+      "macro_f1": 0.6342,
+      "high_recall": 0.825,
+      "cloud_routing_rate": 0.4217,
+      "cost_leak": 0.22,
+      "qual_leak": 0.22
+    },
+    {
+      "theta": 0.18,
+      "macro_f1": 0.6352,
+      "high_recall": 0.8175,
+      "cloud_routing_rate": 0.4158,
+      "cost_leak": 0.215,
+      "qual_leak": 0.2238
+    },
+    {
+      "theta": 0.19,
+      "macro_f1": 0.6355,
+      "high_recall": 0.815,
+      "cloud_routing_rate": 0.4133,
+      "cost_leak": 0.2125,
+      "qual_leak": 0.225
+    },
+    {
+      "theta": 0.2,
+      "macro_f1": 0.6355,
+      "high_recall": 0.815,
+      "cloud_routing_rate": 0.4125,
+      "cost_leak": 0.2112,
+      "qual_leak": 0.225
+    },
+    {
+      "theta": 0.21,
+      "macro_f1": 0.6368,
+      "high_recall": 0.8125,
+      "cloud_routing_rate": 0.41,
+      "cost_leak": 0.2087,
+      "qual_leak": 0.2263
+    },
+    {
+      "theta": 0.22,
+      "macro_f1": 0.6354,
+      "high_recall": 0.8075,
+      "cloud_routing_rate": 0.4075,
+      "cost_leak": 0.2075,
+      "qual_leak": 0.2288
+    },
+    {
+      "theta": 0.23,
+      "macro_f1": 0.6333,
+      "high_recall": 0.8,
+      "cloud_routing_rate": 0.4033,
+      "cost_leak": 0.205,
+      "qual_leak": 0.2338
+    },
+    {
+      "theta": 0.24,
+      "macro_f1": 0.6342,
+      "high_recall": 0.7925,
+      "cloud_routing_rate": 0.3975,
+      "cost_leak": 0.2,
+      "qual_leak": 0.2375
+    },
+    {
+      "theta": 0.25,
+      "macro_f1": 0.6354,
+      "high_recall": 0.79,
+      "cloud_routing_rate": 0.3942,
+      "cost_leak": 0.1963,
+      "qual_leak": 0.24
+    },
+    {
+      "theta": 0.26,
+      "macro_f1": 0.635,
+      "high_recall": 0.785,
+      "cloud_routing_rate": 0.3917,
+      "cost_leak": 0.195,
+      "qual_leak": 0.2425
+    },
+    {
+      "theta": 0.27,
+      "macro_f1": 0.6346,
+      "high_recall": 0.78,
+      "cloud_routing_rate": 0.3883,
+      "cost_leak": 0.1925,
+      "qual_leak": 0.245
+    },
+    {
+      "theta": 0.28,
+      "macro_f1": 0.635,
+      "high_recall": 0.775,
+      "cloud_routing_rate": 0.3842,
+      "cost_leak": 0.1888,
+      "qual_leak": 0.2475
+    },
+    {
+      "theta": 0.29,
+      "macro_f1": 0.635,
+      "high_recall": 0.775,
+      "cloud_routing_rate": 0.3842,
+      "cost_leak": 0.1888,
+      "qual_leak": 0.2475
+    },
+    {
+      "theta": 0.3,
+      "macro_f1": 0.6343,
+      "high_recall": 0.7725,
+      "cloud_routing_rate": 0.3833,
+      "cost_leak": 0.1888,
+      "qual_leak": 0.2487
+    },
+    {
+      "theta": 0.31,
+      "macro_f1": 0.6343,
+      "high_recall": 0.7725,
+      "cloud_routing_rate": 0.3833,
+      "cost_leak": 0.1888,
+      "qual_leak": 0.2487
+    },
+    {
+      "theta": 0.32,
+      "macro_f1": 0.6343,
+      "high_recall": 0.7725,
+      "cloud_routing_rate": 0.3833,
+      "cost_leak": 0.1888,
+      "qual_leak": 0.2487
+    },
+    {
+      "theta": 0.33,
+      "macro_f1": 0.6355,
+      "high_recall": 0.77,
+      "cloud_routing_rate": 0.3808,
+      "cost_leak": 0.1862,
+      "qual_leak": 0.25
+    },
+    {
+      "theta": 0.34,
+      "macro_f1": 0.6356,
+      "high_recall": 0.7675,
+      "cloud_routing_rate": 0.3783,
+      "cost_leak": 0.1837,
+      "qual_leak": 0.2525
+    },
+    {
+      "theta": 0.35,
+      "macro_f1": 0.636,
+      "high_recall": 0.765,
+      "cloud_routing_rate": 0.375,
+      "cost_leak": 0.18,
+      "qual_leak": 0.2537
+    },
+    {
+      "theta": 0.36,
+      "macro_f1": 0.6362,
+      "high_recall": 0.7625,
+      "cloud_routing_rate": 0.3725,
+      "cost_leak": 0.1775,
+      "qual_leak": 0.255
+    },
+    {
+      "theta": 0.37,
+      "macro_f1": 0.6365,
+      "high_recall": 0.76,
+      "cloud_routing_rate": 0.37,
+      "cost_leak": 0.175,
+      "qual_leak": 0.2562
+    },
+    {
+      "theta": 0.38,
+      "macro_f1": 0.6359,
+      "high_recall": 0.7575,
+      "cloud_routing_rate": 0.3667,
+      "cost_leak": 0.1713,
+      "qual_leak": 0.2575
+    },
+    {
+      "theta": 0.39,
+      "macro_f1": 0.6369,
+      "high_recall": 0.7575,
+      "cloud_routing_rate": 0.3642,
+      "cost_leak": 0.1675,
+      "qual_leak": 0.2587
+    },
+    {
+      "theta": 0.4,
+      "macro_f1": 0.6371,
+      "high_recall": 0.755,
+      "cloud_routing_rate": 0.3625,
+      "cost_leak": 0.1663,
+      "qual_leak": 0.26
+    },
+    {
+      "theta": 0.41,
+      "macro_f1": 0.6366,
+      "high_recall": 0.75,
+      "cloud_routing_rate": 0.36,
+      "cost_leak": 0.165,
+      "qual_leak": 0.2625
+    },
+    {
+      "theta": 0.42,
+      "macro_f1": 0.6376,
+      "high_recall": 0.75,
+      "cloud_routing_rate": 0.3592,
+      "cost_leak": 0.1638,
+      "qual_leak": 0.2625
+    },
+    {
+      "theta": 0.43,
+      "macro_f1": 0.638,
+      "high_recall": 0.745,
+      "cloud_routing_rate": 0.3558,
+      "cost_leak": 0.1613,
+      "qual_leak": 0.265
+    },
+    {
+      "theta": 0.44,
+      "macro_f1": 0.6382,
+      "high_recall": 0.7425,
+      "cloud_routing_rate": 0.3542,
+      "cost_leak": 0.16,
+      "qual_leak": 0.2662
+    },
+    {
+      "theta": 0.45,
+      "macro_f1": 0.6368,
+      "high_recall": 0.7375,
+      "cloud_routing_rate": 0.3517,
+      "cost_leak": 0.1588,
+      "qual_leak": 0.2687
+    },
+    {
+      "theta": 0.46,
+      "macro_f1": 0.6387,
+      "high_recall": 0.7375,
+      "cloud_routing_rate": 0.35,
+      "cost_leak": 0.1562,
+      "qual_leak": 0.2687
+    },
+    {
+      "theta": 0.47,
+      "macro_f1": 0.638,
+      "high_recall": 0.735,
+      "cloud_routing_rate": 0.3492,
+      "cost_leak": 0.1562,
+      "qual_leak": 0.27
+    },
+    {
+      "theta": 0.48,
+      "macro_f1": 0.6373,
+      "high_recall": 0.7325,
+      "cloud_routing_rate": 0.3475,
+      "cost_leak": 0.155,
+      "qual_leak": 0.2712
+    },
+    {
+      "theta": 0.49,
+      "macro_f1": 0.6385,
+      "high_recall": 0.73,
+      "cloud_routing_rate": 0.3442,
+      "cost_leak": 0.1512,
+      "qual_leak": 0.2725
+    },
+    {
+      "theta": 0.5,
+      "macro_f1": 0.6399,
+      "high_recall": 0.725,
+      "cloud_routing_rate": 0.3392,
+      "cost_leak": 0.1462,
+      "qual_leak": 0.275
+    },
+    {
+      "theta": 0.51,
+      "macro_f1": 0.6392,
+      "high_recall": 0.7225,
+      "cloud_routing_rate": 0.3383,
+      "cost_leak": 0.1462,
+      "qual_leak": 0.2762
+    },
+    {
+      "theta": 0.52,
+      "macro_f1": 0.6401,
+      "high_recall": 0.7225,
+      "cloud_routing_rate": 0.3375,
+      "cost_leak": 0.145,
+      "qual_leak": 0.2762
+    },
+    {
+      "theta": 0.53,
+      "macro_f1": 0.6401,
+      "high_recall": 0.7225,
+      "cloud_routing_rate": 0.3375,
+      "cost_leak": 0.145,
+      "qual_leak": 0.2762
+    },
+    {
+      "theta": 0.54,
+      "macro_f1": 0.6394,
+      "high_recall": 0.72,
+      "cloud_routing_rate": 0.3367,
+      "cost_leak": 0.145,
+      "qual_leak": 0.2775
+    },
+    {
+      "theta": 0.55,
+      "macro_f1": 0.6396,
+      "high_recall": 0.7175,
+      "cloud_routing_rate": 0.3342,
+      "cost_leak": 0.1425,
+      "qual_leak": 0.2787
+    },
+    {
+      "theta": 0.56,
+      "macro_f1": 0.6408,
+      "high_recall": 0.715,
+      "cloud_routing_rate": 0.3317,
+      "cost_leak": 0.14,
+      "qual_leak": 0.28
+    },
+    {
+      "theta": 0.57,
+      "macro_f1": 0.64,
+      "high_recall": 0.7125,
+      "cloud_routing_rate": 0.3308,
+      "cost_leak": 0.14,
+      "qual_leak": 0.2812
+    },
+    {
+      "theta": 0.58,
+      "macro_f1": 0.6386,
+      "high_recall": 0.7075,
+      "cloud_routing_rate": 0.3283,
+      "cost_leak": 0.1388,
+      "qual_leak": 0.2838
+    },
+    {
+      "theta": 0.59,
+      "macro_f1": 0.6395,
+      "high_recall": 0.7075,
+      "cloud_routing_rate": 0.3275,
+      "cost_leak": 0.1375,
+      "qual_leak": 0.2838
+    },
+    {
+      "theta": 0.6,
+      "macro_f1": 0.6399,
+      "high_recall": 0.7025,
+      "cloud_routing_rate": 0.3225,
+      "cost_leak": 0.1325,
+      "qual_leak": 0.2875
+    },
+    {
+      "theta": 0.61,
+      "macro_f1": 0.6418,
+      "high_recall": 0.7,
+      "cloud_routing_rate": 0.3192,
+      "cost_leak": 0.1288,
+      "qual_leak": 0.2888
+    },
+    {
+      "theta": 0.62,
+      "macro_f1": 0.6437,
+      "high_recall": 0.7,
+      "cloud_routing_rate": 0.3167,
+      "cost_leak": 0.125,
+      "qual_leak": 0.2888
+    },
+    {
+      "theta": 0.63,
+      "macro_f1": 0.6431,
+      "high_recall": 0.695,
+      "cloud_routing_rate": 0.3142,
+      "cost_leak": 0.1237,
+      "qual_leak": 0.2913
+    },
+    {
+      "theta": 0.64,
+      "macro_f1": 0.6424,
+      "high_recall": 0.6925,
+      "cloud_routing_rate": 0.3133,
+      "cost_leak": 0.1237,
+      "qual_leak": 0.2925
+    },
+    {
+      "theta": 0.65,
+      "macro_f1": 0.6425,
+      "high_recall": 0.6925,
+      "cloud_routing_rate": 0.3125,
+      "cost_leak": 0.1225,
+      "qual_leak": 0.2925
+    },
+    {
+      "theta": 0.66,
+      "macro_f1": 0.6402,
+      "high_recall": 0.685,
+      "cloud_routing_rate": 0.31,
+      "cost_leak": 0.1225,
+      "qual_leak": 0.2963
+    },
+    {
+      "theta": 0.67,
+      "macro_f1": 0.6395,
+      "high_recall": 0.68,
+      "cloud_routing_rate": 0.3075,
+      "cost_leak": 0.1212,
+      "qual_leak": 0.2988
+    },
+    {
+      "theta": 0.68,
+      "macro_f1": 0.6398,
+      "high_recall": 0.675,
+      "cloud_routing_rate": 0.3042,
+      "cost_leak": 0.1187,
+      "qual_leak": 0.3013
+    },
+    {
+      "theta": 0.69,
+      "macro_f1": 0.6375,
+      "high_recall": 0.6675,
+      "cloud_routing_rate": 0.3017,
+      "cost_leak": 0.1187,
+      "qual_leak": 0.305
+    },
+    {
+      "theta": 0.7,
+      "macro_f1": 0.6361,
+      "high_recall": 0.66,
+      "cloud_routing_rate": 0.2983,
+      "cost_leak": 0.1175,
+      "qual_leak": 0.3088
+    },
+    {
+      "theta": 0.71,
+      "macro_f1": 0.6364,
+      "high_recall": 0.6575,
+      "cloud_routing_rate": 0.295,
+      "cost_leak": 0.1138,
+      "qual_leak": 0.31
+    },
+    {
+      "theta": 0.72,
+      "macro_f1": 0.6365,
+      "high_recall": 0.655,
+      "cloud_routing_rate": 0.2933,
+      "cost_leak": 0.1125,
+      "qual_leak": 0.3113
+    },
+    {
+      "theta": 0.73,
+      "macro_f1": 0.6365,
+      "high_recall": 0.655,
+      "cloud_routing_rate": 0.2933,
+      "cost_leak": 0.1125,
+      "qual_leak": 0.3113
+    },
+    {
+      "theta": 0.74,
+      "macro_f1": 0.635,
+      "high_recall": 0.6475,
+      "cloud_routing_rate": 0.29,
+      "cost_leak": 0.1113,
+      "qual_leak": 0.315
+    },
+    {
+      "theta": 0.75,
+      "macro_f1": 0.6368,
+      "high_recall": 0.6475,
+      "cloud_routing_rate": 0.2883,
+      "cost_leak": 0.1087,
+      "qual_leak": 0.315
+    },
+    {
+      "theta": 0.76,
+      "macro_f1": 0.6378,
+      "high_recall": 0.645,
+      "cloud_routing_rate": 0.2858,
+      "cost_leak": 0.1062,
+      "qual_leak": 0.3162
+    },
+    {
+      "theta": 0.77,
+      "macro_f1": 0.6363,
+      "high_recall": 0.6375,
+      "cloud_routing_rate": 0.2825,
+      "cost_leak": 0.105,
+      "qual_leak": 0.32
+    },
+    {
+      "theta": 0.78,
+      "macro_f1": 0.64,
+      "high_recall": 0.6325,
+      "cloud_routing_rate": 0.275,
+      "cost_leak": 0.0963,
+      "qual_leak": 0.3237
+    },
+    {
+      "theta": 0.79,
+      "macro_f1": 0.642,
+      "high_recall": 0.63,
+      "cloud_routing_rate": 0.2708,
+      "cost_leak": 0.0912,
+      "qual_leak": 0.325
+    },
+    {
+      "theta": 0.8,
+      "macro_f1": 0.6431,
+      "high_recall": 0.6275,
+      "cloud_routing_rate": 0.2675,
+      "cost_leak": 0.0875,
+      "qual_leak": 0.3262
+    },
+    {
+      "theta": 0.81,
+      "macro_f1": 0.6407,
+      "high_recall": 0.6175,
+      "cloud_routing_rate": 0.2633,
+      "cost_leak": 0.0862,
+      "qual_leak": 0.3312
+    },
+    {
+      "theta": 0.82,
+      "macro_f1": 0.6425,
+      "high_recall": 0.6175,
+      "cloud_routing_rate": 0.2617,
+      "cost_leak": 0.0838,
+      "qual_leak": 0.3312
+    },
+    {
+      "theta": 0.83,
+      "macro_f1": 0.6418,
+      "high_recall": 0.6075,
+      "cloud_routing_rate": 0.2558,
+      "cost_leak": 0.08,
+      "qual_leak": 0.3362
+    },
+    {
+      "theta": 0.84,
+      "macro_f1": 0.6428,
+      "high_recall": 0.605,
+      "cloud_routing_rate": 0.2533,
+      "cost_leak": 0.0775,
+      "qual_leak": 0.3375
+    },
+    {
+      "theta": 0.85,
+      "macro_f1": 0.6411,
+      "high_recall": 0.6,
+      "cloud_routing_rate": 0.2517,
+      "cost_leak": 0.0775,
+      "qual_leak": 0.34
+    },
+    {
+      "theta": 0.86,
+      "macro_f1": 0.6404,
+      "high_recall": 0.5925,
+      "cloud_routing_rate": 0.2475,
+      "cost_leak": 0.075,
+      "qual_leak": 0.3438
+    },
+    {
+      "theta": 0.87,
+      "macro_f1": 0.6388,
+      "high_recall": 0.5825,
+      "cloud_routing_rate": 0.2425,
+      "cost_leak": 0.0725,
+      "qual_leak": 0.3488
+    },
+    {
+      "theta": 0.88,
+      "macro_f1": 0.6354,
+      "high_recall": 0.5725,
+      "cloud_routing_rate": 0.2392,
+      "cost_leak": 0.0725,
+      "qual_leak": 0.3538
+    },
+    {
+      "theta": 0.89,
+      "macro_f1": 0.6337,
+      "high_recall": 0.565,
+      "cloud_routing_rate": 0.2358,
+      "cost_leak": 0.0712,
+      "qual_leak": 0.3575
+    },
+    {
+      "theta": 0.9,
+      "macro_f1": 0.6311,
+      "high_recall": 0.5525,
+      "cloud_routing_rate": 0.23,
+      "cost_leak": 0.0688,
+      "qual_leak": 0.3638
+    },
+    {
+      "theta": 0.91,
+      "macro_f1": 0.6294,
+      "high_recall": 0.545,
+      "cloud_routing_rate": 0.2267,
+      "cost_leak": 0.0675,
+      "qual_leak": 0.3675
+    },
+    {
+      "theta": 0.92,
+      "macro_f1": 0.6267,
+      "high_recall": 0.53,
+      "cloud_routing_rate": 0.2192,
+      "cost_leak": 0.0638,
+      "qual_leak": 0.375
+    },
+    {
+      "theta": 0.93,
+      "macro_f1": 0.6274,
+      "high_recall": 0.52,
+      "cloud_routing_rate": 0.2117,
+      "cost_leak": 0.0575,
+      "qual_leak": 0.38
+    },
+    {
+      "theta": 0.94,
+      "macro_f1": 0.6255,
+      "high_recall": 0.5075,
+      "cloud_routing_rate": 0.205,
+      "cost_leak": 0.0537,
+      "qual_leak": 0.3862
+    },
+    {
+      "theta": 0.95,
+      "macro_f1": 0.6181,
+      "high_recall": 0.485,
+      "cloud_routing_rate": 0.1967,
+      "cost_leak": 0.0525,
+      "qual_leak": 0.3975
+    },
+    {
+      "theta": 0.96,
+      "macro_f1": 0.6158,
+      "high_recall": 0.47,
+      "cloud_routing_rate": 0.1883,
+      "cost_leak": 0.0475,
+      "qual_leak": 0.405
+    },
+    {
+      "theta": 0.97,
+      "macro_f1": 0.6017,
+      "high_recall": 0.4225,
+      "cloud_routing_rate": 0.1675,
+      "cost_leak": 0.04,
+      "qual_leak": 0.4288
+    },
+    {
+      "theta": 0.98,
+      "macro_f1": 0.5936,
+      "high_recall": 0.3875,
+      "cloud_routing_rate": 0.1483,
+      "cost_leak": 0.0288,
+      "qual_leak": 0.4462
+    },
+    {
+      "theta": 0.99,
+      "macro_f1": 0.5821,
+      "high_recall": 0.345,
+      "cloud_routing_rate": 0.1267,
+      "cost_leak": 0.0175,
+      "qual_leak": 0.4675
+    },
+    {
+      "theta": 1.0,
+      "macro_f1": 0.3976,
+      "high_recall": 0.0,
+      "cloud_routing_rate": 0.0,
+      "cost_leak": 0.0,
+      "qual_leak": 0.64
+    }
+  ]
+}

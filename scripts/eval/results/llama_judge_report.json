@@ -1,0 +1,66 @@
+{
+  "model": "llama3.2:3b",
+  "n_test": 1200,
+  "accuracy": 0.49,
+  "macro_f1": 0.4358,
+  "free_tier_retention_pct": 85.12,
+  "latency_ms": {
+    "p50": 163.6,
+    "p95": 230.2,
+    "p99": 264.5,
+    "mean": 175.1
+  },
+  "per_class": {
+    "LOW": {
+      "precision": 0.825,
+      "recall": 0.0825,
+      "f1": 0.15,
+      "wilson_ci": {
+        "k": 33,
+        "n": 400,
+        "recall_lo": 0.0593,
+        "recall_hi": 0.1136
+      }
+    },
+    "MEDIUM": {
+      "precision": 0.3925,
+      "recall": 0.785,
+      "f1": 0.5233,
+      "wilson_ci": {
+        "k": 314,
+        "n": 400,
+        "recall_lo": 0.7421,
+        "recall_hi": 0.8224
+      }
+    },
+    "HIGH": {
+      "precision": 0.6694,
+      "recall": 0.6025,
+      "f1": 0.6342,
+      "wilson_ci": {
+        "k": 241,
+        "n": 400,
+        "recall_lo": 0.5538,
+        "recall_hi": 0.6493
+      }
+    }
+  },
+  "confusion_matrix": [
+    [
+      33,
+      328,
+      39
+    ],
+    [
+      6,
+      314,
+      80
+    ],
+    [
+      1,
+      158,
+      241
+    ]
+  ],
+  "generated_at": "2026-05-20T01:52:50Z"
+}

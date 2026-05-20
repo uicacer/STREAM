@@ -366,6 +366,34 @@ TIERS = {
 }
 
 # =============================================================================
+# BUDGET-AWARE ADAPTIVE ROUTING
+# =============================================================================
+#
+# When ROUTING_BUDGET_USD > 0, STREAM adjusts the classifier threshold θ at
+# runtime so that cloud spending gracefully slows as the budget is depleted,
+# rather than cutting off abruptly.
+#
+# Algorithm:
+#   θ_effective = max(θ_base, cumulative_cloud_spend / monthly_budget)
+#
+# Intuition:
+#   - Early in the period (little spend): θ_effective ≈ θ_base → normal routing.
+#   - As spend approaches budget: θ_effective rises → fewer queries reach cloud.
+#   - Users with money left can still escalate HIGH-complexity queries.
+#   - Prevents the "cliff" where the last dollar triggers a hard block.
+#
+# Set ROUTING_BUDGET_USD=0 to disable budget-aware routing entirely (θ always
+# equals θ_base, and spending is unrestricted).
+#
+# ROUTING_THETA_BASE controls the base classification threshold. Queries whose
+# P(HIGH) ≥ θ_effective are routed to cloud; others go to HPC/local.
+# Only relevant when the ModernBERT soft-score classifier is active.
+#
+ROUTING_BUDGET_USD = float(os.getenv("ROUTING_BUDGET_USD", "0"))  # 0 = disabled
+ROUTING_BUDGET_PERIOD = os.getenv("ROUTING_BUDGET_PERIOD", "monthly")  # monthly | weekly | daily
+ROUTING_THETA_BASE = float(os.getenv("ROUTING_THETA_BASE", "0.5"))  # default cloud threshold
+
+# =============================================================================
 # CLOUD PROVIDERS
 # =============================================================================
 #

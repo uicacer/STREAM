@@ -5,14 +5,20 @@ This module determines which AI tier to use for a query based on:
 1. User preference (if specified)
 2. Query complexity (from complexity_judge)
 3. Tier availability (from tier_health)
+4. Budget-aware adaptive threshold θ (optional)
 """
 
 import logging
+import threading
+import time
 
 from stream.middleware.config import (
     DEFAULT_MODELS,
     DEFAULT_VISION_MODELS,
     LLM_JUDGE_ENABLED,
+    ROUTING_BUDGET_PERIOD,
+    ROUTING_BUDGET_USD,
+    ROUTING_THETA_BASE,
 )
 from stream.middleware.core.complexity_judge import (
     judge_complexity_with_keywords,
@@ -24,6 +30,73 @@ from stream.middleware.core.tier_health import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Budget tracker
+# ---------------------------------------------------------------------------
+
+
+class _BudgetTracker:
+    """
+    Thread-safe tracker for cloud spend within a rolling period.
+
+    Implements θ_effective = max(θ_base, cumulative_spend / budget).
+    Resets automatically at the start of each period (daily / weekly / monthly).
+    """
+
+    _PERIOD_SECONDS = {
+        "daily": 86_400,
+        "weekly": 7 * 86_400,
+        "monthly": 30 * 86_400,
+    }
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._spend_usd = 0.0
+        self._period_start = time.time()
+
+    def _reset_if_needed(self) -> None:
+        period_s = self._PERIOD_SECONDS.get(ROUTING_BUDGET_PERIOD, 30 * 86_400)
+        if time.time() - self._period_start >= period_s:
+            self._spend_usd = 0.0
+            self._period_start = time.time()
+            logger.info("Budget tracker: period reset (spend → $0.00)")
+
+    def record_cloud_query(self, cost_usd: float = 0.0) -> None:
+        """Call after a query is routed to cloud. Pass estimated cost if known."""
+        with self._lock:
+            self._reset_if_needed()
+            self._spend_usd += cost_usd
+
+    def effective_theta(self) -> float:
+        """
+        Return θ_effective for the current moment.
+
+        If ROUTING_BUDGET_USD == 0 (disabled), always returns ROUTING_THETA_BASE.
+        Otherwise: max(θ_base, spend / budget), capped at 0.999 so that even at
+        100% budget depletion the most genuinely HIGH queries still reach cloud.
+        """
+        if ROUTING_BUDGET_USD <= 0:
+            return ROUTING_THETA_BASE
+        with self._lock:
+            self._reset_if_needed()
+            ratio = self._spend_usd / ROUTING_BUDGET_USD
+        return min(max(ROUTING_THETA_BASE, ratio), 0.999)
+
+    @property
+    def spend_usd(self) -> float:
+        with self._lock:
+            self._reset_if_needed()
+            return self._spend_usd
+
+    @property
+    def budget_usd(self) -> float:
+        return ROUTING_BUDGET_USD
+
+
+# Module-level singleton — shared across all requests
+budget_tracker = _BudgetTracker()
 
 
 class AuthError(Exception):
@@ -215,6 +288,7 @@ def get_tier_for_query(
     # Try LLM judge first (if enabled)
     complexity = None
     method = "unknown"
+    _soft_p_high: float | None = None  # P(HIGH) from classifier, if available
 
     if LLM_JUDGE_ENABLED:
         complexity, error, _cost, _tokens = judge_complexity_with_llm(query)
@@ -231,6 +305,41 @@ def get_tier_for_query(
         )
 
     logger.debug(method)
+
+    # ------------------------------------------------------------------
+    # Budget-aware adaptive threshold θ (only affects HIGH→cloud routing)
+    #
+    # When budget tracking is enabled (ROUTING_BUDGET_USD > 0), we apply
+    #   θ_effective = max(θ_base, cumulative_spend / budget)
+    # to the classifier's P(HIGH) soft score.  If P(HIGH) < θ_effective,
+    # the query is downgraded from HIGH to MEDIUM (HPC) instead of cloud.
+    #
+    # This only fires when:
+    #   (a) the query was classified HIGH (would otherwise go to cloud)
+    #   (b) budget tracking is active
+    #   (c) we can get a soft score from the ModernBERT classifier
+    #
+    # Queries that hit keyword or LLM judge paths skip the θ gate and are
+    # routed normally — budget still rises over time, affecting future θ.
+    # ------------------------------------------------------------------
+    if complexity == "high" and ROUTING_BUDGET_USD > 0:
+        theta_eff = budget_tracker.effective_theta()
+        if theta_eff > ROUTING_THETA_BASE:
+            # Try to get P(HIGH) from the classifier for the θ gate
+            try:
+                from stream.middleware.core.complexity_judge import judge_complexity_with_classifier
+
+                _, scores, _ = judge_complexity_with_classifier(query)
+                _soft_p_high = scores.get("high", 1.0)
+                if _soft_p_high < theta_eff:
+                    logger.info(
+                        f"Budget θ gate: P(HIGH)={_soft_p_high:.3f} < θ_eff={theta_eff:.3f} "
+                        f"(spend=${budget_tracker.spend_usd:.2f}/${ROUTING_BUDGET_USD:.2f}) "
+                        f"→ downgrading HIGH→MEDIUM"
+                    )
+                    complexity = "medium"
+            except Exception as e:
+                logger.debug(f"Budget θ gate: classifier unavailable ({e}), routing HIGH normally")
 
     # Map complexity to preferred tier
     if complexity == "low":

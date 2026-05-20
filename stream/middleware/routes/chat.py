@@ -35,7 +35,12 @@ from stream.middleware.config import (
     VISION_CAPABLE_MODELS,
 )
 from stream.middleware.core.complexity_judge import judge_complexity
-from stream.middleware.core.query_router import AuthError, get_model_for_tier, get_tier_for_query
+from stream.middleware.core.query_router import (
+    AuthError,
+    budget_tracker,
+    get_model_for_tier,
+    get_tier_for_query,
+)
 from stream.middleware.core.streaming import create_streaming_response
 from stream.middleware.core.tier_health import set_active_cloud_provider
 from stream.middleware.utils.context_window import check_context_limit
@@ -486,6 +491,13 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
         ) from e
 
     tier = routing_result.tier
+
+    # Record cloud usage for budget-aware adaptive routing.
+    # Cost estimate: rough average for a mid-length cloud query.
+    # The tracker uses this to raise θ_effective as spend accumulates.
+    if tier == "cloud":
+        budget_tracker.record_cloud_query(cost_usd=0.003)
+
     model = get_model_for_tier(
         tier,
         cloud_provider=request_body.cloud_provider,

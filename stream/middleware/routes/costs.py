@@ -189,3 +189,35 @@ async def get_cost_summary(
     finally:
         if conn:
             db_pool.putconn(conn)
+
+
+# =============================================================================
+# BUDGET STATUS ENDPOINT
+# =============================================================================
+
+
+@router.get("/costs/budget")
+async def get_budget_status():
+    """Return current budget tracking state for adaptive routing."""
+    from stream.middleware.config import (
+        ROUTING_BUDGET_PERIOD,
+        ROUTING_BUDGET_USD,
+        ROUTING_THETA_BASE,
+    )
+    from stream.middleware.core.query_router import budget_tracker
+
+    theta_eff = budget_tracker.effective_theta()
+    spend = budget_tracker.spend_usd
+    enabled = ROUTING_BUDGET_USD > 0
+
+    return {
+        "enabled": enabled,
+        "budget_usd": ROUTING_BUDGET_USD,
+        "spend_usd": round(spend, 4),
+        "remaining_usd": round(max(0.0, ROUTING_BUDGET_USD - spend), 4) if enabled else None,
+        "pct_used": round(spend / ROUTING_BUDGET_USD * 100, 1) if enabled else None,
+        "period": ROUTING_BUDGET_PERIOD,
+        "theta_base": ROUTING_THETA_BASE,
+        "theta_effective": round(theta_eff, 4),
+        "timestamp": datetime.now(UTC).isoformat(),
+    }

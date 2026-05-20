@@ -37,7 +37,7 @@ OUTPUT_PATH = Path("scripts/eval/realworld_testset.json")
 
 # Label distribution in real prompts skews toward simple queries;
 # we sample from harder-to-find categories to avoid trivial test sets.
-TARGET_N = 400
+TARGET_N = 1200
 MAX_TEXT_LEN = 400  # characters; longer prompts are usually multi-turn or pastes
 MIN_TEXT_LEN = 15
 
@@ -123,7 +123,15 @@ def label_with_claude(texts: list[str], dry_run: bool) -> list[str]:
         print("ERROR: anthropic package not installed. Run: pip install anthropic")
         raise
 
+    # Load from .env if not already in environment
     api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        env_file = Path(__file__).parent.parent.parent / ".env"
+        if env_file.exists():
+            for line in env_file.read_text().splitlines():
+                if line.startswith("ANTHROPIC_API_KEY="):
+                    api_key = line.split("=", 1)[1].strip()
+                    break
     if not api_key:
         print("ERROR: ANTHROPIC_API_KEY not set")
         raise OSError("ANTHROPIC_API_KEY not set")
@@ -162,10 +170,11 @@ def label_with_claude(texts: list[str], dry_run: bool) -> list[str]:
                         all_labels.extend(valid)
                         break
                 print(f"  [WARN] Batch {batch_idx+1}/{n_batches}: unexpected response, retrying...")
+                if attempt == 2:
+                    all_labels.extend(["MEDIUM"] * len(batch))
             except Exception as e:
                 if attempt == 2:
                     print(f"  [WARN] Batch {batch_idx+1}/{n_batches}: failed after 3 attempts: {e}")
-                    # Pad with MEDIUM as fallback (neutral label)
                     all_labels.extend(["MEDIUM"] * len(batch))
                     break
                 time.sleep(2)

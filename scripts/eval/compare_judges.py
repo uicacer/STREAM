@@ -170,6 +170,13 @@ def run_llm_judge(queries: list[dict], judge: str, dry_run: bool = False) -> lis
 
         api_key = os.environ.get("ANTHROPIC_API_KEY")
         if not api_key:
+            env_file = Path(__file__).parent.parent.parent / ".env"
+            if env_file.exists():
+                for line in env_file.read_text().splitlines():
+                    if line.startswith("ANTHROPIC_API_KEY="):
+                        api_key = line.split("=", 1)[1].strip()
+                        break
+        if not api_key:
             raise OSError("ANTHROPIC_API_KEY not set")
         client = anthropic.Anthropic(api_key=api_key)
     elif is_ollama:

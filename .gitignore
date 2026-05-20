@@ -100,17 +100,28 @@ yarn-error.log*
 frontends/react/dist/
 frontends/react/.vite/
 
-# Unpublished paper and poster (keep local until after publication)
-docs/pearc26-stream-paper.tex
+# Unpublished poster (keep local until after publication)
 docs/pearc26-stream-poster.tex
 docs/reference-verification.md
 
 # Internal/unpublished documents (kept locally, not in public repo)
 docs/*.md
-docs/*.pdf
 docs/*.tex
 docs/*.bib
 docs/image/
+
+# Paper figures (committed — referenced by paper)
+!docs/figure1_theta_curve.pdf
+!docs/figure1_theta_curve.png
+!docs/figure2_budget_routing.pdf
+!docs/figure2_budget_routing.png
+
+# Paper source (committed)
+!docs/pearc26-stream-paper.tex
+!docs/references.bib
+
+# Keep compiled paper PDF excluded (submit directly, not in repo)
+docs/pearc26-stream-paper.pdf
 
 # Claude Code memory
 .claude/
@@ -132,14 +143,22 @@ streamrelay_staging/
 tests/results_*.json
 tests/figures/
 
-# Benchmark datasets (large, published on HuggingFace)
+# Benchmark datasets and HuggingFace cards (large or published separately)
 scripts/eval/benchmark_dataset*.json
 scripts/eval/stream_routing_benchmark.json
 scripts/eval/stream_routing_benchmark.jsonl
-scripts/eval/hf_dataset_card.md
 
-# Real-world test set (generated, not committed)
+# HuggingFace cards (committed — uploaded to HF)
+!scripts/eval/hf_dataset_card.md
+!scripts/eval/hf_model_card.md
+
+# Generated datasets (large, published on HuggingFace)
 scripts/eval/realworld_testset.json
+scripts/eval/mixed_training_dataset.json
+scripts/eval/mixed_oversample_dataset.json
+scripts/eval/mixed_downsample_dataset.json
+scripts/eval/balanced_training_dataset.json
+scripts/eval/balanced_train.jsonl
 
 # Trained model weights (large, published on HuggingFace)
 scripts/eval/models/
