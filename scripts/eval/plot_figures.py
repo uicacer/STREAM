@@ -209,15 +209,27 @@ def plot_figure2(sim: dict, out_dir: Path, show: bool) -> None:
         color="#1f77b4",
     )
 
-    # Shade overshoot region (fixed above cap)
+    # Shade overshoot region (fixed above cap) — higher alpha so it survives print/greyscale
     ax_bot.fill_between(
         t,
         1.0,
         f_cum,
         where=[f > 1.0 for f in f_cum],
-        alpha=0.25,
+        alpha=0.55,
         color="#ff7f0e",
         label="Overshoot",
+    )
+
+    # Annotate the overshoot so it's legible even in greyscale
+    overshoot_pct = (max(f_cum) - 1.0) * 100
+    overshoot_t = t[f_cum.index(max(f_cum))]
+    ax_bot.annotate(
+        f"+{overshoot_pct:.0f}%",
+        xy=(overshoot_t, max(f_cum)),
+        xytext=(overshoot_t - 0.18, max(f_cum) + 0.05),
+        arrowprops={"arrowstyle": "->", "color": "#ff7f0e", "lw": 0.8},
+        fontsize=6.5,
+        color="#ff7f0e",
     )
 
     ax_bot.set_ylabel("Spend / Budget", fontsize=8)
