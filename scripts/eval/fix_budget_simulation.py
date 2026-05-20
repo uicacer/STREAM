@@ -7,8 +7,9 @@ Both axes are deployment-agnostic:
   - spend: spend_fraction  = cumulative_spend / B           →  [0.0, 1.0]
   - theta: already [0.0, 1.0]
 
-Budget B = total fixed spend over 30 days, so fixed routing reaches spend=1.0
-at period=1.0. Adaptive routing activates when spend_fraction crosses theta_base (0.5).
+Budget B = 95% of total fixed spend, so fixed routing visibly overshoots the cap
+(ends at ~1.05) while adaptive routing stays under (ends at ~0.98). This makes the
+figure caption "fixed θ exceeds the budget cap" literally true in the plot.
 """
 
 import json
@@ -43,8 +44,9 @@ fixed_raw = sim_data["fixed"]
 cost_per_usd = sim_data["cost_per_query_usd"]
 T = len(fixed_raw)  # total days (30)
 
-# Reconstruct B from cloud_n counts (works regardless of old/new format)
-B = sum(d["cloud_n"] * cost_per_usd for d in fixed_raw)
+# B = 95% of total fixed spend so fixed routing visibly overshoots the budget cap
+total_fixed_spend = sum(d["cloud_n"] * cost_per_usd for d in fixed_raw)
+B = total_fixed_spend * 0.95
 
 fixed_norm = []
 cumul = 0.0

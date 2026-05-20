@@ -3,30 +3,29 @@
 Generate Figure 1 and Figure 2 for the PEARC paper.
 
 Figure 1 — Static θ threshold tradeoff curve
-  X-axis: θ (0.05 → 0.95)
-  Primary Y-axis (left):  HIGH recall, macro-F1
-  Secondary Y-axis (right): cloud routing rate (cost proxy)
-  The intersection of HIGH recall and cloud rate highlights the operating point.
+  X-axis: θ (0.0 → 1.0)
+  Left Y-axis:  HIGH recall, macro-F1
+  Right Y-axis: cloud routing rate (cost proxy)
+  Vertical lines mark θ=0.5 (paper default) and the score-optimal θ*.
 
-Figure 2 — Budget-aware adaptive routing simulation (30 days)
+Figure 2 — Budget-aware adaptive routing simulation
   Two subplots:
-    (a) Tier routing breakdown by day: stacked area (LOCAL, HPC, CLOUD)
-        for fixed-θ vs adaptive-θ — shows adaptive cutting cloud as budget depletes
-    (b) Cumulative spend: fixed vs adaptive over 30 days, horizontal budget cap line
+    (a) θ_eff over time: flat at θ_base until spend fraction crosses it, then rises.
+        Shows exactly when/how the adaptive mechanism activates.
+    (b) Cumulative spend: fixed vs adaptive, with budget cap line.
+        Fixed θ visibly overshoots; adaptive stays under.
 
-Input files (from train_balanced_classifier.py):
+Input files:
   results/theta_sweep.json
   results/budget_simulation.json
 
 Output:
-  figures/figure1_theta_curve.pdf
-  figures/figure1_theta_curve.png
-  figures/figure2_budget_routing.pdf
-  figures/figure2_budget_routing.png
+  <out_dir>/figure1_theta_curve.pdf  (.png)
+  <out_dir>/figure2_budget_routing.pdf  (.png)
 
 Usage:
   python plot_figures.py
-  python plot_figures.py --show    # open interactive window
+  python plot_figures.py --show
 """
 
 import argparse
@@ -41,7 +40,7 @@ FIGURES_DIR = Path("figures")
 SWEEP_PATH = RESULTS_DIR / "theta_sweep.json"
 SIM_PATH = RESULTS_DIR / "budget_simulation.json"
 
-# PEARC double-column figure width: 3.33 in per column, 7.0 in full width
+# ACM sigconf single-column width = 3.33 in
 FIG_WIDTH_SINGLE = 3.33
 FIG_WIDTH_DOUBLE = 7.0
 
@@ -61,25 +60,23 @@ def plot_figure1(data: dict, out_dir: Path, show: bool) -> None:
     macro_f1 = [r["macro_f1"] for r in sweep]
     cloud_rate = [r["cloud_routing_rate"] for r in sweep]
 
-    # Find the "balanced" operating point: maximize HIGH recall - cloud_rate
-    # (useful tradeoff: catch most HIGH without over-routing to cloud)
+    # Score-optimal θ*: maximise HIGH recall per unit cloud cost
     score = np.array(high_recall) - np.array(cloud_rate)
     best_idx = int(np.argmax(score))
     best_theta = thetas[best_idx]
 
-    fig, ax1 = plt.subplots(figsize=(FIG_WIDTH_DOUBLE * 0.65, 2.8))
+    # Single-column width, taller than before so labels don't crowd
+    fig, ax1 = plt.subplots(figsize=(FIG_WIDTH_SINGLE, 2.6))
 
-    # Left axis: HIGH recall and macro-F1
     color_recall = "#d62728"  # red
     color_f1 = "#1f77b4"  # blue
     color_cloud = "#ff7f0e"  # orange
 
-    (l1,) = ax1.plot(thetas, high_recall, color=color_recall, lw=1.8, label="HIGH recall")
-    (l2,) = ax1.plot(thetas, macro_f1, color=color_f1, lw=1.8, linestyle="--", label="Macro-F1")
-    ax1.set_xlabel("Classification threshold θ", fontsize=9)
-    ax1.set_ylabel("Recall / Macro-F1", fontsize=9, color="black")
-    ax1.tick_params(axis="y", labelcolor="black", labelsize=8)
-    ax1.tick_params(axis="x", labelsize=8)
+    (l1,) = ax1.plot(thetas, high_recall, color=color_recall, lw=1.6, label="HIGH recall")
+    (l2,) = ax1.plot(thetas, macro_f1, color=color_f1, lw=1.6, linestyle="--", label="Macro-F1")
+    ax1.set_xlabel("Threshold θ", fontsize=8)
+    ax1.set_ylabel("Recall / Macro-F1", fontsize=8)
+    ax1.tick_params(axis="both", labelsize=7)
     ax1.set_xlim(0.0, 1.0)
     ax1.set_ylim(0, 1.05)
     ax1.yaxis.set_major_formatter(mticker.PercentFormatter(xmax=1.0, decimals=0))
@@ -87,29 +84,42 @@ def plot_figure1(data: dict, out_dir: Path, show: bool) -> None:
     # Right axis: cloud routing rate
     ax2 = ax1.twinx()
     (l3,) = ax2.plot(
-        thetas, cloud_rate, color=color_cloud, lw=1.8, linestyle=":", label="Cloud routing rate"
+        thetas, cloud_rate, color=color_cloud, lw=1.6, linestyle=":", label="Cloud routing rate"
     )
-    ax2.set_ylabel("Cloud routing rate", fontsize=9, color=color_cloud)
-    ax2.tick_params(axis="y", labelcolor=color_cloud, labelsize=8)
+    ax2.set_ylabel("Cloud routing rate", fontsize=8, color=color_cloud)
+    ax2.tick_params(axis="y", labelcolor=color_cloud, labelsize=7)
     ax2.set_ylim(0, 1.05)
     ax2.yaxis.set_major_formatter(mticker.PercentFormatter(xmax=1.0, decimals=0))
 
-    # Annotate recommended operating point
-    ax1.axvline(best_theta, color="gray", lw=1.0, linestyle="--", alpha=0.7)
-    ax1.annotate(
-        f"θ*={best_theta:.2f}",
-        xy=(best_theta, high_recall[best_idx]),
-        xytext=(best_theta + 0.05, high_recall[best_idx] - 0.12),
-        arrowprops={"arrowstyle": "->", "color": "gray", "lw": 0.8},
-        fontsize=7.5,
-        color="gray",
+    # Mark θ=0.5 (paper default) with a solid vertical line
+    ax1.axvline(0.5, color="#555555", lw=0.9, linestyle="-", alpha=0.8)
+    ax1.text(
+        0.5 + 0.02,
+        0.92,
+        "θ=0.5\n(default)",
+        fontsize=6.5,
+        color="#555555",
+        transform=ax1.get_xaxis_transform(),
+        va="top",
     )
+
+    # Mark score-optimal θ* with a dashed line (only if meaningfully different from 0.5)
+    if abs(best_theta - 0.5) > 0.05:
+        ax1.axvline(best_theta, color="gray", lw=0.8, linestyle="--", alpha=0.6)
+        ax1.text(
+            best_theta + 0.02,
+            0.72,
+            f"θ*={best_theta:.2f}",
+            fontsize=6.5,
+            color="gray",
+            transform=ax1.get_xaxis_transform(),
+            va="top",
+        )
 
     lines = [l1, l2, l3]
     labels = [line.get_label() for line in lines]
-    ax1.legend(lines, labels, loc="lower left", fontsize=7.5, framealpha=0.9)
+    ax1.legend(lines, labels, loc="lower left", fontsize=6.5, framealpha=0.9, handlelength=1.8)
 
-    ax1.set_title("Figure 1: Threshold–recall–cost tradeoff (θ sweep)", fontsize=9, pad=4)
     fig.tight_layout()
 
     for ext in ("pdf", "png"):
@@ -134,64 +144,92 @@ def plot_figure2(sim: dict, out_dir: Path, show: bool) -> None:
 
     fixed_days = sim["fixed"]
     adaptive_days = sim["adaptive"]
+    theta_base = sim["theta_base"]
 
-    # Use normalized axes: period_fraction (0–1) and spend_fraction (0–1)
-    t_fix = [d["period_fraction"] for d in fixed_days]
-    t_adap = [d["period_fraction"] for d in adaptive_days]
-    f_cloud = [d["cloud_n"] / d["total_n"] for d in fixed_days]
-    a_cloud = [d["cloud_n"] / d["total_n"] for d in adaptive_days]
+    t = [d["period_fraction"] for d in adaptive_days]
+    a_theta = [d["theta_eff"] for d in adaptive_days]
     f_cum = [d["spend_fraction"] for d in fixed_days]
     a_cum = [d["spend_fraction"] for d in adaptive_days]
-    fig = plt.figure(figsize=(FIG_WIDTH_DOUBLE * 0.85, 4.2))
-    gs = gridspec.GridSpec(2, 1, figure=fig, hspace=0.45)
+
+    # Single-column width, two stacked subplots
+    fig = plt.figure(figsize=(FIG_WIDTH_SINGLE, 3.6))
+    gs = gridspec.GridSpec(2, 1, figure=fig, hspace=0.52)
     ax_top = fig.add_subplot(gs[0])
     ax_bot = fig.add_subplot(gs[1])
 
-    # ---- Top: cloud routing rate comparison ----
-    ax_top.plot(t_fix, f_cloud, color="#ff7f0e", lw=1.6, label="Fixed θ")
-    ax_top.plot(t_adap, a_cloud, color="#1f77b4", lw=1.6, linestyle="--", label="Adaptive θ")
-    ax_top.fill_between(
-        t_adap,
-        a_cloud,
-        f_cloud,
-        where=[a < f for a, f in zip(a_cloud, f_cloud, strict=False)],
-        alpha=0.15,
-        color="#1f77b4",
-        label="Savings region",
-    )
-    ax_top.set_ylabel("Cloud routing rate", fontsize=9)
-    ax_top.set_xlabel("")
-    ax_top.tick_params(labelsize=8)
-    ax_top.set_xlim(0, 1)
-    ax_top.set_ylim(0, max(max(f_cloud), max(a_cloud)) * 1.2)
-    ax_top.xaxis.set_major_formatter(mticker.PercentFormatter(xmax=1.0, decimals=0))
-    ax_top.yaxis.set_major_formatter(mticker.PercentFormatter(xmax=1.0, decimals=0))
-    ax_top.legend(fontsize=7.5, loc="upper right", framealpha=0.9)
-    ax_top.set_title("(a) Daily cloud routing rate: fixed vs adaptive θ", fontsize=8.5, pad=3)
+    # ---- (a) θ_eff over time: shows when adaptive mechanism activates ----
+    # Shade the "coasting" region (θ_eff = θ_base) vs "activated" region
+    activation_frac = sim.get("summary", {}).get("theta_activation_period_frac", None)
 
-    # ---- Bottom: cumulative spend (normalized) ----
-    ax_bot.plot(t_fix, f_cum, color="#ff7f0e", lw=1.6, label="Fixed θ")
-    ax_bot.plot(t_adap, a_cum, color="#1f77b4", lw=1.6, linestyle="--", label="Adaptive θ")
-    ax_bot.axhline(1.0, color="red", lw=1.2, linestyle=":", alpha=0.8, label="Budget cap (B = 1.0)")
+    ax_top.plot(t, a_theta, color="#1f77b4", lw=1.6, label="Adaptive θ_eff")
+    ax_top.axhline(
+        theta_base, color="#ff7f0e", lw=1.2, linestyle="--", label=f"Fixed θ = {theta_base}"
+    )
+    ax_top.fill_between(
+        t,
+        theta_base,
+        a_theta,
+        where=[th > theta_base for th in a_theta],
+        alpha=0.18,
+        color="#1f77b4",
+        label="Activated region",
+    )
+
+    if activation_frac is not None:
+        ax_top.axvline(activation_frac, color="gray", lw=0.8, linestyle=":", alpha=0.8)
+        ax_top.text(
+            activation_frac + 0.02,
+            theta_base + 0.03,
+            "activates",
+            fontsize=6,
+            color="gray",
+            transform=ax_top.get_xaxis_transform(),
+            va="bottom",
+        )
+
+    ax_top.set_ylabel("θ_eff", fontsize=8)
+    ax_top.set_xlabel("")
+    ax_top.tick_params(labelsize=7)
+    ax_top.set_xlim(0, 1)
+    ax_top.set_ylim(0.3, 1.05)
+    ax_top.xaxis.set_major_formatter(mticker.PercentFormatter(xmax=1.0, decimals=0))
+    ax_top.legend(fontsize=6.5, loc="upper left", framealpha=0.9, handlelength=1.6)
+    ax_top.set_title("(a) Adaptive threshold over budget period", fontsize=7.5, pad=3)
+
+    # ---- (b) Cumulative spend: fixed overshoots, adaptive stays under ----
+    ax_bot.plot(t, f_cum, color="#ff7f0e", lw=1.6, label="Fixed θ")
+    ax_bot.plot(t, a_cum, color="#1f77b4", lw=1.6, linestyle="--", label="Adaptive θ")
+    ax_bot.axhline(1.0, color="#d62728", lw=1.2, linestyle=":", alpha=0.85, label="Budget cap")
     ax_bot.fill_between(
-        t_adap,
+        t,
         a_cum,
         f_cum,
         where=[a < f for a, f in zip(a_cum, f_cum, strict=False)],
         alpha=0.15,
         color="#1f77b4",
     )
-    ax_bot.set_ylabel("Cumulative spend (fraction of B)", fontsize=9)
-    ax_bot.set_xlabel("Budget period (fraction)", fontsize=9)
-    ax_bot.tick_params(labelsize=8)
+
+    # Shade overshoot region (fixed above cap)
+    ax_bot.fill_between(
+        t,
+        1.0,
+        f_cum,
+        where=[f > 1.0 for f in f_cum],
+        alpha=0.25,
+        color="#ff7f0e",
+        label="Overshoot",
+    )
+
+    ax_bot.set_ylabel("Spend / Budget", fontsize=8)
+    ax_bot.set_xlabel("Budget period", fontsize=8)
+    ax_bot.tick_params(labelsize=7)
     ax_bot.set_xlim(0, 1)
-    ax_bot.set_ylim(0, 1.15)
+    ax_bot.set_ylim(0, 1.18)
     ax_bot.xaxis.set_major_formatter(mticker.PercentFormatter(xmax=1.0, decimals=0))
     ax_bot.yaxis.set_major_formatter(mticker.PercentFormatter(xmax=1.0, decimals=0))
-    ax_bot.legend(fontsize=7.5, loc="upper left", framealpha=0.9)
-    ax_bot.set_title("(b) Cumulative cloud spend over budget period", fontsize=8.5, pad=3)
+    ax_bot.legend(fontsize=6.5, loc="upper left", framealpha=0.9, handlelength=1.6)
+    ax_bot.set_title("(b) Cumulative cloud spend vs. budget cap", fontsize=7.5, pad=3)
 
-    fig.suptitle("Figure 2: Budget-aware adaptive routing", fontsize=9, y=1.01)
     fig.tight_layout()
 
     for ext in ("pdf", "png"):
@@ -220,7 +258,6 @@ def print_summary(data: dict) -> None:
     print(f"  {'θ':>5}  {'HIGH recall':>12}  {'Macro-F1':>9}  {'Cloud rate':>11}")
     print(f"  {'─'*5}  {'─'*12}  {'─'*9}  {'─'*11}")
     for t in [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]:
-        # find closest
         idx = min(range(len(thetas)), key=lambda i: abs(thetas[i] - t))
         print(
             f"  {thetas[idx]:>5.2f}"
@@ -229,11 +266,10 @@ def print_summary(data: dict) -> None:
             f"  {cloud_rate[idx]:>11.1%}"
         )
 
-    # Best balanced operating point
     score = np.array(high_recall) - np.array(cloud_rate)
     best = int(np.argmax(score))
     print(
-        f"\n  Recommended θ* = {thetas[best]:.2f}  "
+        f"\n  Score-optimal θ* = {thetas[best]:.2f}  "
         f"HIGH recall={high_recall[best]:.1%}  "
         f"cloud rate={cloud_rate[best]:.1%}  "
         f"macro-F1={macro_f1[best]:.3f}"
@@ -284,10 +320,10 @@ def main():
         matplotlib.rcParams.update(
             {
                 "font.family": "serif",
-                "font.size": 9,
-                "axes.linewidth": 0.8,
-                "xtick.major.width": 0.6,
-                "ytick.major.width": 0.6,
+                "font.size": 8,
+                "axes.linewidth": 0.7,
+                "xtick.major.width": 0.5,
+                "ytick.major.width": 0.5,
                 "legend.framealpha": 0.85,
                 "figure.dpi": 150,
             }
@@ -300,7 +336,6 @@ def main():
         sweep_path = Path(args.sweep)
         if not sweep_path.exists():
             print(f"[ERROR] Sweep file not found: {sweep_path}")
-            print("  Run: python scripts/eval/train_balanced_classifier.py")
         else:
             with open(sweep_path) as f:
                 sweep_data = json.load(f)
@@ -312,7 +347,6 @@ def main():
         sim_path = Path(args.sim)
         if not sim_path.exists():
             print(f"[ERROR] Simulation file not found: {sim_path}")
-            print("  Run: python scripts/eval/train_balanced_classifier.py")
         else:
             with open(sim_path) as f:
                 sim_data = json.load(f)
