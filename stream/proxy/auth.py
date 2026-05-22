@@ -56,7 +56,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 
 import httpx
-from fastapi import HTTPException, Request
+from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 logger = logging.getLogger(__name__)
@@ -312,7 +312,7 @@ security = HTTPBearer()
 
 async def authenticate(
     request: Request,
-    credentials: HTTPAuthorizationCredentials = security,  # type: ignore[assignment]
+    credentials: HTTPAuthorizationCredentials = Depends(security),
 ) -> CallerIdentity:
     """
     FastAPI dependency — authenticates every request to the proxy.
@@ -329,8 +329,6 @@ async def authenticate(
         async def chat(caller: CallerIdentity = Depends(authenticate)):
             ...
     """
-    from fastapi import Depends  # noqa: F401 — available for callers
-
     token = credentials.credentials
 
     # Step 1: Try Globus token validation
