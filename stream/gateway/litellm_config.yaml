@@ -41,7 +41,7 @@ model_list:
 
   - model_name: cloud-or-claude
     litellm_params:
-      model: openrouter/anthropic/claude-sonnet-4
+      model: openrouter/anthropic/claude-sonnet-4-6
       api_key: os.environ/OPENROUTER_API_KEY  # pragma: allowlist secret
     model_info:
       input_cost_per_token: 0.000003    # $3 per 1M input tokens
@@ -120,7 +120,7 @@ model_list:
 
   - model_name: cloud-claude
     litellm_params:
-      model: claude-sonnet-4-20250514
+      model: anthropic/claude-sonnet-4-6
       api_key: os.environ/ANTHROPIC_API_KEY  # pragma: allowlist secret
     model_info:
       input_cost_per_token: 0.000003    # $3 per 1M input tokens
@@ -129,7 +129,7 @@ model_list:
   # Claude Haiku - Fast & cheap model for complexity judging
   - model_name: cloud-haiku
     litellm_params:
-      model: claude-3-5-haiku-20241022
+      model: anthropic/claude-3-5-haiku-20241022
       api_key: os.environ/ANTHROPIC_API_KEY  # pragma: allowlist secret
     model_info:
       input_cost_per_token: 0.0000008   # $0.80 per 1M input tokens

@@ -1,0 +1,24 @@
+{
+  "primary_model": "claude-sonnet-4-6",
+  "consistency_model": "gpt-4o-mini",
+  "dataset": "balanced_train.jsonl + balanced_test.jsonl (6,000 queries)",
+  "n_sampled": 300,
+  "n_invalid": 0,
+  "agreement": 0.3933,
+  "cohens_kappa": 0.09,
+  "interpretation": "fair",
+  "per_class": {
+    "LOW": {
+      "n": 100,
+      "agreement": 0.17
+    },
+    "MEDIUM": {
+      "n": 100,
+      "agreement": 0.86
+    },
+    "HIGH": {
+      "n": 100,
+      "agreement": 0.15
+    }
+  }
+}

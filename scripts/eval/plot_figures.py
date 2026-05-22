@@ -74,7 +74,7 @@ def plot_figure1(data: dict, out_dir: Path, show: bool) -> None:
 
     (l1,) = ax1.plot(thetas, high_recall, color=color_recall, lw=1.6, label="HIGH recall")
     (l2,) = ax1.plot(thetas, macro_f1, color=color_f1, lw=1.6, linestyle="--", label="Macro-F1")
-    ax1.set_xlabel("Threshold θ", fontsize=8)
+    ax1.set_xlabel(r"Threshold $\theta$", fontsize=8)
     ax1.set_ylabel("Recall / Macro-F1", fontsize=8)
     ax1.tick_params(axis="both", labelsize=7)
     ax1.set_xlim(0.0, 1.0)
@@ -96,7 +96,7 @@ def plot_figure1(data: dict, out_dir: Path, show: bool) -> None:
     ax1.text(
         0.5 + 0.02,
         0.92,
-        "θ=0.5\n(default)",
+        r"$\theta{=}0.5$" + "\n(default)",
         fontsize=6.5,
         color="#555555",
         transform=ax1.get_xaxis_transform(),
@@ -109,7 +109,7 @@ def plot_figure1(data: dict, out_dir: Path, show: bool) -> None:
         ax1.text(
             best_theta + 0.02,
             0.72,
-            f"θ*={best_theta:.2f}",
+            r"$\theta^*{=}$" + f"{best_theta:.2f}",
             fontsize=6.5,
             color="gray",
             transform=ax1.get_xaxis_transform(),
@@ -148,6 +148,8 @@ def plot_figure2(sim: dict, out_dir: Path, show: bool) -> None:
 
     t = [d["period_fraction"] for d in adaptive_days]
     a_theta = [d["theta_eff"] for d in adaptive_days]
+    a_recall = [d["high_recall"] for d in adaptive_days]
+    f_recall_val = fixed_days[0]["high_recall"]  # constant for fixed θ
     f_cum = [d["spend_fraction"] for d in fixed_days]
     a_cum = [d["spend_fraction"] for d in adaptive_days]
 
@@ -157,13 +159,18 @@ def plot_figure2(sim: dict, out_dir: Path, show: bool) -> None:
     ax_top = fig.add_subplot(gs[0])
     ax_bot = fig.add_subplot(gs[1])
 
-    # ---- (a) θ_eff over time: shows when adaptive mechanism activates ----
-    # Shade the "coasting" region (θ_eff = θ_base) vs "activated" region
+    # ---- (a) θ_eff and HIGH recall over time ----
     activation_frac = sim.get("summary", {}).get("theta_activation_period_frac", None)
 
-    ax_top.plot(t, a_theta, color="#1f77b4", lw=1.6, label="Adaptive θ_eff")
+    color_recall = "#d62728"  # red for recall
+
+    ax_top.plot(t, a_theta, color="#1f77b4", lw=1.6, label=r"Adaptive $\theta_\mathrm{eff}$")
     ax_top.axhline(
-        theta_base, color="#ff7f0e", lw=1.2, linestyle="--", label=f"Fixed θ = {theta_base}"
+        theta_base,
+        color="#ff7f0e",
+        lw=1.2,
+        linestyle="--",
+        label=r"Fixed $\theta{=}$" + f"{theta_base}",
     )
     ax_top.fill_between(
         t,
@@ -172,44 +179,80 @@ def plot_figure2(sim: dict, out_dir: Path, show: bool) -> None:
         where=[th > theta_base for th in a_theta],
         alpha=0.18,
         color="#1f77b4",
-        label="Activated region",
     )
 
-    if activation_frac is not None:
-        ax_top.axvline(activation_frac, color="gray", lw=0.8, linestyle=":", alpha=0.8)
-        ax_top.text(
-            activation_frac + 0.02,
-            theta_base + 0.03,
-            "activates",
-            fontsize=6,
-            color="gray",
-            transform=ax_top.get_xaxis_transform(),
-            va="bottom",
-        )
+    # Right axis: HIGH recall (adaptive drops, fixed stays flat)
+    ax_top_r = ax_top.twinx()
+    ax_top_r.plot(
+        t, a_recall, color=color_recall, lw=1.4, linestyle="-.", label="Adaptive HIGH recall"
+    )
+    ax_top_r.axhline(
+        f_recall_val,
+        color=color_recall,
+        lw=1.0,
+        linestyle=":",
+        alpha=0.7,
+        label=f"Fixed recall ({f_recall_val:.0%})",
+    )
+    ax_top_r.set_ylabel("HIGH recall", fontsize=7, color=color_recall)
+    ax_top_r.tick_params(axis="y", labelcolor=color_recall, labelsize=6.5)
+    ax_top_r.set_ylim(0, 1.05)
+    ax_top_r.yaxis.set_major_formatter(mticker.PercentFormatter(xmax=1.0, decimals=0))
 
-    ax_top.set_ylabel("θ_eff", fontsize=8)
+    ax_top.set_ylabel(r"$\theta_\mathrm{eff}$", fontsize=8)
     ax_top.set_xlabel("")
     ax_top.tick_params(labelsize=7)
     ax_top.set_xlim(0, 1)
     ax_top.set_ylim(0.3, 1.05)
     ax_top.xaxis.set_major_formatter(mticker.PercentFormatter(xmax=1.0, decimals=0))
-    ax_top.legend(fontsize=6.5, loc="upper left", framealpha=0.9, handlelength=1.6)
-    ax_top.set_title("(a) Adaptive threshold over budget period", fontsize=7.5, pad=3)
+
+    # Combined legend — 2 columns, bottom of panel to keep upper area clear
+    lines_l, labels_l = ax_top.get_legend_handles_labels()
+    lines_r, labels_r = ax_top_r.get_legend_handles_labels()
+    ax_top.legend(
+        lines_l + lines_r,
+        labels_l + labels_r,
+        fontsize=5.8,
+        loc="lower center",
+        bbox_to_anchor=(0.5, -0.02),
+        framealpha=0.9,
+        handlelength=1.4,
+        ncol=2,
+        columnspacing=0.8,
+    )
+    ax_top.set_title(
+        r"(a) $\theta_\mathrm{eff}$ and HIGH recall over budget period", fontsize=7.5, pad=3
+    )
+
+    if activation_frac is not None:
+        ax_top.axvline(activation_frac, color="gray", lw=0.8, linestyle=":", alpha=0.8)
+        ax_top.text(
+            activation_frac + 0.03,
+            0.98,
+            f"activates ({activation_frac*100:.0f}%)",
+            fontsize=6,
+            color="gray",
+            ha="left",
+            va="top",
+            transform=ax_top.get_xaxis_transform(),
+        )
 
     # ---- (b) Cumulative spend: fixed overshoots, adaptive stays under ----
-    ax_bot.plot(t, f_cum, color="#ff7f0e", lw=1.6, label="Fixed θ")
-    ax_bot.plot(t, a_cum, color="#1f77b4", lw=1.6, linestyle="--", label="Adaptive θ")
+    ax_bot.plot(t, f_cum, color="#ff7f0e", lw=1.6, label=r"Fixed $\theta$")
+    ax_bot.plot(t, a_cum, color="#1f77b4", lw=1.6, linestyle="--", label=r"Adaptive $\theta$")
     ax_bot.axhline(1.0, color="#d62728", lw=1.2, linestyle=":", alpha=0.85, label="Budget cap")
+    # Blue shading: savings region (adaptive below fixed)
     ax_bot.fill_between(
         t,
         a_cum,
         f_cum,
         where=[a < f for a, f in zip(a_cum, f_cum, strict=False)],
-        alpha=0.15,
+        alpha=0.30,
         color="#1f77b4",
+        label="Savings",
     )
 
-    # Shade overshoot region (fixed above cap) — higher alpha so it survives print/greyscale
+    # Orange shading: overshoot region (fixed above cap)
     ax_bot.fill_between(
         t,
         1.0,
@@ -220,26 +263,28 @@ def plot_figure2(sim: dict, out_dir: Path, show: bool) -> None:
         label="Overshoot",
     )
 
-    # Annotate the overshoot so it's legible even in greyscale
+    # Overshoot annotation — place inside the visible area with arrow pointing to the peak
     overshoot_pct = (max(f_cum) - 1.0) * 100
     overshoot_t = t[f_cum.index(max(f_cum))]
+    ylim_top = max(f_cum) + 0.08
     ax_bot.annotate(
         f"+{overshoot_pct:.0f}%",
         xy=(overshoot_t, max(f_cum)),
-        xytext=(overshoot_t - 0.22, max(f_cum) + 0.12),
+        xytext=(overshoot_t - 0.20, max(f_cum) - 0.10),
         arrowprops={"arrowstyle": "->", "color": "#ff7f0e", "lw": 0.8},
         fontsize=6.5,
         color="#ff7f0e",
+        ha="center",
     )
 
     ax_bot.set_ylabel("Spend / Budget", fontsize=8)
     ax_bot.set_xlabel("Budget period", fontsize=8)
     ax_bot.tick_params(labelsize=7)
     ax_bot.set_xlim(0, 1)
-    ax_bot.set_ylim(0, 1.60)
+    ax_bot.set_ylim(0, ylim_top)
     ax_bot.xaxis.set_major_formatter(mticker.PercentFormatter(xmax=1.0, decimals=0))
     ax_bot.yaxis.set_major_formatter(mticker.PercentFormatter(xmax=1.0, decimals=0))
-    ax_bot.legend(fontsize=6.5, loc="upper left", framealpha=0.9, handlelength=1.6)
+    ax_bot.legend(fontsize=6.5, loc="lower right", framealpha=0.9, handlelength=1.6)
     ax_bot.set_title("(b) Cumulative cloud spend vs. budget cap", fontsize=7.5, pad=3)
 
     fig.tight_layout()

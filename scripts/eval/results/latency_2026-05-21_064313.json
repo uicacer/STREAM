@@ -1,0 +1,46 @@
+{
+  "timestamp": "2026-05-21T06:23:31.525571",
+  "stream_url": "http://localhost:5000",
+  "hardware": {
+    "local": {
+      "os": "macOS 15.7.4 (arm64)",
+      "cpu": "Apple M4 Pro",
+      "ram": "24 GB",
+      "gpu": "Apple M4 Pro (Metal)"
+    },
+    "lakeshore": {
+      "gpu": "NVIDIA H100 NVL 94 GB",
+      "node": "ghi2-002",
+      "partition": "batch_gpu2",
+      "model": "Qwen2.5-VL-72B-Instruct-AWQ",
+      "framework": "vLLM with Marlin kernels"
+    },
+    "cloud": {
+      "note": "Infrastructure not disclosed by providers",
+      "model": "Claude Sonnet 4.6 (claude-sonnet-4-6-20250514) via OpenRouter",
+      "path": "STREAM cloud tier \u2192 LiteLLM gateway \u2192 OpenRouter \u2192 Anthropic",
+      "thinking": "disabled for standard benchmark; use --cloud-thinking for thinking effort comparison"
+    }
+  },
+  "benchmark_queries": "60 distinct queries (rotating pool)",
+  "runs_per_tier": 50,
+  "tiers": {},
+  "relay_comparison": {
+    "streaming": {
+      "ttft_median": 0.6045490209944546,
+      "ttft_stdev": 0.20134065366945947,
+      "ttft_p95": 0.9036457270151004,
+      "total_median": 11.387098541017622,
+      "successful": 50
+    },
+    "batch": {
+      "ttft_median": 11.169849645812064,
+      "ttft_stdev": 2.5378407631974587,
+      "ttft_p95": 16.03933508328628,
+      "total_median": 11.169849645812064,
+      "successful": 50
+    },
+    "ttft_speedup": 18.476334024060098
+  },
+  "cloud_thinking": null
+}

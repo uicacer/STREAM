@@ -219,6 +219,15 @@ class ChatCompletionRequest(BaseModel):
         description="User's OpenAI API key (direct GPT access)",
     )
 
+    reasoning_effort: str | None = Field(
+        default=None,
+        description=(
+            "Extended thinking effort level for reasoning models (claude-sonnet-4, o3, etc.). "
+            "Values: 'none', 'low', 'medium', 'high'. "
+            "Only applies to direct provider calls (cloud-claude); OpenRouter models ignore this."
+        ),
+    )
+
 
 # =============================================================================
 # MAIN CHAT ENDPOINT
@@ -580,6 +589,25 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
     # All three inference engines accept the OpenAI vision format natively.
     messages = messages_as_dicts
 
+    # Inject verbose system prompt for Lakeshore tier.
+    # Qwen 2.5 VL 72B defaults to shorter responses than cloud models.
+    # This prompt instructs it to give detailed, comprehensive answers
+    # unless the user explicitly asks for brevity.
+    # Only injected if no system message is already present.
+    if tier == "lakeshore" and not any(m.get("role") == "system" for m in messages):
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are a knowledgeable and thorough assistant. "
+                    "Always provide detailed, comprehensive, and well-structured responses. "
+                    "Explain your reasoning, include relevant examples, and cover edge cases "
+                    "where appropriate. Do not truncate your answers unless the user explicitly "
+                    "asks for a brief or short response."
+                ),
+            }
+        ] + messages
+
     # =========================================================================
     # STEP 5b: Rolling Summarization — Check Only (Deferred Execution)
     # =========================================================================
@@ -714,6 +742,7 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
                 local_model=request_body.local_model,
                 lakeshore_model=request_body.lakeshore_model,
                 needs_summarization=needs_summarization,
+                reasoning_effort=request_body.reasoning_effort,
             ),
             media_type="text/event-stream",  # SSE content type
             headers={

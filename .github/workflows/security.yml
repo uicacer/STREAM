@@ -1,0 +1,94 @@
+name: Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Run weekly on Monday at 08:00 UTC — catches new CVEs in existing deps
+    - cron: "0 8 * * 1"
+
+jobs:
+  # --------------------------------------------------------------------------
+  # Job 1: pip-audit — scan dependencies for known CVEs
+  # Reads uv.lock and checks every package against the OSV vulnerability DB.
+  # Fails the build if any dependency has a known, fixable vulnerability.
+  # --------------------------------------------------------------------------
+  dependency-audit:
+    name: Dependency CVE Scan (pip-audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      - name: Audit dependencies from uv.lock
+        # --require-hashes: verify integrity of every package (supply chain)
+        # We export from uv.lock to a requirements format pip-audit can read
+        run: |
+          pip install uv
+          uv export --frozen --no-dev --format requirements-txt > /tmp/requirements.txt
+          pip-audit -r /tmp/requirements.txt --progress-spinner off
+
+  # --------------------------------------------------------------------------
+  # Job 2: bandit — static analysis for Python security anti-patterns
+  # Scans source code for: hardcoded secrets, shell injection, weak crypto,
+  # use of pickle, SQL injection patterns, insecure temp files, etc.
+  # --------------------------------------------------------------------------
+  static-analysis:
+    name: Static Security Analysis (bandit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install bandit
+        run: pip install bandit[toml]
+
+      - name: Run bandit
+        run: |
+          bandit -r stream/ \
+            --severity-level medium \
+            --confidence-level medium \
+            --exclude stream/middleware/tests,stream/desktop \
+            -f json -o bandit-report.json || true
+          bandit -r stream/ \
+            --severity-level medium \
+            --confidence-level medium \
+            --exclude stream/middleware/tests,stream/desktop
+
+      - name: Upload bandit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bandit-security-report
+          path: bandit-report.json
+
+  # --------------------------------------------------------------------------
+  # Job 3: gitleaks — scan git history for accidentally committed secrets
+  # Catches: API keys, passwords, tokens committed to the repo at any point.
+  # Runs on the full git history, not just the latest commit.
+  # --------------------------------------------------------------------------
+  secret-scan:
+    name: Secret Scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history — gitleaks scans all commits
+
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

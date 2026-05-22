@@ -72,6 +72,7 @@ async def forward_to_litellm(
     temperature: float,
     correlation_id: str,
     user_api_keys: dict[str, str] | None = None,
+    reasoning_effort: str | None = None,
 ) -> AsyncGenerator[str, None]:
     """
     Forward a chat completion request to LiteLLM and stream the response.
@@ -95,7 +96,7 @@ async def forward_to_litellm(
         correlation_id: Unique request ID for tracing through logs
         user_api_keys: Optional dict mapping env var names to user-provided
                        API key values. Example:
-                       {"OPENROUTER_API_KEY": "sk-or-v1-abc123"}
+                       {"OPENROUTER_API_KEY": "sk-or-v1-abc123"}  # pragma: allowlist secret
                        When present, these override environment variables.
 
     Yields:
@@ -128,6 +129,7 @@ async def forward_to_litellm(
             temperature,
             correlation_id,
             user_api_keys=user_api_keys,
+            reasoning_effort=reasoning_effort,
         ):
             yield line
         return
@@ -145,17 +147,24 @@ async def forward_to_litellm(
         "stream": True,
     }
 
-    # Enable reasoning/thinking for direct provider calls only.
-    # OpenRouter-proxied models (cloud-or-* mapped to openrouter/*) don't support
-    # reasoning_effort through litellm — litellm raises UnsupportedParamsError.
-    # In server mode, cloud models go through OpenRouter, so we skip this.
     from stream.middleware.config import is_reasoning_model
 
-    is_cloud_model = model.startswith("cloud")
-    if not is_cloud_model and is_reasoning_model(model):
-        payload["reasoning_effort"] = "low"
+    is_openrouter_model = model.startswith("cloud-or-")
+    if is_openrouter_model and reasoning_effort and reasoning_effort != "none":
+        # OpenRouter expects reasoning via extra_body, not reasoning_effort.
+        payload["reasoning"] = {"effort": reasoning_effort, "exclude": False}
         logger.info(
-            f"[{correlation_id}] Enabling reasoning (effort=low) for {model}",
+            f"[{correlation_id}] Enabling OpenRouter reasoning (effort={reasoning_effort}) for {model}",
+            extra={"correlation_id": correlation_id},
+        )
+    elif not is_openrouter_model and is_reasoning_model(model):
+        effort = reasoning_effort or "low"
+        payload["reasoning_effort"] = effort
+        # Anthropic requires temperature=1 when extended thinking is enabled
+        if model.startswith("cloud-claude") or model.startswith("anthropic/"):
+            payload["temperature"] = 1
+        logger.info(
+            f"[{correlation_id}] Enabling reasoning (effort={effort}) for {model}",
             extra={"correlation_id": correlation_id},
         )
 
