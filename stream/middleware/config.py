@@ -920,6 +920,8 @@ REASONING_MODEL_PATTERNS = [
     "claude-sonnet-4",
     "claude-opus",
     "claude-4",
+    "cloud-claude",  # STREAM alias for direct Anthropic Claude Sonnet 4
+    "cloud-haiku",  # STREAM alias for direct Anthropic Claude Haiku
     "o1",
     "o3",
     "o4",

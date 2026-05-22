@@ -308,17 +308,61 @@ async def handle_connection(websocket):
     role = parts[0]  # "produce" (Lakeshore sending tokens) or "consume" (proxy receiving)
     channel_id = parts[1]  # UUID that pairs this producer with its consumer
 
-    # ---- Shared-secret authentication ----
-    # When --secret is configured, every produce/consume connection must supply
-    # the matching token as ?secret=<value> in the query string. Connections
-    # without the correct secret are rejected before any channel state is created.
+    # ---- Shared-secret authentication (post-handshake) ----
+    #
+    # WHY NOT ?secret= IN THE URL:
+    # The WebSocket handshake is an HTTP Upgrade request. Even over wss://,
+    # the full URL (including query parameters) appears in the server's HTTP
+    # access log BEFORE TLS decryption context is applied to log filtering.
+    # Caddy and nginx both log the raw request path by default, which means
+    # ?secret=<value> would appear in plaintext in access logs on the relay VM.
+    #
+    # THE FIX — post-handshake first message:
+    # The WebSocket connection is fully TLS-encrypted by the time any message
+    # is sent. We establish the connection first, then ask the client to prove
+    # it knows the secret by sending it as the first JSON message:
+    #   {"type": "auth", "secret": "<value>"}
+    # The relay validates and immediately continues (or closes with 4003).
+    # This message never appears in any HTTP log.
+    #
+    # BACKWARDS COMPATIBILITY:
+    # We still accept ?secret= in the URL for legacy clients (e.g., the
+    # existing remote function on Lakeshore that hasn't been updated yet).
+    # New clients should use the post-handshake method. Log a deprecation
+    # warning when the legacy path is used.
     if _RELAY_SECRET:
+        # Check URL query param first (legacy path — deprecated)
         qs = parse_qs(parsed.query)
-        provided = qs.get("secret", [None])[0]
-        if provided != _RELAY_SECRET:
-            logger.warning(f"[{channel_id[:8]}] rejected {role}r: invalid or missing secret")
-            await websocket.close(4003, "Forbidden: invalid or missing secret")
-            return  # exit early: unauthenticated connection
+        url_secret = qs.get("secret", [None])[0]
+
+        if url_secret is not None:
+            # Legacy client — secret in URL. Warn operator but allow for now.
+            if url_secret != _RELAY_SECRET:
+                logger.warning(f"[{channel_id[:8]}] rejected {role}r: invalid secret (URL param)")
+                await websocket.close(4003, "Forbidden: invalid or missing secret")
+                return
+            logger.warning(
+                f"[{channel_id[:8]}] {role}r used deprecated URL ?secret= param. "
+                'Update client to send {"type": "auth", "secret": "..."} '
+                "as first message instead."
+            )
+        else:
+            # New path — expect first message to be {"type": "auth", "secret": "..."}
+            try:
+                first_msg = await asyncio.wait_for(websocket.recv(), timeout=10.0)
+                auth = json.loads(first_msg)
+                if auth.get("type") != "auth" or auth.get("secret") != _RELAY_SECRET:
+                    logger.warning(f"[{channel_id[:8]}] rejected {role}r: invalid auth message")
+                    await websocket.close(4003, "Forbidden: invalid or missing secret")
+                    return
+            except TimeoutError:
+                logger.warning(f"[{channel_id[:8]}] rejected {role}r: auth timeout (10s)")
+                await websocket.close(4003, "Forbidden: auth message not received within 10s")
+                return
+            except (json.JSONDecodeError, Exception) as e:
+                logger.warning(f"[{channel_id[:8]}] rejected {role}r: bad auth message: {e}")
+                await websocket.close(4003, "Forbidden: invalid auth message format")
+                return
 
     logger.info(f"[{channel_id[:8]}] {role}r connected")  # log first 8 chars for readability
 

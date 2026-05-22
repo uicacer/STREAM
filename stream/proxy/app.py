@@ -33,17 +33,19 @@ import logging
 import os
 
 import httpx
-from fastapi import APIRouter, FastAPI, HTTPException, Request
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from globus_sdk import GlobusAPIError
 
 from stream.middleware.config import (
+    LAKESHORE_MODELS,
     MODEL_CONTEXT_LIMITS,
     RELAY_ENCRYPTION_KEY,
     RELAY_SECRET,
     RELAY_URL,
 )
 from stream.middleware.core.globus_compute_client import GlobusComputeClient
+from stream.proxy.auth import CallerIdentity, authenticate, validate_messages
 from stream.relay.crypto import decrypt_message
 
 # =========================================================================
@@ -97,6 +99,36 @@ async def health_check():
     }
 
 
+@router.get("/v1/models")
+async def list_models(caller: CallerIdentity = Depends(authenticate)):
+    """
+    List available Lakeshore models in OpenAI-compatible format.
+
+    This allows any OpenAI-compatible client to discover what models are
+    available on the HPC cluster — identical to calling GET /v1/models
+    on OpenAI's API. The caller sees model names and basic metadata;
+    all HPC infrastructure details (vLLM URLs, Globus endpoints) are hidden.
+
+    Requires authentication — same as the chat endpoint.
+    """
+    from time import time as now
+
+    models = []
+    for stream_name, info in LAKESHORE_MODELS.items():
+        models.append(
+            {
+                "id": info.get("hf_name", stream_name),
+                "object": "model",
+                "created": int(now()),
+                "owned_by": "uic-acer",
+                # Include the STREAM internal name as metadata so callers can use either
+                "stream_name": stream_name,
+            }
+        )
+
+    return {"object": "list", "data": models}
+
+
 @router.post("/reload-auth")
 async def reload_authentication():
     """
@@ -120,16 +152,31 @@ async def reload_authentication():
 
 
 @router.post("/v1/chat/completions")
-async def proxy_chat_completions(request: Request):
+async def proxy_chat_completions(
+    request: Request,
+    caller: CallerIdentity = Depends(authenticate),
+):
     try:
         body = await request.json()
     except Exception as e:
         raise HTTPException(status_code=400, detail="Invalid JSON body") from e
 
-    model = body.get("model", "Qwen/Qwen2.5-1.5B-Instruct")
-    messages = body.get("messages", [])
+    raw_model = body.get("model", "Qwen/Qwen2.5-1.5B-Instruct")
+    # LiteLLM gateway prefixes models with "openai/" before forwarding to the proxy.
+    # Strip it so get_lakeshore_vllm_url() can match against LAKESHORE_MODELS.
+    model = raw_model.removeprefix("openai/")
+
+    # Validate and sanitize the messages array before sending to HPC.
+    # Malformed payloads could crash vLLM or consume excessive resources.
+    messages = validate_messages(body.get("messages", []))
+
     temperature = body.get("temperature", 0.7)
     stream = body.get("stream", False)
+
+    logger.info(
+        f"Chat request: caller={caller.log_safe_id()}, model={model}, "
+        f"messages={len(messages)}, stream={stream}"
+    )
 
     # =========================================================================
     # MAX_TOKENS AND CONTEXT WINDOW - LAKESHORE TIER ONLY
@@ -292,11 +339,13 @@ async def _route_via_globus_compute_streaming(model, messages, temperature, max_
     async def sse_generator():
         """Connect to relay and yield SSE events as tokens arrive."""
         try:
-            # Append shared secret if configured (must match relay's --secret flag)
+            # Connect WITHOUT secret in the URL — secret travels as first message
+            # after the handshake so it never appears in HTTP access logs.
             relay_consume_url = f"{RELAY_URL}/consume/{channel_id}"
-            if RELAY_SECRET:
-                relay_consume_url += f"?secret={RELAY_SECRET}"
             async with ws_connect(relay_consume_url) as ws:
+                # Send auth as first message (post-handshake, fully TLS-encrypted)
+                if RELAY_SECRET:
+                    await ws.send(json.dumps({"type": "auth", "secret": RELAY_SECRET}))
                 async for msg_str in ws:
                     # --- E2E DECRYPTION ---
                     # If RELAY_ENCRYPTION_KEY is configured, the producer encrypted

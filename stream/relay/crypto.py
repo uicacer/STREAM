@@ -63,10 +63,13 @@ KEY GENERATION
 --------------
 Run once, paste into .env on BOTH the STREAM middleware AND Lakeshore side:
 
-    python -c "import os, base64; print(base64.b64encode(os.urandom(32)).decode())"
+    python -c "import secrets; print(secrets.token_hex(32))"
 
-Then in .env:
+Then in .env and in worker_init on Lakeshore:
     RELAY_ENCRYPTION_KEY=<output from above>
+
+The key is 64 hex characters (0-9, a-f only) — no special characters, safe in
+.env files, shell exports, and YAML without quoting.
 """
 
 import base64
@@ -76,71 +79,49 @@ import os
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 
-def encrypt_message(key_b64: str, plaintext_json: str) -> str:
+def encrypt_message(key_hex: str, plaintext_json: str) -> str:
     """Encrypt a JSON message string and return the relay wire format.
 
     Args:
-        key_b64:        Base64-encoded 32-byte AES-256 key (from RELAY_ENCRYPTION_KEY).
+        key_hex:        Hex-encoded 32-byte AES-256 key (from RELAY_ENCRYPTION_KEY).
         plaintext_json: The original JSON string, e.g. '{"type":"token","content":"Hi"}'.
 
     Returns:
         A JSON string ready to send over the relay:
         '{"type": "enc", "d": "<base64(nonce+ciphertext+tag)>"}'
-
-    How it works step by step:
-        1. Decode the key from base64 → 32 raw bytes.
-        2. Generate a fresh 12-byte random nonce (NEVER reused).
-        3. Encrypt plaintext_json using AES-256-GCM.
-           The `encrypt()` call returns ciphertext + 16-byte auth tag concatenated.
-        4. Concatenate nonce + ciphertext (with embedded tag) → one binary blob.
-        5. Base64-encode the blob so it's safe inside JSON strings.
-        6. Wrap in the relay envelope: {"type": "enc", "d": "<blob>"}.
     """
-    key = base64.b64decode(key_b64)  # 32 bytes
+    key = bytes.fromhex(key_hex)  # 32 bytes
     nonce = os.urandom(12)  # Fresh random 12-byte nonce per message
     aesgcm = AESGCM(key)
-    # encrypt() returns ciphertext with the 16-byte GCM auth tag already appended
     ciphertext_with_tag = aesgcm.encrypt(nonce, plaintext_json.encode(), None)
     blob = base64.b64encode(nonce + ciphertext_with_tag).decode()
     return json.dumps({"type": "enc", "d": blob})
 
 
-def decrypt_message(key_b64: str, msg_str: str) -> str:
+def decrypt_message(key_hex: str, msg_str: str) -> str:
     """Decrypt a relay message; pass through unchanged if not encrypted.
 
     Args:
-        key_b64:  Base64-encoded 32-byte AES-256 key (from RELAY_ENCRYPTION_KEY).
+        key_hex:  Hex-encoded 32-byte AES-256 key (from RELAY_ENCRYPTION_KEY).
         msg_str:  A JSON string received from the relay.
 
     Returns:
         The decrypted inner JSON string (if the message was encrypted),
-        or the original msg_str unchanged (if type != "enc" — backward compat).
+        or the original msg_str unchanged (if type != "enc").
 
     Raises:
         cryptography.exceptions.InvalidTag: if the ciphertext was tampered with
-            or the wrong key was used.  This is a hard failure — do not ignore it.
-
-    How it works step by step:
-        1. Parse the outer JSON envelope.
-        2. If type != "enc", return unchanged (plaintext passthrough).
-        3. Decode the base64 blob → binary.
-        4. Split: first 12 bytes = nonce, rest = ciphertext+tag.
-        5. Decrypt using AES-256-GCM.  The auth tag is verified automatically;
-           if it doesn't match, InvalidTag is raised before any plaintext is returned.
-        6. Decode the resulting bytes to a UTF-8 string.
+            or the wrong key was used.
     """
     msg = json.loads(msg_str)
 
-    # Passthrough: message is not encrypted (key not set on producer side,
-    # or message is a non-token control frame from a plaintext producer).
     if msg.get("type") != "enc":
         return msg_str
 
-    key = base64.b64decode(key_b64)
+    key = bytes.fromhex(key_hex)
     blob = base64.b64decode(msg["d"])
-    nonce = blob[:12]  # First 12 bytes are the nonce prepended at encrypt time
-    ciphertext_with_tag = blob[12:]  # Remainder is ciphertext + 16-byte GCM auth tag
+    nonce = blob[:12]
+    ciphertext_with_tag = blob[12:]
     aesgcm = AESGCM(key)
-    # decrypt() verifies the auth tag first; raises InvalidTag if tampered or wrong key
     plaintext = aesgcm.decrypt(nonce, ciphertext_with_tag, None)
     return plaintext.decode()

@@ -476,11 +476,15 @@ async def _forward_lakeshore_streaming(
     # sending tokens. If the producer sent tokens before we connected,
     # the relay buffered them and flushes them to us now.
     try:
-        # Append shared secret if configured (must match relay's --secret flag)
+        # Connect WITHOUT secret in the URL — secret travels as first message
+        # after the handshake so it never appears in HTTP access logs.
         relay_consume_url = f"{RELAY_URL}/consume/{channel_id}"
-        if RELAY_SECRET:
-            relay_consume_url += f"?secret={RELAY_SECRET}"
         async with ws_connect(relay_consume_url) as ws:
+            # Send auth as first message (post-handshake, fully TLS-encrypted)
+            if RELAY_SECRET:
+                import json as _json
+
+                await ws.send(_json.dumps({"type": "auth", "secret": RELAY_SECRET}))
             # Step 4: Receive tokens and convert to SSE format.
             # Each message from the relay is a JSON object:
             #   {"type": "token", "content": "Hello"}  — a generated token
@@ -564,6 +568,7 @@ async def forward_direct(
     temperature: float,
     correlation_id: str,
     user_api_keys: dict[str, str] | None = None,
+    reasoning_effort: str | None = None,
 ) -> AsyncGenerator[str, None]:
     """
     Call litellm library directly and stream the response as SSE lines.
@@ -639,10 +644,19 @@ async def forward_direct(
 
     actual_model = kwargs["model"]
     is_openrouter = actual_model.startswith("openrouter/")
-    if not is_openrouter and (is_reasoning_model(actual_model) or is_reasoning_model(model)):
-        kwargs["reasoning_effort"] = "low"
+    if is_openrouter and reasoning_effort and reasoning_effort != "none":
+        # OpenRouter uses its own `reasoning` param, not litellm's `reasoning_effort`.
+        # Pass it via extra_body so litellm forwards it verbatim to OpenRouter.
+        kwargs["extra_body"] = {"reasoning": {"effort": reasoning_effort, "exclude": False}}
         logger.info(
-            f"[{correlation_id}] Enabling reasoning (effort=low) for {actual_model}",
+            f"[{correlation_id}] Enabling OpenRouter reasoning (effort={reasoning_effort}) for {actual_model}",
+            extra={"correlation_id": correlation_id},
+        )
+    elif not is_openrouter and (is_reasoning_model(actual_model) or is_reasoning_model(model)):
+        effort = reasoning_effort or "low"
+        kwargs["reasoning_effort"] = effort
+        logger.info(
+            f"[{correlation_id}] Enabling reasoning (effort={effort}) for {actual_model}",
             extra={"correlation_id": correlation_id},
         )
 
