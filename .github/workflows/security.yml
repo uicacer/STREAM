@@ -8,6 +8,7 @@ on:
   schedule:
     # Run weekly on Monday at 08:00 UTC — catches new CVEs in existing deps
     - cron: "0 8 * * 1"
+  workflow_dispatch:
 
 jobs:
   # --------------------------------------------------------------------------
