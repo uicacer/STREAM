@@ -1,7 +1,7 @@
 [extend]
 useDefault = true
 
-# Allowlist for documentation files that contain example/placeholder API keys.
+# Allowlist for documentation files containing example/placeholder API keys.
 # These are not real credentials — they are illustrative values in technical docs.
 [[allowlists]]
 description = "Example keys in documentation files"
