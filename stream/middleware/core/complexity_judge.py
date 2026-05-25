@@ -124,7 +124,7 @@ class JudgmentResult:
 
 def _get_cache_key(query: str) -> str:
     """Generate cache key from query"""
-    return hashlib.md5(query.lower().encode()).hexdigest()
+    return hashlib.md5(query.lower().encode()).hexdigest()  # nosec B324
 
 
 def get_cached_judgment(query: str) -> str | None:

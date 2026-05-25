@@ -617,8 +617,8 @@ def main():
     )
     parser.add_argument(
         "--host",
-        default="0.0.0.0",
-        help="Bind address (default: 0.0.0.0 = all interfaces)",  # nosec B104
+        default="0.0.0.0",  # nosec B104
+        help="Bind address (default: 0.0.0.0 = all interfaces)",
     )
     parser.add_argument("--port", type=int, default=8765, help="Port to listen on (default: 8765)")
     parser.add_argument(
