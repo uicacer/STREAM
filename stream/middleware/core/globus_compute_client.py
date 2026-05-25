@@ -138,7 +138,7 @@ def remote_vllm_inference(vllm_url, model, messages, temperature, max_tokens, st
 # Compile and execute the source string to produce a function with clean bytecode.
 # The filename "<remote_vllm_inference>" appears in tracebacks for debugging.
 _ns = {}
-exec(compile(_REMOTE_FN_SOURCE, "<remote_vllm_inference>", "exec"), _ns)
+exec(compile(_REMOTE_FN_SOURCE, "<remote_vllm_inference>", "exec"), _ns)  # nosec B102
 remote_vllm_inference = _ns["remote_vllm_inference"]
 
 
@@ -339,7 +339,7 @@ def remote_vllm_streaming(vllm_url, model, messages, temperature, max_tokens, re
 """
 
 _ns2 = {}
-exec(compile(_REMOTE_STREAMING_FN_SOURCE, "<remote_vllm_streaming>", "exec"), _ns2)
+exec(compile(_REMOTE_STREAMING_FN_SOURCE, "<remote_vllm_streaming>", "exec"), _ns2)  # nosec B102
 remote_vllm_streaming = _ns2["remote_vllm_streaming"]
 
 

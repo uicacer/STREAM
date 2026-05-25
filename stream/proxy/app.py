@@ -53,7 +53,7 @@ from stream.relay.crypto import decrypt_message
 # =========================================================================
 # These settings control how the proxy connects to the Lakeshore HPC cluster.
 # In Docker, they come from docker-compose.yml. In desktop, from config.py.
-PROXY_HOST = os.getenv("PROXY_HOST", "0.0.0.0")
+PROXY_HOST = os.getenv("PROXY_HOST", "0.0.0.0")  # nosec B104
 PROXY_PORT = int(os.getenv("PROXY_PORT", "8001"))
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 

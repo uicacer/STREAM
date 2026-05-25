@@ -26,21 +26,22 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install pip-audit
-        run: pip install pip-audit
+      - name: Install pip-audit and uv
+        run: pip install pip-audit uv
 
       - name: Audit dependencies from uv.lock
-        # --require-hashes: verify integrity of every package (supply chain)
-        # We export from uv.lock to a requirements format pip-audit can read
+        # --no-emit-project excludes the local editable package (not on PyPI)
+        # --no-dev excludes dev-only dependencies
         run: |
-          pip install uv
-          uv export --frozen --no-dev --format requirements-txt > /tmp/requirements.txt
+          uv export --frozen --no-dev --no-emit-project --format requirements-txt > /tmp/requirements.txt
           pip-audit -r /tmp/requirements.txt --progress-spinner off
 
   # --------------------------------------------------------------------------
   # Job 2: bandit — static analysis for Python security anti-patterns
   # Scans source code for: hardcoded secrets, shell injection, weak crypto,
   # use of pickle, SQL injection patterns, insecure temp files, etc.
+  # Intentional patterns (exec for Globus Compute, 0.0.0.0 server bind) are
+  # marked with # nosec in source and skipped here.
   # --------------------------------------------------------------------------
   static-analysis:
     name: Static Security Analysis (bandit)
@@ -76,9 +77,9 @@ jobs:
           path: bandit-report.json
 
   # --------------------------------------------------------------------------
-  # Job 3: gitleaks — scan git history for accidentally committed secrets
-  # Catches: API keys, passwords, tokens committed to the repo at any point.
-  # Runs on the full git history, not just the latest commit.
+  # Job 3: gitleaks CLI — scan git history for accidentally committed secrets
+  # Uses the free gitleaks CLI directly (gitleaks-action@v2 requires a paid
+  # license for organization repos).
   # --------------------------------------------------------------------------
   secret-scan:
     name: Secret Scan (gitleaks)
@@ -88,7 +89,10 @@ jobs:
         with:
           fetch-depth: 0  # full history — gitleaks scans all commits
 
+      - name: Install gitleaks
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.21.2/gitleaks_8.21.2_linux_x64.tar.gz \
+            | tar -xz -C /usr/local/bin gitleaks
+
       - name: Run gitleaks
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gitleaks detect --source . --log-opts="--all" --redact --exit-code 1
