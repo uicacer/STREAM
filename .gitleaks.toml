@@ -13,4 +13,6 @@ paths = [
     "docs/test-plan.md",
     "docs/proxy-vm-deployment.md",
     "docs/vm-hpc-as-api-migration.md",
+    "streamrelay_staging_backup/streamrelay/crypto.py",
+    "streamrelay_staging_backup/README.md",
 ]
