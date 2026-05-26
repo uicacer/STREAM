@@ -22,7 +22,7 @@
     "geist": "^1.7.0",
     "idb": "^8.0.0",
     "katex": "^0.16.28",
-    "lucide-react": "^0.312.0",
+    "lucide-react": "^0.575.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-markdown": "^10.1.0",
