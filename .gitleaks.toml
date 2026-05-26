@@ -10,4 +10,7 @@ paths = [
     "docs/CLOUD_ROUTING_VIA_AGGREGATORS.md",
     "docs/LAKESHORE_CONNECTIVITY.md",
     "docs/WEBSOCKET_RELAY_TECHNICAL_REPORT.md",
+    "docs/test-plan.md",
+    "docs/proxy-vm-deployment.md",
+    "docs/vm-hpc-as-api-migration.md",
 ]
