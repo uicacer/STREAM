@@ -14,16 +14,18 @@ managed networking infrastructure.
 """
 
 import asyncio
+import contextlib
 import logging
 import os
 import time
 import warnings
 from typing import Any
 
-from globus_compute_sdk import Executor
+from globus_compute_sdk import Client, Executor
 from globus_compute_sdk.errors.error_types import DeserializationError, TaskExecutionFailed
 from globus_compute_sdk.serialize import AllCodeStrategies, ComputeSerializer
 from globus_sdk import GlobusAPIError
+from globus_sdk.authorizers import AccessTokenAuthorizer
 from globus_sdk.login_flows.command_line_login_flow_manager import CommandLineLoginFlowEOFError
 
 from stream.middleware.config import (
@@ -496,6 +498,22 @@ class GlobusComputeClient:
                 logger.debug(f"Error during Executor shutdown (expected if connection died): {e}")
             self._executor = None
             logger.info("Executor reset — will reconnect on next request")
+
+    def _make_executor_for_token(self, globus_token: str) -> Executor:
+        """
+        Create a short-lived Executor authenticated with the caller's own Globus token.
+
+        Used for Mode A-1 (user brings their own Globus credentials). The job is
+        submitted under the caller's identity, giving full per-user SLURM attribution
+        on the HPC cluster. This Executor is NOT persistent — it is created per request
+        and shut down immediately after submission, so the AMQP setup cost (~1.5s) is
+        paid once per request for this auth mode.
+        """
+        authorizer = AccessTokenAuthorizer(globus_token)
+        client = Client(authorizer=authorizer)
+        exe = Executor(endpoint_id=self.endpoint_id, client=client)
+        exe.serializer = ComputeSerializer(strategy_code=AllCodeStrategies())
+        return exe
 
     def shutdown(self):
         """
@@ -1045,6 +1063,7 @@ class GlobusComputeClient:
         max_tokens: int | None = None,
         model: str = "",
         relay_url: str = "",
+        globus_token: str | None = None,
     ) -> dict[str, Any]:
         """
         Submit a streaming inference task to Lakeshore via Globus Compute.
@@ -1065,6 +1084,11 @@ class GlobusComputeClient:
             model: STREAM model key (e.g., "lakeshore-qwen-vl-72b", "lakeshore-qwen-vl-72b").
                    Resolved to the HuggingFace model name internally.
             relay_url: WebSocket URL of the relay server (e.g., wss://abc.trycloudflare.com)
+            globus_token: Optional caller Globus access token. When provided, the job is
+                submitted under the caller's own Globus identity (Mode A-1: per-user SLURM
+                attribution). When None, the proxy's stored credentials are used (Mode A-2).
+                Note: a per-request Executor is created for token-authenticated calls, so
+                the first request pays the ~1.5s AMQP setup cost.
 
         Returns:
             {"channel_id": "uuid-string"} on success
@@ -1114,7 +1138,17 @@ class GlobusComputeClient:
         channel_id = str(uuid.uuid4())
 
         try:
-            gce = self._get_executor()
+            # Use caller's own Globus token (Mode A-1) when provided,
+            # otherwise fall back to the proxy's persistent executor (Mode A-2).
+            own_executor = None
+            if globus_token:
+                own_executor = self._make_executor_for_token(globus_token)
+                gce = own_executor
+                logger.info(
+                    f"Using caller-token executor (per-user SLURM attribution, channel={channel_id[:8]})"
+                )
+            else:
+                gce = self._get_executor()
 
             # Resolve the vLLM URL for this model (each model runs on its own port)
             vllm_url = get_lakeshore_vllm_url(model)
@@ -1154,14 +1188,26 @@ class GlobusComputeClient:
 
             logger.info(f"Streaming job submitted (channel={channel_id[:8]})")
 
+            # Clean up the per-request executor after submission (Mode A-1 only).
+            # The job is already enqueued in Globus — the executor is no longer needed.
+            if own_executor is not None:
+                with contextlib.suppress(Exception):
+                    own_executor.shutdown(wait=False, cancel_futures=False)
+
             return {"channel_id": channel_id}
 
         except Exception as e:
             logger.error(f"Failed to submit streaming inference: {e}", exc_info=True)
 
+            # Clean up per-request executor on failure too
+            if own_executor is not None:
+                with contextlib.suppress(Exception):
+                    own_executor.shutdown(wait=False, cancel_futures=True)
+
             error_str = str(e).lower()
             if "unable to open database file" in error_str or "login_required" in error_str:
-                self._reset_executor()
+                if own_executor is None:
+                    self._reset_executor()
                 return {
                     "error": "Globus Compute authentication required.",
                     "error_type": "AuthenticationError",
