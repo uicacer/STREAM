@@ -30,7 +30,6 @@ from stream.middleware.config import (
     GLOBUS_MAX_PAYLOAD_BYTES,
     LAKESHORE_MODELS,
     MODEL_CONTEXT_LIMITS,
-    RELAY_SECRET,
     get_lakeshore_vllm_url,
 )
 from stream.middleware.utils.multimodal import strip_old_images
@@ -166,7 +165,7 @@ remote_vllm_inference = _ns["remote_vllm_inference"]
 # Same exec() pattern as above — see comments on _REMOTE_FN_SOURCE for why.
 
 _REMOTE_STREAMING_FN_SOURCE = """\
-def remote_vllm_streaming(vllm_url, model, messages, temperature, max_tokens, relay_url, channel_id, relay_secret=""):
+def remote_vllm_streaming(vllm_url, model, messages, temperature, max_tokens, relay_url, channel_id):
     # NOTE: All imports MUST be inside this function body.
     # This entire function is serialised as a source-code string and executed
     # remotely on Lakeshore by Globus Compute.  There is no shared import
@@ -176,9 +175,12 @@ def remote_vllm_streaming(vllm_url, model, messages, temperature, max_tokens, re
     import requests
     from websockets.sync.client import connect as ws_connect
 
-    # Read the encryption key from the endpoint environment, not from task arguments.
-    # This prevents the key from travelling over Globus Compute's AMQP channel.
-    # Set RELAY_ENCRYPTION_KEY in worker_init in ~/.globus_compute/<endpoint>/config.yaml.
+    # Both relay credentials are read from the endpoint environment, not from
+    # task arguments. This prevents them from travelling over Globus Compute's
+    # AMQP channel. Set both in worker_init in ~/.globus_compute/<endpoint>/config.yaml:
+    #   export RELAY_SECRET=<channel-access token>
+    #   export RELAY_ENCRYPTION_KEY=<32-byte hex AES-256 key>
+    relay_secret = os.environ.get("RELAY_SECRET", "")
     encryption_key = os.environ.get("RELAY_ENCRYPTION_KEY", "")
 
     # ---- Encryption helper (used only when encryption_key is set) ----
@@ -1143,10 +1145,11 @@ class GlobusComputeClient:
                 max_tokens,
                 relay_url,
                 channel_id,
-                RELAY_SECRET,  # auth: controls who may connect to the channel
-                # RELAY_ENCRYPTION_KEY is NOT passed here — the remote function
-                # reads it from os.environ on the endpoint to avoid sending the
-                # key over Globus Compute's AMQP channel.
+                # No relay credentials are passed as task arguments. Both
+                # RELAY_SECRET (channel-access token) and RELAY_ENCRYPTION_KEY
+                # (AES-256-GCM payload key) are pre-provisioned in the Globus
+                # Compute endpoint's worker_init environment on the HPC cluster,
+                # so neither traverses Globus Compute's AMQP channel.
             )
 
             logger.info(f"Streaming job submitted (channel={channel_id[:8]})")
