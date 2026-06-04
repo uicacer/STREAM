@@ -235,12 +235,21 @@ async def proxy_chat_completions(
     )
 
     if USE_GLOBUS_COMPUTE:
-        return await _route_via_globus_compute(model, messages, temperature, max_tokens, stream)
+        return await _route_via_globus_compute(
+            model,
+            messages,
+            temperature,
+            max_tokens,
+            stream,
+            globus_token=caller.globus_token,
+        )
     else:
         return await _route_via_ssh(model, messages, temperature, max_tokens, stream)
 
 
-async def _route_via_globus_compute(model, messages, temperature, max_tokens, stream):
+async def _route_via_globus_compute(
+    model, messages, temperature, max_tokens, stream, globus_token=None
+):
     if not globus_client or not globus_client.is_available():
         raise HTTPException(status_code=503, detail="Globus Compute not configured")
 
@@ -252,7 +261,7 @@ async def _route_via_globus_compute(model, messages, temperature, max_tokens, st
     if stream and RELAY_URL:
         try:
             return await _route_via_globus_compute_streaming(
-                model, messages, temperature, max_tokens
+                model, messages, temperature, max_tokens, globus_token=globus_token
             )
         except Exception as e:
             logger.warning(f"Relay streaming failed, falling back to batch mode: {e}")
@@ -301,7 +310,9 @@ async def _route_via_globus_compute(model, messages, temperature, max_tokens, st
         raise HTTPException(status_code=500, detail=f"Internal proxy error: {str(e)}") from e
 
 
-async def _route_via_globus_compute_streaming(model, messages, temperature, max_tokens):
+async def _route_via_globus_compute_streaming(
+    model, messages, temperature, max_tokens, globus_token=None
+):
     """
     TRUE streaming from Lakeshore via the WebSocket relay (server/Docker mode).
 
@@ -315,13 +326,15 @@ async def _route_via_globus_compute_streaming(model, messages, temperature, max_
     """
     from websockets.asyncio.client import connect as ws_connect
 
-    # Submit the streaming job to Globus Compute
+    # Submit the streaming job to Globus Compute.
+    # Pass the caller's Globus token when available (Mode A-1: per-user SLURM attribution).
     result = await globus_client.submit_streaming_inference(
         messages=messages,
         temperature=temperature,
         max_tokens=max_tokens,
         model=model,
         relay_url=RELAY_URL,
+        globus_token=globus_token,
     )
 
     if "error" in result:
