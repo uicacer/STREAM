@@ -19,6 +19,7 @@ jobs:
   dependency-audit:
     name: Dependency CVE Scan (pip-audit)
     runs-on: ubuntu-latest
+    if: github.repository == 'uicacer/STREAM'
     steps:
       - uses: actions/checkout@v4
 
@@ -47,6 +48,7 @@ jobs:
   static-analysis:
     name: Static Security Analysis (bandit)
     runs-on: ubuntu-latest
+    if: github.repository == 'uicacer/STREAM'
     steps:
       - uses: actions/checkout@v4
 
@@ -85,6 +87,7 @@ jobs:
   secret-scan:
     name: Secret Scan (gitleaks)
     runs-on: ubuntu-latest
+    if: github.repository == 'uicacer/STREAM'
     steps:
       - uses: actions/checkout@v4
         with:
