@@ -132,8 +132,8 @@ BACKUP_INSTRUCTIONS.md
 tutorial/
 Research_Directions/
 
-# streamrelay standalone library (has its own repo: github.com/uicacer/streamrelay)
-streamrelay_staging/
+# streamrelay standalone library (has its own repo at ~/Documents/CODES/streamrelay)
+streamrelay_backup/
 
 # Excalidraw source files
 *.excalidraw

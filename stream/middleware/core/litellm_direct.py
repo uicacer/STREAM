@@ -395,7 +395,14 @@ async def _check_relay_reachable(relay_url: str, timeout: float = 3.0) -> bool:
     from websockets.asyncio.client import connect as ws_connect
 
     try:
-        async with ws_connect(f"{relay_url}/health", open_timeout=timeout) as ws:
+        import ssl as _ssl
+
+        _ssl_ctx = _ssl.create_default_context()
+        _ssl_ctx.load_verify_locations(
+            _ssl.get_default_verify_paths().cafile or "/etc/pki/tls/cert.pem"
+        )
+        _ws_kwargs = {"ssl": _ssl_ctx} if relay_url.startswith("wss://") else {}
+        async with ws_connect(f"{relay_url}/health", open_timeout=timeout, **_ws_kwargs) as ws:
             await asyncio.wait_for(ws.recv(), timeout=timeout)
             return True
     except Exception as e:
@@ -479,7 +486,16 @@ async def _forward_lakeshore_streaming(
         # Connect WITHOUT secret in the URL — secret travels as first message
         # after the handshake so it never appears in HTTP access logs.
         relay_consume_url = f"{RELAY_URL}/consume/{channel_id}"
-        async with ws_connect(relay_consume_url) as ws:
+        # Use an explicit SSL context for wss:// so the connection works even
+        # in environments where the default cert store may be shadowed.
+        import ssl as _ssl
+
+        _ssl_ctx = _ssl.create_default_context()
+        _ssl_ctx.load_verify_locations(
+            _ssl.get_default_verify_paths().cafile or "/etc/pki/tls/cert.pem"
+        )
+        _ws_kwargs = {"ssl": _ssl_ctx} if RELAY_URL.startswith("wss://") else {}
+        async with ws_connect(relay_consume_url, **_ws_kwargs) as ws:
             # Send auth as first message (post-handshake, fully TLS-encrypted)
             if RELAY_SECRET:
                 import json as _json
