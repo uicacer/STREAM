@@ -231,7 +231,19 @@ def remote_vllm_streaming(vllm_url, model, messages, temperature, max_tokens, re
         # never touches any log. The relay expects {"type":"auth","secret":"..."}
         # as the very first message and rejects the connection if it doesn't match.
         ws_url = f"{relay_url}/produce/{channel_id}"
-        ws = ws_connect(ws_url)
+
+        # Build an explicit SSL context when connecting over wss://.
+        # Globus Compute worker processes on Lakeshore have a custom PYTHONPATH
+        # that can shadow the system SSL cert store, causing the default TLS
+        # handshake to fail silently. Passing an explicit context with the system
+        # CA bundle fixes this without changing the security model.
+        import ssl as _ssl
+        _ssl_ctx = _ssl.create_default_context()
+        _ssl_ctx.load_verify_locations(
+            _ssl.get_default_verify_paths().cafile or "/etc/pki/tls/cert.pem"
+        )
+        _ws_kwargs = {"ssl": _ssl_ctx} if relay_url.startswith("wss://") else {}
+        ws = ws_connect(ws_url, **_ws_kwargs)
 
         # Send auth as first message (secret never appears in any HTTP log)
         if relay_secret:
