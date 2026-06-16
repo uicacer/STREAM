@@ -228,6 +228,16 @@ class ChatCompletionRequest(BaseModel):
         ),
     )
 
+    tools: list | None = Field(
+        default=None,
+        description="Tool definitions for function/tool calling (OpenAI-compatible format).",
+    )
+
+    tool_choice: str | dict | None = Field(
+        default=None,
+        description="Tool selection: 'auto', 'required', 'none', or a specific tool dict.",
+    )
+
 
 # =============================================================================
 # MAIN CHAT ENDPOINT
@@ -743,6 +753,8 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
                 lakeshore_model=request_body.lakeshore_model,
                 needs_summarization=needs_summarization,
                 reasoning_effort=request_body.reasoning_effort,
+                tools=request_body.tools,
+                tool_choice=request_body.tool_choice,
             ),
             media_type="text/event-stream",  # SSE content type
             headers={

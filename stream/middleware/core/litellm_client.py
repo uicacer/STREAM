@@ -73,6 +73,8 @@ async def forward_to_litellm(
     correlation_id: str,
     user_api_keys: dict[str, str] | None = None,
     reasoning_effort: str | None = None,
+    tools: list | None = None,
+    tool_choice: str | dict | None = None,
 ) -> AsyncGenerator[str, None]:
     """
     Forward a chat completion request to LiteLLM and stream the response.
@@ -130,6 +132,8 @@ async def forward_to_litellm(
             correlation_id,
             user_api_keys=user_api_keys,
             reasoning_effort=reasoning_effort,
+            tools=tools,
+            tool_choice=tool_choice,
         ):
             yield line
         return
@@ -146,6 +150,10 @@ async def forward_to_litellm(
         "temperature": temperature,
         "stream": True,
     }
+    if tools:
+        payload["tools"] = tools
+    if tool_choice is not None:
+        payload["tool_choice"] = tool_choice
 
     from stream.middleware.config import is_reasoning_model
 
