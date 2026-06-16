@@ -172,6 +172,7 @@ async def proxy_chat_completions(
 
     temperature = body.get("temperature", 0.7)
     stream = body.get("stream", False)
+    chat_template_kwargs = body.get("chat_template_kwargs", None)
 
     logger.info(
         f"Chat request: caller={caller.log_safe_id()}, model={model}, "
@@ -242,13 +243,21 @@ async def proxy_chat_completions(
             max_tokens,
             stream,
             globus_token=caller.globus_token,
+            chat_template_kwargs=chat_template_kwargs,
         )
     else:
-        return await _route_via_ssh(model, messages, temperature, max_tokens, stream)
+        return await _route_via_ssh(
+            model,
+            messages,
+            temperature,
+            max_tokens,
+            stream,
+            chat_template_kwargs=chat_template_kwargs,
+        )
 
 
 async def _route_via_globus_compute(
-    model, messages, temperature, max_tokens, stream, globus_token=None
+    model, messages, temperature, max_tokens, stream, globus_token=None, chat_template_kwargs=None
 ):
     if not globus_client or not globus_client.is_available():
         raise HTTPException(status_code=503, detail="Globus Compute not configured")
@@ -261,7 +270,12 @@ async def _route_via_globus_compute(
     if stream and RELAY_URL:
         try:
             return await _route_via_globus_compute_streaming(
-                model, messages, temperature, max_tokens, globus_token=globus_token
+                model,
+                messages,
+                temperature,
+                max_tokens,
+                globus_token=globus_token,
+                chat_template_kwargs=chat_template_kwargs,
             )
         except Exception as e:
             logger.warning(f"Relay streaming failed, falling back to batch mode: {e}")
@@ -274,7 +288,11 @@ async def _route_via_globus_compute(
     try:
         logger.info(f"Submitting to Globus endpoint: {GLOBUS_COMPUTE_ENDPOINT_ID}")
         result = await globus_client.submit_inference(
-            messages=messages, temperature=temperature, max_tokens=max_tokens, model=model
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            model=model,
+            chat_template_kwargs=chat_template_kwargs,
         )
 
         if "error" in result:
@@ -311,7 +329,7 @@ async def _route_via_globus_compute(
 
 
 async def _route_via_globus_compute_streaming(
-    model, messages, temperature, max_tokens, globus_token=None
+    model, messages, temperature, max_tokens, globus_token=None, chat_template_kwargs=None
 ):
     """
     TRUE streaming from Lakeshore via the WebSocket relay (server/Docker mode).
@@ -335,6 +353,7 @@ async def _route_via_globus_compute_streaming(
         model=model,
         relay_url=RELAY_URL,
         globus_token=globus_token,
+        chat_template_kwargs=chat_template_kwargs,
     )
 
     if "error" in result:
@@ -371,9 +390,12 @@ async def _route_via_globus_compute_streaming(
                     msg = json.loads(msg_str)
 
                     if msg["type"] == "token":
-                        chunk = {
-                            "choices": [{"index": 0, "delta": {"content": msg["content"]}}],
-                        }
+                        delta: dict = {}
+                        if "content" in msg:
+                            delta["content"] = msg["content"]
+                        if "reasoning_content" in msg:
+                            delta["reasoning_content"] = msg["reasoning_content"]
+                        chunk = {"choices": [{"index": 0, "delta": delta}]}
                         yield f"data: {json.dumps(chunk)}\n\n"
 
                     elif msg["type"] == "done":
