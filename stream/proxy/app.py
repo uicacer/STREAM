@@ -226,7 +226,7 @@ async def proxy_chat_completions(
     # =========================================================================
     # Look up context limits for the specific model, fall back to lakeshore-qwen-vl-72b
     lakeshore_limits = MODEL_CONTEXT_LIMITS.get(
-        model, MODEL_CONTEXT_LIMITS.get("lakeshore-qwen-vl-72b", {})
+        model, MODEL_CONTEXT_LIMITS.get("lakeshore-gemma4-31b", {})
     )
     default_max_tokens = lakeshore_limits.get("reserve_output", 2048)
     max_tokens = body.get("max_tokens", default_max_tokens)
