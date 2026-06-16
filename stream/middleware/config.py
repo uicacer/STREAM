@@ -210,18 +210,26 @@ RELAY_ENCRYPTION_KEY = os.getenv("RELAY_ENCRYPTION_KEY", "")
 # =============================================================================
 # LAKESHORE MODELS
 # =============================================================================
-# Each Lakeshore model runs as a vLLM instance on the H100 NVL GPU (ghi2-002).
+# Each Lakeshore model runs as a vLLM instance on the cluster.
 # The Globus Compute client uses this mapping to route to the correct vLLM URL.
 #
-# GPU: Full H100 NVL (94 GB / 95,830 MiB VRAM) on ghi2-002 in batch_gpu2 partition.
-# Only one model can run at a time (same port on same node).
-#
-# hf_name: The HuggingFace model ID that vLLM loads. This MUST match the model
-# name passed to `vllm serve` in the SLURM script, because vLLM's OpenAI-
-# compatible API uses this as the model identifier in chat completion requests.
+# hf_name: The value passed to --served-model-name in the SLURM script.
+# This MUST match exactly — vLLM's OpenAI-compatible API uses it as the model
+# identifier in chat completion requests.
 LAKESHORE_MODELS = {
-    # 72B VL AWQ: Vision-Language flagship. Handles both text and image queries.
-    #   ~25 tok/s with Marlin kernels on H100 NVL.
+    # Gemma 4 31B Instruct: text + tool-use flagship (currently running).
+    #   2× A100 SXM4 80GB on ga-002, batch_gpuapi, account ts_acer.
+    #   128K context window. Text-only (image/audio disabled in SLURM script).
+    #   See scripts/vllm-gemma4-ga002.sh for SLURM launch script.
+    "lakeshore-gemma4-31b": {
+        "hf_name": "gemma4-31b",
+        "host": "ga-002",
+        "port": 8001,
+        "description": "Text + Tool-Use (Gemma 4 31B, 128K context)",
+        "multimodal": False,
+    },
+    # Qwen2.5-VL-72B AWQ: Vision-Language model (offline — ghi2-002 not allocated).
+    #   Full H100 NVL (94 GB) on ghi2-002, batch_gpu2 partition.
     #   See scripts/vllm-qwen-vl-72b.sh for SLURM launch script.
     "lakeshore-qwen-vl-72b": {
         "hf_name": "Qwen/Qwen2.5-VL-72B-Instruct-AWQ",
@@ -241,6 +249,7 @@ def get_lakeshore_vllm_url(model: str) -> str:
     from VLLM_SERVER_URL.
 
     Examples:
+        lakeshore-gemma4-31b (host=ga-002) → http://ga-002:8001
         lakeshore-qwen-vl-72b (host=ghi2-002) → http://ghi2-002:8000
     """
     model_info = LAKESHORE_MODELS.get(model)
@@ -561,7 +570,7 @@ DEFAULT_CLOUD_PROVIDER = os.getenv("DEFAULT_CLOUD_PROVIDER", "cloud-or-claude")
 
 DEFAULT_MODELS = {
     "local": "local-llama",
-    "lakeshore": "lakeshore-qwen-vl-72b",
+    "lakeshore": "lakeshore-gemma4-31b",
     "cloud": DEFAULT_CLOUD_PROVIDER,  # Now configurable!
 }
 
@@ -609,6 +618,8 @@ VISION_CAPABLE_MODELS = {
     "local-vision",
     # Lakeshore: Qwen2.5-VL-72B (vision-language model on H100)
     "lakeshore-qwen-vl-72b",
+    # NOTE: lakeshore-gemma4-31b is text-only (--limit-mm-per-prompt image:0, audio:0)
+    # — it is intentionally NOT listed here.
     # Cloud (direct): Claude Sonnet 4, GPT-4o, and GPT-4o Mini all support vision
     "cloud-claude",
     "cloud-gpt",
@@ -677,10 +688,11 @@ MODEL_CONTEXT_LIMITS = {
     # Gemma 3 4B supports 128K context, but images consume significant context.
     # Each image uses ~765 tokens, so we use 32K as a practical limit.
     "local-vision": {"total": 32768, "reserve_output": 2048},
-    # Lakeshore: 64K context (vLLM --max-model-len=65536) on H100 NVL.
-    # reserve_output=4096 allows longer, more detailed responses (~2 pages),
-    # matching cloud models. The 72B models have enough VRAM headroom at 0.90
-    # utilization with --enforce-eager for 64K context + 4K output reserve.
+    # Gemma 4 31B: 128K context (--max-model-len 131072) on 2× A100 SXM4 80GB.
+    # reserve_output=8192 allows long responses; 128K - 8K = 120K for input.
+    "lakeshore-gemma4-31b": {"total": 131072, "reserve_output": 8192},
+    # Qwen2.5-VL-72B AWQ: 64K context (--max-model-len=65536) on H100 NVL.
+    # reserve_output=4096 allows ~2 pages of response.
     "lakeshore-qwen-vl-72b": {"total": 65536, "reserve_output": 4096},
     # Cloud (direct): Full native context limits
     # max_input = 200000 - 4000 = 196000 tokens (~780KB of text)
