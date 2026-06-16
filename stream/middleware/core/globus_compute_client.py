@@ -88,7 +88,7 @@ GLOBUS_TASK_TIMEOUT = int(os.getenv("GLOBUS_TASK_TIMEOUT", "240"))
 # 4. exec() from source string → clean bytecode, works everywhere ✓
 
 _REMOTE_FN_SOURCE = """\
-def remote_vllm_inference(vllm_url, model, messages, temperature, max_tokens, stream=False, chat_template_kwargs=None):
+def remote_vllm_inference(vllm_url, model, messages, temperature, max_tokens, stream=False, chat_template_kwargs=None, tools=None, tool_choice=None):
     try:
         import requests
         endpoint = f"{vllm_url}/v1/chat/completions"
@@ -101,6 +101,10 @@ def remote_vllm_inference(vllm_url, model, messages, temperature, max_tokens, st
         }
         if chat_template_kwargs:
             payload["chat_template_kwargs"] = chat_template_kwargs
+        if tools:
+            payload["tools"] = tools
+        if tool_choice is not None:
+            payload["tool_choice"] = tool_choice
         try:
             response = requests.post(endpoint, json=payload, timeout=180)
             if response.status_code >= 400:
@@ -169,7 +173,7 @@ remote_vllm_inference = _ns["remote_vllm_inference"]
 # Same exec() pattern as above — see comments on _REMOTE_FN_SOURCE for why.
 
 _REMOTE_STREAMING_FN_SOURCE = """\
-def remote_vllm_streaming(vllm_url, model, messages, temperature, max_tokens, relay_url, channel_id, chat_template_kwargs=None):
+def remote_vllm_streaming(vllm_url, model, messages, temperature, max_tokens, relay_url, channel_id, chat_template_kwargs=None, tools=None, tool_choice=None):
     # NOTE: All imports MUST be inside this function body.
     # This entire function is serialised as a source-code string and executed
     # remotely on Lakeshore by Globus Compute.  There is no shared import
@@ -265,9 +269,14 @@ def remote_vllm_streaming(vllm_url, model, messages, temperature, max_tokens, re
             "temperature": temperature,
             "max_tokens": max_tokens,
             "stream": True,
+            "stream_options": {"include_usage": True},
         }
         if chat_template_kwargs:
             _payload["chat_template_kwargs"] = chat_template_kwargs
+        if tools:
+            _payload["tools"] = tools
+        if tool_choice is not None:
+            _payload["tool_choice"] = tool_choice
         response = requests.post(
             f"{vllm_url}/v1/chat/completions",
             json=_payload,
@@ -295,6 +304,7 @@ def remote_vllm_streaming(vllm_url, model, messages, temperature, max_tokens, re
         # and send it through the WebSocket relay to the consumer.
         usage = {}
         tokens_sent = 0
+        finish_reason_final = "stop"
         for line in response.iter_lines(decode_unicode=True):
             # Skip empty lines (SSE uses blank lines as event separators)
             if not line or not line.startswith("data: "):
@@ -319,29 +329,31 @@ def remote_vllm_streaming(vllm_url, model, messages, temperature, max_tokens, re
             delta = choices[0].get("delta", {})
             content = delta.get("content")
             reasoning = delta.get("reasoning") or delta.get("reasoning_content")
+            tool_calls_delta = delta.get("tool_calls")
+            finish_reason = choices[0].get("finish_reason")
 
-            # Forward token and/or reasoning to the relay.
-            # If encryption_key is set, _send() encrypts before transmitting —
-            # the relay forwards an opaque blob instead of readable JSON.
-            if content or reasoning:
+            # Forward token, reasoning, and/or tool_call deltas to the relay.
+            if content or reasoning or tool_calls_delta:
                 msg: dict = {"type": "token"}
                 if content:
                     msg["content"] = content
                 if reasoning:
                     msg["reasoning_content"] = reasoning
+                if tool_calls_delta:
+                    msg["tool_calls"] = tool_calls_delta
                 _send(ws, msg)
                 tokens_sent += 1
 
-            # Capture usage stats from the final chunk (vLLM includes them
-            # in the last SSE event with finish_reason="stop")
+            # Capture finish_reason so consumers get "tool_calls" not just "stop".
+            if finish_reason:
+                finish_reason_final = finish_reason
+
+            # Capture usage stats from the final chunk.
             if chunk.get("usage"):
                 usage = chunk["usage"]
 
         # ---- Step 4: Signal completion through the relay ----
-        # Everything the consumer needs is sent here: the "done" signal
-        # plus usage stats (prompt_tokens, completion_tokens, total_tokens).
-        # The consumer reads this and knows the stream is complete.
-        _send(ws, {"type": "done", "usage": usage})
+        _send(ws, {"type": "done", "usage": usage, "finish_reason": finish_reason_final})
 
     except Exception as e:
         # Best-effort: try to notify the consumer about the error via relay
@@ -723,6 +735,8 @@ class GlobusComputeClient:
         model: str = "Qwen/Qwen2.5-1.5B-Instruct",
         _retry: bool = False,  # Internal flag to prevent infinite retry loops
         chat_template_kwargs: dict | None = None,
+        tools: list | None = None,
+        tool_choice: str | dict | None = None,
     ) -> dict[str, Any]:
         """
         Submit an inference task to Lakeshore via Globus Compute.
@@ -848,8 +862,10 @@ class GlobusComputeClient:
                 messages,
                 temperature,
                 max_tokens,
-                False,  # stream=False (streaming not yet implemented)
+                False,  # stream=False
                 chat_template_kwargs,
+                tools,
+                tool_choice,
             )
 
             t_submit = time.perf_counter()
@@ -1041,6 +1057,9 @@ class GlobusComputeClient:
                     max_tokens=max_tokens,
                     model=model,
                     _retry=True,
+                    chat_template_kwargs=chat_template_kwargs,
+                    tools=tools,
+                    tool_choice=tool_choice,
                 )
 
             return {
@@ -1090,6 +1109,8 @@ class GlobusComputeClient:
         relay_url: str = "",
         globus_token: str | None = None,
         chat_template_kwargs: dict | None = None,
+        tools: list | None = None,
+        tool_choice: str | dict | None = None,
     ) -> dict[str, Any]:
         """
         Submit a streaming inference task to Lakeshore via Globus Compute.
@@ -1206,6 +1227,8 @@ class GlobusComputeClient:
                 relay_url,
                 channel_id,
                 chat_template_kwargs,
+                tools,
+                tool_choice,
                 # No relay credentials are passed as task arguments. Both
                 # RELAY_SECRET (channel-access token) and RELAY_ENCRYPTION_KEY
                 # (AES-256-GCM payload key) are pre-provisioned in the Globus

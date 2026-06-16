@@ -210,6 +210,8 @@ async def _forward_lakeshore(
     messages: list[dict],
     temperature: float,
     correlation_id: str,
+    tools: list | None = None,
+    tool_choice: str | dict | None = None,
 ) -> AsyncGenerator[str, None]:
     """
     Call the Lakeshore Globus Compute client directly (desktop mode only).
@@ -276,7 +278,13 @@ async def _forward_lakeshore(
     if RELAY_URL:
         try:
             async for line in _forward_lakeshore_streaming(
-                gc, model, messages, temperature, correlation_id
+                gc,
+                model,
+                messages,
+                temperature,
+                correlation_id,
+                tools=tools,
+                tool_choice=tool_choice,
             ):
                 yield line
             return
@@ -314,6 +322,8 @@ async def _forward_lakeshore(
         temperature=temperature,
         model=model,
         max_tokens=max_tokens,
+        tools=tools,
+        tool_choice=tool_choice,
     )
 
     # Log the raw result at DEBUG level (truncated to avoid flooding logs)
@@ -418,6 +428,8 @@ async def _forward_lakeshore_streaming(
     messages: list[dict],
     temperature: float,
     correlation_id: str,
+    tools: list | None = None,
+    tool_choice: str | dict | None = None,
 ) -> AsyncGenerator[str, None]:
     """
     TRUE streaming from Lakeshore via the WebSocket relay.
@@ -460,6 +472,8 @@ async def _forward_lakeshore_streaming(
         model=model,
         max_tokens=max_tokens,
         relay_url=RELAY_URL,
+        tools=tools,
+        tool_choice=tool_choice,
     )
 
     # Check for submission errors (auth, config, etc.)
@@ -521,22 +535,27 @@ async def _forward_lakeshore_streaming(
                 msg = json.loads(msg_str)
 
                 if msg["type"] == "token":
-                    # Convert to the same SSE delta format that streaming.py expects.
-                    # This is identical to what litellm streaming produces.
+                    delta: dict = {}
+                    if "content" in msg:
+                        delta["content"] = msg["content"]
+                    if "reasoning_content" in msg:
+                        delta["reasoning_content"] = msg["reasoning_content"]
+                    if "tool_calls" in msg:
+                        delta["tool_calls"] = msg["tool_calls"]
                     chunk = {
-                        "choices": [{"index": 0, "delta": {"content": msg["content"]}}],
+                        "choices": [{"index": 0, "delta": delta}],
                     }
                     yield f"data: {json.dumps(chunk)}"
 
                 elif msg["type"] == "done":
-                    # Stream complete. Include usage stats if available.
                     usage = msg.get("usage", {})
+                    finish_reason = msg.get("finish_reason", "stop")
+                    final_chunk = {
+                        "choices": [{"index": 0, "delta": {}, "finish_reason": finish_reason}],
+                    }
                     if usage:
-                        final_chunk = {
-                            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
-                            "usage": usage,
-                        }
-                        yield f"data: {json.dumps(final_chunk)}"
+                        final_chunk["usage"] = usage
+                    yield f"data: {json.dumps(final_chunk)}"
                     yield "data: [DONE]"
                     break
 
@@ -585,6 +604,8 @@ async def forward_direct(
     correlation_id: str,
     user_api_keys: dict[str, str] | None = None,
     reasoning_effort: str | None = None,
+    tools: list | None = None,
+    tool_choice: str | dict | None = None,
 ) -> AsyncGenerator[str, None]:
     """
     Call litellm library directly and stream the response as SSE lines.
@@ -637,7 +658,9 @@ async def forward_direct(
     """
     # Lakeshore: call Globus Compute directly (no HTTP self-connection)
     if model.startswith("lakeshore"):
-        async for line in _forward_lakeshore(model, messages, temperature, correlation_id):
+        async for line in _forward_lakeshore(
+            model, messages, temperature, correlation_id, tools=tools, tool_choice=tool_choice
+        ):
             yield line
         return
 
