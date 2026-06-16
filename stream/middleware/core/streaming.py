@@ -232,6 +232,8 @@ async def create_streaming_response(
     lakeshore_model: str | None = None,
     needs_summarization: bool = False,
     reasoning_effort: str | None = None,
+    tools: list | None = None,
+    tool_choice: str | dict | None = None,
 ) -> AsyncGenerator[str, None]:
     """
     Create a streaming Server-Sent Events (SSE) response with metrics tracking and automatic fallback.
@@ -460,6 +462,8 @@ async def create_streaming_response(
                 correlation_id=correlation_id,
                 user_api_keys=user_api_keys,
                 reasoning_effort=reasoning_effort,
+                tools=tools,
+                tool_choice=tool_choice,
             )
             async for line in stream_with_gap_warnings(raw_stream, current_tier, correlation_id):
                 # Record TTFT on first chunk that contains actual model content.

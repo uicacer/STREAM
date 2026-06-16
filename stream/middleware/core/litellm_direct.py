@@ -673,6 +673,10 @@ async def forward_direct(
             "stream": True,
         }
     )
+    if tools:
+        kwargs["tools"] = tools
+    if tool_choice is not None:
+        kwargs["tool_choice"] = tool_choice
 
     # Enable extended thinking/reasoning for models that support it.
     # `reasoning_effort` only works for direct provider calls (openai/, anthropic/).
