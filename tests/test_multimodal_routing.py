@@ -100,7 +100,7 @@ class TestGetModelForTierMultimodal:
         from stream.middleware.core.query_router import get_model_for_tier
 
         model = get_model_for_tier("lakeshore", has_images=False)
-        assert model == "lakeshore-qwen-vl-72b"
+        assert model == "lakeshore-gemma4-31b"
 
 
 # =============================================================================
