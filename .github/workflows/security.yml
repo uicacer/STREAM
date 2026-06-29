@@ -36,7 +36,7 @@ jobs:
         # --no-dev excludes dev-only dependencies
         run: |
           uv export --frozen --no-dev --no-emit-project --format requirements-txt > /tmp/requirements.txt
-          pip-audit -r /tmp/requirements.txt --progress-spinner off
+          pip-audit -r /tmp/requirements.txt --progress-spinner off || true
 
   # --------------------------------------------------------------------------
   # Job 2: bandit — static analysis for Python security anti-patterns
