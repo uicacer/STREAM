@@ -295,6 +295,8 @@ async def create_streaming_response(
     # Initialize tracking variables
     input_tokens = 0  # Tokens in the prompt/conversation
     output_tokens = 0  # Tokens in the model's response
+    cache_read_tokens = 0  # Tokens served from KV cache (billed at 0.1× input rate)
+    cache_creation_tokens = 0  # Tokens written to KV cache (billed at 1.25× input rate)
     output_text = []  # Track generated text for estimation
     tiers_tried = [tier]  # Track which tiers we've attempted
     current_tier = tier  # The tier we're currently trying
@@ -589,6 +591,9 @@ async def create_streaming_response(
                             if usage.get("prompt_tokens") is not None:
                                 input_tokens = usage.get("prompt_tokens", 0)
                                 output_tokens = usage.get("completion_tokens", 0)
+                                # Anthropic prompt-caching fields (subset of input_tokens)
+                                cache_read_tokens = usage.get("cache_read_input_tokens", 0)
+                                cache_creation_tokens = usage.get("cache_creation_input_tokens", 0)
                                 logger.debug(f"[{correlation_id}] Tokens from usage object")
                                 # Found tokens - don't collect text!
 
@@ -596,6 +601,8 @@ async def create_streaming_response(
                         elif "prompt_tokens" in data:
                             input_tokens = data.get("prompt_tokens", 0)
                             output_tokens = data.get("completion_tokens", 0)
+                            cache_read_tokens = data.get("cache_read_input_tokens", 0)
+                            cache_creation_tokens = data.get("cache_creation_input_tokens", 0)
                             logger.debug(f"[{correlation_id}] Tokens from top-level")
                             # Found tokens - don't collect text!
 
@@ -639,7 +646,13 @@ async def create_streaming_response(
                 )
 
             # Calculate cost only once (now using centralized cost_reader!)
-            inference_cost = calculate_query_cost(current_model, input_tokens, output_tokens)
+            inference_cost = calculate_query_cost(
+                current_model,
+                input_tokens,
+                output_tokens,
+                cache_read_tokens=cache_read_tokens,
+                cache_creation_tokens=cache_creation_tokens,
+            )
             total_cost = inference_cost + judge_cost  # Include judge cost in total
             tracker.record_tokens(input_tokens, output_tokens)
             tracker.record_completion(total_cost)
@@ -679,6 +692,8 @@ async def create_streaming_response(
                             "judge_cost": judge_cost,
                             "input_tokens": input_tokens,
                             "output_tokens": output_tokens,
+                            "cache_read_tokens": cache_read_tokens,
+                            "cache_creation_tokens": cache_creation_tokens,
                         },
                     }
                 }
