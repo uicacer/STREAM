@@ -592,9 +592,15 @@ async def create_streaming_response(
                             if usage.get("prompt_tokens") is not None:
                                 input_tokens = usage.get("prompt_tokens", 0)
                                 output_tokens = usage.get("completion_tokens", 0)
-                                # Anthropic prompt-caching fields (subset of input_tokens)
+                                # Cache token counts — read from all known provider formats.
+                                # Anthropic: top-level cache_read_input_tokens / cache_creation_input_tokens
+                                # OpenAI/DeepSeek/others: LiteLLM normalizes to prompt_tokens_details.cached_tokens
                                 cache_read_tokens = usage.get("cache_read_input_tokens", 0)
                                 cache_creation_tokens = usage.get("cache_creation_input_tokens", 0)
+                                if cache_read_tokens == 0:
+                                    details = usage.get("prompt_tokens_details") or {}
+                                    if isinstance(details, dict):
+                                        cache_read_tokens = details.get("cached_tokens", 0)
                                 # LiteLLM injects cost here when include_cost_in_streaming_usage=True
                                 if usage.get("cost") is not None:
                                     provider_cost = float(usage["cost"])
