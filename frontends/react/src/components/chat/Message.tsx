@@ -333,6 +333,25 @@ export function Message({ message, isStreaming = false }: MessageProps) {
             })()}
           </div>
 
+          {/* Cache savings — visible only for cloud when prompt cache was hit */}
+          {tierKey !== 'local' && tierKey !== 'lakeshore' && (() => {
+            const cacheRead = message.metadata!.cache_read_tokens ?? 0
+            const cacheCreated = message.metadata!.cache_creation_tokens ?? 0
+            if (cacheRead === 0 && cacheCreated === 0) return null
+            return (
+              <div
+                className="flex items-center gap-1 text-xs text-purple-600 dark:text-purple-400"
+                title={`Cache read: ${cacheRead.toLocaleString()} tokens | Cache write: ${cacheCreated.toLocaleString()} tokens`}
+              >
+                <span>⚡</span>
+                <span>cached</span>
+                {cacheRead > 0 && (
+                  <span className="opacity-70">({cacheRead.toLocaleString()}↩)</span>
+                )}
+              </div>
+            )
+          })()}
+
           {/* Copy button */}
           <button
             onClick={handleCopy}

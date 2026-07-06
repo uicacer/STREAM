@@ -149,6 +149,7 @@ async def forward_to_litellm(
         "messages": messages,
         "temperature": temperature,
         "stream": True,
+        "stream_options": {"include_usage": True},
     }
     if tools:
         payload["tools"] = tools

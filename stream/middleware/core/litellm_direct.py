@@ -57,6 +57,7 @@ logger = logging.getLogger(__name__)
 # Reduce litellm's verbose startup logging in desktop mode.
 # Without this, litellm prints debug info about every provider it loads.
 litellm.suppress_debug_info = True
+litellm.include_cost_in_streaming_usage = True  # inject usage.cost into the final streaming chunk
 
 
 # =============================================================================
@@ -671,6 +672,7 @@ async def forward_direct(
             "messages": messages,
             "temperature": temperature,
             "stream": True,
+            "stream_options": {"include_usage": True},
         }
     )
     if tools:

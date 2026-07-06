@@ -225,6 +225,18 @@ export interface MessageMetadata {
   cost_estimated?: boolean
 
   /**
+   * Tokens served from prompt cache (billed at ~0.1× input rate).
+   * Non-zero only for Anthropic cloud models with prompt caching active.
+   */
+  cache_read_tokens?: number
+
+  /**
+   * Tokens written to prompt cache (billed at ~1.25× input rate).
+   * Non-zero only for Anthropic cloud models on first-call cache writes.
+   */
+  cache_creation_tokens?: number
+
+  /**
    * Optional: Whether a fallback was used (tier was unavailable)
    * True if the original tier failed and we switched to another
    */
@@ -269,6 +281,8 @@ export interface StreamMetadata {
    * Estimated at ~4 characters per token using pricing from litellm_config.yaml.
    */
   cost_estimated?: boolean
+  cache_read_tokens?: number
+  cache_creation_tokens?: number
   /**
    * How long the response took in seconds
    * Sent by backend at end of stream

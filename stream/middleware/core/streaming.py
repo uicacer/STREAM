@@ -297,6 +297,7 @@ async def create_streaming_response(
     output_tokens = 0  # Tokens in the model's response
     cache_read_tokens = 0  # Tokens served from KV cache (billed at 0.1× input rate)
     cache_creation_tokens = 0  # Tokens written to KV cache (billed at 1.25× input rate)
+    provider_cost: float | None = None  # Cost reported directly by provider via LiteLLM
     output_text = []  # Track generated text for estimation
     tiers_tried = [tier]  # Track which tiers we've attempted
     current_tier = tier  # The tier we're currently trying
@@ -594,6 +595,12 @@ async def create_streaming_response(
                                 # Anthropic prompt-caching fields (subset of input_tokens)
                                 cache_read_tokens = usage.get("cache_read_input_tokens", 0)
                                 cache_creation_tokens = usage.get("cache_creation_input_tokens", 0)
+                                # LiteLLM injects cost here when include_cost_in_streaming_usage=True
+                                if usage.get("cost") is not None:
+                                    provider_cost = float(usage["cost"])
+                                    logger.debug(
+                                        f"[{correlation_id}] Provider cost from usage: ${provider_cost:.8f}"
+                                    )
                                 logger.debug(f"[{correlation_id}] Tokens from usage object")
                                 # Found tokens - don't collect text!
 
@@ -645,14 +652,20 @@ async def create_streaming_response(
                     extra={"correlation_id": correlation_id, "input_tokens": input_tokens},
                 )
 
-            # Calculate cost only once (now using centralized cost_reader!)
-            inference_cost = calculate_query_cost(
-                current_model,
-                input_tokens,
-                output_tokens,
-                cache_read_tokens=cache_read_tokens,
-                cache_creation_tokens=cache_creation_tokens,
-            )
+            # Prefer provider-reported cost (accurate, includes caching discounts).
+            # Fall back to manual calculation for Lakeshore ($0) and any stream
+            # where the provider didn't return a usage chunk with cost.
+            if provider_cost is not None:
+                inference_cost = provider_cost
+                logger.debug(f"[{correlation_id}] Using provider cost: ${inference_cost:.8f}")
+            else:
+                inference_cost = calculate_query_cost(
+                    current_model,
+                    input_tokens,
+                    output_tokens,
+                    cache_read_tokens=cache_read_tokens,
+                    cache_creation_tokens=cache_creation_tokens,
+                )
             total_cost = inference_cost + judge_cost  # Include judge cost in total
             tracker.record_tokens(input_tokens, output_tokens)
             tracker.record_completion(total_cost)

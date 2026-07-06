@@ -430,6 +430,9 @@ export async function streamChat(
             cost: meta.cost?.total ?? meta.cost,
             // Duration comes directly
             duration: meta.duration,
+            // Cache token counts (from Anthropic prompt caching)
+            cache_read_tokens: meta.cache_read_tokens,
+            cache_creation_tokens: meta.cache_creation_tokens,
           }
 
           callbacks.onMetadata(normalizedMeta)

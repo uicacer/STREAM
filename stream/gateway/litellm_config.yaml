@@ -214,6 +214,7 @@ general_settings:
   # Cost tracking (ENABLED)
   track_cost_per_deployment: true
   store_model_in_db: true # Store model details in DB for cost tracking
+  include_cost_in_streaming_usage: true  # inject usage.cost into the final SSE chunk
 
   # Verbose logging
   set_verbose: false  # Set to true only for debugging
