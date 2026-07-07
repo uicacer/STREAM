@@ -90,6 +90,17 @@ LAKESHORE_PROXY_URL = os.getenv(
     f"http://{LAKESHORE_PROXY_HOST}:{LAKESHORE_PROXY_PORT}",
 )
 
+# Shared secret sent as Authorization: Bearer token from STREAM to the lakeshore-proxy.
+# Set to the same random hex value on both STREAM and the VM proxy-env file.
+# Example: python -c "import secrets; print(secrets.token_hex(32))"
+LAKESHORE_PROXY_SECRET = os.getenv("LAKESHORE_PROXY_SECRET", "")
+
+# Controls how the lakeshore proxy and litellm_direct choose a routing path.
+#   auto   — health-check the SSH tunnel first; fall back to Globus Compute if down (default)
+#   tunnel — always use the SSH tunnel; hard 503 if tunnel is down (no Globus fallback)
+#   globus — always use Globus Compute + relay (original behavior, ignores tunnel)
+LAKESHORE_ROUTING_MODE = os.getenv("LAKESHORE_ROUTING_MODE", "auto")
+
 # Maximum payload size for Globus Compute tasks (in bytes).
 #
 # Globus Compute enforces a 10 MB limit on task submissions:

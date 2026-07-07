@@ -39,6 +39,7 @@ from globus_sdk import GlobusAPIError
 
 from stream.middleware.config import (
     LAKESHORE_MODELS,
+    LAKESHORE_ROUTING_MODE,
     MODEL_CONTEXT_LIMITS,
     RELAY_ENCRYPTION_KEY,
     RELAY_SECRET,
@@ -63,6 +64,25 @@ VLLM_SERVER_URL = os.getenv("VLLM_SERVER_URL", "http://ga-001:8000")
 LAKESHORE_VLLM_ENDPOINT = os.getenv("LAKESHORE_VLLM_ENDPOINT", "http://host.docker.internal:8000")
 
 logger = logging.getLogger(__name__)
+
+
+async def _tunnel_alive(timeout: float = 1.0) -> bool:
+    """Check whether the SSH reverse tunnel to vLLM is up.
+
+    The old placeholder default ("http://host.docker.internal:8000") is the
+    Globus-mode placeholder and must NOT activate the tunnel path, so we skip
+    it explicitly.
+    """
+    placeholder = "http://host.docker.internal:8000"
+    if not LAKESHORE_VLLM_ENDPOINT or placeholder == LAKESHORE_VLLM_ENDPOINT:
+        return False
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.get(f"{LAKESHORE_VLLM_ENDPOINT}/health")
+            return resp.status_code == 200
+    except Exception:
+        return False
+
 
 # =========================================================================
 # Initialize Globus Compute client (module-level, runs once at import time)
@@ -89,13 +109,21 @@ router = APIRouter()
 
 @router.get("/health")
 async def health_check():
+    tunnel_up = await _tunnel_alive()
+    globus_ok = bool(USE_GLOBUS_COMPUTE and globus_client and globus_client.is_available())
+    if LAKESHORE_ROUTING_MODE == "tunnel":
+        active_mode = "tunnel" if tunnel_up else "none"
+    elif LAKESHORE_ROUTING_MODE == "globus":
+        active_mode = "globus" if globus_ok else "none"
+    else:  # auto
+        active_mode = "tunnel" if tunnel_up else ("globus" if globus_ok else "none")
     return {
         "status": "healthy",
         "service": "Lakeshore vLLM Proxy",
-        "mode": "globus_compute" if USE_GLOBUS_COMPUTE else "ssh",
-        "globus_configured": bool(globus_client and globus_client.is_available())
-        if USE_GLOBUS_COMPUTE
-        else False,
+        "routing_mode": LAKESHORE_ROUTING_MODE,
+        "tunnel_alive": tunnel_up,
+        "globus_configured": globus_ok,
+        "active_mode": active_mode,
     }
 
 
@@ -233,11 +261,50 @@ async def proxy_chat_completions(
     default_max_tokens = lakeshore_limits.get("reserve_output", 2048)
     max_tokens = body.get("max_tokens", default_max_tokens)
 
+    # =========================================================================
+    # ROUTING DECISION — controlled by LAKESHORE_ROUTING_MODE
+    # =========================================================================
+    # auto  : health-check the SSH tunnel first; fall back to Globus if down
+    # tunnel: always SSH tunnel; hard 503 if tunnel is down
+    # globus: always Globus Compute + relay (original behavior)
+    # =========================================================================
+    if LAKESHORE_ROUTING_MODE == "globus":
+        use_tunnel = False
+        tunnel_up = False
+    elif LAKESHORE_ROUTING_MODE == "tunnel":
+        tunnel_up = await _tunnel_alive()
+        use_tunnel = True  # will 503 below if tunnel_up is False
+    else:  # auto
+        tunnel_up = await _tunnel_alive()
+        use_tunnel = tunnel_up
+
     logger.info(
-        f"Proxy request: model={model}, messages={len(messages)}, stream={stream}, mode={'globus' if USE_GLOBUS_COMPUTE else 'ssh'}"
+        f"Proxy request: model={model}, messages={len(messages)}, stream={stream}, "
+        f"routing_mode={LAKESHORE_ROUTING_MODE}, tunnel_up={tunnel_up}, use_tunnel={use_tunnel}"
     )
 
-    if USE_GLOBUS_COMPUTE:
+    if use_tunnel:
+        if not tunnel_up:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "SSH tunnel is down (LAKESHORE_ROUTING_MODE=tunnel). "
+                    "Restart the SLURM job on Sophia to restore the tunnel."
+                ),
+            )
+        return await _route_via_ssh(
+            model,
+            messages,
+            temperature,
+            max_tokens,
+            stream,
+            chat_template_kwargs=chat_template_kwargs,
+            tools=tools,
+            tool_choice=tool_choice,
+        )
+    elif USE_GLOBUS_COMPUTE and globus_client and globus_client.is_available():
+        if not tunnel_up and LAKESHORE_ROUTING_MODE == "auto":
+            logger.info("SSH tunnel unreachable, falling back to Globus Compute")
         return await _route_via_globus_compute(
             model,
             messages,
@@ -250,15 +317,12 @@ async def proxy_chat_completions(
             tool_choice=tool_choice,
         )
     else:
-        return await _route_via_ssh(
-            model,
-            messages,
-            temperature,
-            max_tokens,
-            stream,
-            chat_template_kwargs=chat_template_kwargs,
-            tools=tools,
-            tool_choice=tool_choice,
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Lakeshore unavailable: SSH tunnel is down and Globus Compute is not configured. "
+                "Set LAKESHORE_ROUTING_MODE and ensure at least one path is active."
+            ),
         )
 
 

@@ -44,6 +44,8 @@ import stream.proxy.app as _proxy_app
 from stream.middleware.config import (
     LAKESHORE_MODELS,
     LAKESHORE_PROXY_URL,
+    LAKESHORE_ROUTING_MODE,
+    LAKESHORE_VLLM_ENDPOINT,
     MODEL_CONTEXT_LIMITS,
     OLLAMA_BASE_URL,
     RELAY_ENCRYPTION_KEY,
@@ -165,9 +167,7 @@ def _resolve_model(friendly_name: str) -> dict:
             openrouter_model_id = friendly_name.removeprefix("cloud-or-dynamic-")
             return {"model": f"openrouter/{openrouter_model_id}"}
 
-        raise ValueError(
-            f"Unknown model: {friendly_name}. " f"Available: {list(_MODEL_MAP.keys())}"
-        )
+        raise ValueError(f"Unknown model: {friendly_name}. Available: {list(_MODEL_MAP.keys())}")
 
     entry = _MODEL_MAP[friendly_name]
     kwargs = {"model": entry["model"]}
@@ -215,40 +215,80 @@ async def _forward_lakeshore(
     tool_choice: str | dict | None = None,
 ) -> AsyncGenerator[str, None]:
     """
-    Call the Lakeshore Globus Compute client directly (desktop mode only).
+    Route a Lakeshore request in desktop mode.
 
-    Two modes depending on whether RELAY_URL is configured:
+    Routing is controlled by LAKESHORE_ROUTING_MODE:
+      tunnel — SSH reverse tunnel only (hard error if down)
+      auto   — SSH tunnel first, fall back to Globus Compute
+      globus — Globus Compute + WebSocket relay (original behavior)
 
-    1. WITH RELAY (true streaming):
-       Submits the job to Globus, then connects to the relay as a consumer.
-       Tokens flow in real-time:  Lakeshore GPU → relay → here → frontend
+    The tunnel path calls _forward_lakeshore_via_ssh() which streams directly
+    to vLLM over HTTP — zero cold start, no Globus dependency.
 
-    2. WITHOUT RELAY (fake streaming — original behavior):
-       Waits for the full response via Globus, then splits it into word-by-word
-       chunks with delays to simulate a typing effect.
-
-    WHY NOT USE litellm.acompletion() FOR LAKESHORE?
-    -------------------------------------------------
-    In desktop mode, litellm.acompletion() for lakeshore would make an HTTP
-    POST to http://127.0.0.1:5000/lakeshore/v1/chat/completions — which is
-    the SAME server we're running on. This "self-connection" is problematic:
-
-      litellm (our process) → HTTP POST → FastAPI (same process)
-                                            ↓
-                                    Proxy handler → Globus Compute
-                                            ↓
-                                    Response flows back through HTTP
-                                            ↓
-                              litellm reads the response
-
-    The server is both the client AND the server for the same request.
-    This can cause deadlocks, timeouts, and empty responses because the
-    single-worker event loop must handle both sides simultaneously.
-
-    SOLUTION: Skip HTTP entirely. Call the Globus Compute client directly
-    (it's already loaded in the same process), then convert the response
-    to the same SSE format that streaming.py expects.
+    The Globus paths submit via globus_compute_sdk and receive tokens either
+    through the WebSocket relay (true streaming) or as a complete batch response
+    (fake streaming with word-by-word delays).
     """
+    # =========================================================================
+    # ROUTING — SSH tunnel vs. Globus Compute
+    # =========================================================================
+    _placeholder = "http://host.docker.internal:8000"
+    _tunnel_endpoint_set = bool(LAKESHORE_VLLM_ENDPOINT and _placeholder != LAKESHORE_VLLM_ENDPOINT)
+
+    if LAKESHORE_ROUTING_MODE == "tunnel":
+        if not _tunnel_endpoint_set:
+            raise HTTPException(
+                status_code=503,
+                detail="LAKESHORE_ROUTING_MODE=tunnel but LAKESHORE_VLLM_ENDPOINT is not set.",
+            )
+        # Quick health check — raise immediately if tunnel is down
+        import httpx as _httpx_health
+
+        try:
+            async with _httpx_health.AsyncClient(timeout=1.0) as _c:
+                _r = await _c.get(f"{LAKESHORE_VLLM_ENDPOINT}/health")
+                _alive = _r.status_code == 200
+        except Exception:
+            _alive = False
+        if not _alive:
+            raise HTTPException(
+                status_code=503,
+                detail="SSH tunnel is down (LAKESHORE_ROUTING_MODE=tunnel).",
+            )
+        async for line in _forward_lakeshore_via_ssh(
+            model, messages, temperature, correlation_id, tools=tools, tool_choice=tool_choice
+        ):
+            yield line
+        return
+
+    if LAKESHORE_ROUTING_MODE == "auto" and _tunnel_endpoint_set:
+        import httpx as _httpx_health
+
+        try:
+            async with _httpx_health.AsyncClient(timeout=1.0) as _c:
+                _r = await _c.get(f"{LAKESHORE_VLLM_ENDPOINT}/health")
+                _alive = _r.status_code == 200
+        except Exception:
+            _alive = False
+
+        if _alive:
+            logger.info(
+                f"[{correlation_id}] auto mode: SSH tunnel alive, routing via tunnel",
+                extra={"correlation_id": correlation_id},
+            )
+            async for line in _forward_lakeshore_via_ssh(
+                model, messages, temperature, correlation_id, tools=tools, tool_choice=tool_choice
+            ):
+                yield line
+            return
+        logger.warning(
+            f"[{correlation_id}] auto mode: SSH tunnel unreachable, falling back to Globus Compute",
+            extra={"correlation_id": correlation_id},
+        )
+
+    # =========================================================================
+    # GLOBUS COMPUTE PATH (routing_mode=globus, or auto with tunnel down)
+    # =========================================================================
     gc = _proxy_app.globus_client
     if not gc or not gc.is_available():
         raise HTTPException(status_code=503, detail="Globus Compute not configured")
@@ -418,9 +458,70 @@ async def _check_relay_reachable(relay_url: str, timeout: float = 3.0) -> bool:
             return True
     except Exception as e:
         logger.warning(
-            f"Relay health check failed: {type(e).__name__}: {e} " f"(url={relay_url}/health)"
+            f"Relay health check failed: {type(e).__name__}: {e} (url={relay_url}/health)"
         )
         return False
+
+
+async def _forward_lakeshore_via_ssh(
+    model: str,
+    messages: list[dict],
+    temperature: float,
+    correlation_id: str,
+    tools: list | None = None,
+    tool_choice: str | dict | None = None,
+) -> AsyncGenerator[str, None]:
+    """Stream directly to vLLM over the SSH reverse tunnel (desktop mode).
+
+    LAKESHORE_VLLM_ENDPOINT must point to the tunnel endpoint (e.g. http://localhost:8003
+    on the VM, or wherever the tunnel is forwarded locally).  The model's HuggingFace
+    name is resolved from LAKESHORE_MODELS so vLLM sees the correct model identifier.
+    """
+    import httpx as _httpx
+
+    model_info = LAKESHORE_MODELS.get(model, {})
+    hf_name = model_info.get("hf_name", model)
+    max_tokens = MODEL_CONTEXT_LIMITS.get(model, {}).get("reserve_output", 2048)
+
+    logger.info(
+        f"[{correlation_id}] Lakeshore SSH tunnel: {model} → {hf_name} @ {LAKESHORE_VLLM_ENDPOINT}",
+        extra={"correlation_id": correlation_id},
+    )
+
+    # Emit verified model metadata early so streaming.py captures the HF name
+    yield f"data: {json.dumps({'stream_verified_model': hf_name})}"
+
+    payload: dict = {
+        "model": hf_name,
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "stream": True,
+    }
+    if tools:
+        payload["tools"] = tools
+    if tool_choice is not None:
+        payload["tool_choice"] = tool_choice
+
+    async with (
+        _httpx.AsyncClient(timeout=120.0) as client,
+        client.stream(
+            "POST",
+            f"{LAKESHORE_VLLM_ENDPOINT}/v1/chat/completions",
+            json=payload,
+        ) as response,
+    ):
+        if response.status_code != 200:
+            error_text = await response.aread()
+            raise HTTPException(
+                status_code=response.status_code,
+                detail=f"vLLM error: {error_text.decode()}",
+            )
+        async for line in response.aiter_lines():
+            if line.strip():
+                yield line
+
+    yield "data: [DONE]"
 
 
 async def _forward_lakeshore_streaming(
@@ -813,8 +914,7 @@ async def forward_direct(
             detail={
                 "error_type": "rate_limit",
                 "message": (
-                    "Rate limit exceeded. "
-                    "Please wait a moment or switch to a different provider."
+                    "Rate limit exceeded. Please wait a moment or switch to a different provider."
                 ),
                 "raw_error": str(e),
                 "provider": "cloud",

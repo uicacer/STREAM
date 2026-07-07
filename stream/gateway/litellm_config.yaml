@@ -165,7 +165,7 @@ model_list:
     litellm_params:
       model: openai/gemma4-31b
       api_base: http://lakeshore-proxy:8001/v1
-      api_key: dummy  # pragma: allowlist secret
+      api_key: os.environ/LAKESHORE_PROXY_SECRET  # pragma: allowlist secret
     model_info:
       input_cost_per_token: 0.0
       output_cost_per_token: 0.0
@@ -175,7 +175,7 @@ model_list:
     litellm_params:
       model: openai/Qwen/Qwen2.5-VL-72B-Instruct-AWQ
       api_base: http://lakeshore-proxy:8001/v1
-      api_key: dummy  # pragma: allowlist secret
+      api_key: os.environ/LAKESHORE_PROXY_SECRET  # pragma: allowlist secret
     model_info:
       input_cost_per_token: 0.0
       output_cost_per_token: 0.0

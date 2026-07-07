@@ -59,6 +59,10 @@ import httpx
 from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+# Shared secret for STREAM-internal calls (middleware → proxy).
+# Checked before Globus introspection so internal calls never hit the network.
+_LAKESHORE_PROXY_SECRET = os.getenv("LAKESHORE_PROXY_SECRET", "")
+
 logger = logging.getLogger(__name__)
 
 # =============================================================================
@@ -331,6 +335,16 @@ async def authenticate(
     """
     token = credentials.credentials
 
+    # Step 0: Fast path — STREAM-internal call via shared secret.
+    # Skip Globus introspection entirely (avoids a network round-trip for every
+    # request the middleware makes to its own proxy).
+    if _LAKESHORE_PROXY_SECRET and token == _LAKESHORE_PROXY_SECRET:
+        return CallerIdentity(
+            name="stream-middleware",
+            auth_mode="api_key",
+            globus_token=None,
+        )
+
     # Step 1: Try Globus token validation
     # This covers: UIC researchers, any @uic.edu user, anyone who authenticates
     # via Globus (including users from other InCommon institutions if ALLOWED_DOMAINS
@@ -451,8 +465,7 @@ def validate_messages(messages: list) -> list:
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    f"Message {i}: 'content' must be a string or list, "
-                    f"got {type(content).__name__}"
+                    f"Message {i}: 'content' must be a string or list, got {type(content).__name__}"
                 ),
             )
 
